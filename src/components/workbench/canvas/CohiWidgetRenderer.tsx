@@ -121,9 +121,7 @@ function getCompatibleChartTypes(chartData: any[]): ChartTypeOption[] {
 
   const cols = Object.keys(chartData[0]);
   const sampleRows = chartData.slice(0, Math.min(5, chartData.length));
-  const numericCols = cols.filter((c) =>
-    sampleRows.some((row) => typeof row[c] === 'number' && !isNaN(row[c])),
-  );
+  const numericCols = cols.filter((c) => columnLooksNumeric(c, sampleRows));
   const numCols = cols.length;
   const numRows = chartData.length;
 
@@ -288,6 +286,18 @@ interface ResolvedKeys {
   valueKey?: string;
 }
 
+/** True when a cell value is numeric (including numeric strings from SQL drivers). */
+function isNumericCellValue(value: unknown): boolean {
+  if (value == null || value === '') return false;
+  if (typeof value === 'number') return !isNaN(value);
+  if (typeof value === 'string') return /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value.trim());
+  return false;
+}
+
+function columnLooksNumeric(col: string, sampleRows: Record<string, unknown>[]): boolean {
+  return sampleRows.some((row) => isNumericCellValue(row[col]));
+}
+
 /**
  * Recharts silently renders empty charts when `dataKey` doesn't match any
  * property in the data objects.  This function detects mismatches and
@@ -314,40 +324,68 @@ function resolveChartKeys(config: VisualizationConfig, chartData: any[]): Resolv
     return cols.find((c) => c.toLowerCase().replace(/[_\s]/g, '') === normalized);
   };
 
-  // Classify columns by data type (sample first few rows for robustness)
   const sampleRows = chartData.slice(0, Math.min(5, chartData.length));
-  const numericCols = cols.filter((c) =>
-    sampleRows.some((row) => typeof row[c] === 'number' && !isNaN(row[c])),
-  );
+  const numericCols = cols.filter((c) => columnLooksNumeric(c, sampleRows));
   const nonNumericCols = cols.filter((c) => !numericCols.includes(c));
 
-  // Resolve xKey
-  const xKey = hasKey(config.xKey)
-    ? config.xKey!
-    : fuzzyMatch(config.xKey) || nonNumericCols[0] || cols[0];
+  const resolveExisting = (key?: string) =>
+    key && hasKey(key) ? key : fuzzyMatch(key);
 
-  // Resolve yKey (prefer the first numeric column that isn't the xKey)
-  const yKey = hasKey(config.yKey)
-    ? config.yKey!
-    : fuzzyMatch(config.yKey) ||
-      numericCols.find((c) => c !== xKey) ||
-      cols.find((c) => c !== xKey);
+  let xKey =
+    resolveExisting(config.xKey) || nonNumericCols[0] || cols[0];
+  let yKey =
+    resolveExisting(config.yKey) ||
+    numericCols.find((c) => c !== xKey) ||
+    cols.find((c) => c !== xKey);
 
-  // Resolve yKeys (multi-series)
   let yKeys = config.yKeys
-    ?.map((k) => (hasKey(k) ? k : fuzzyMatch(k)))
+    ?.map((k) => resolveExisting(k))
     .filter((k): k is string => k != null);
   if (yKeys && yKeys.length === 0) yKeys = undefined;
 
-  // Resolve pie/donut keys
-  const nameKey = hasKey(config.nameKey)
-    ? config.nameKey!
-    : fuzzyMatch(config.nameKey) || nonNumericCols[0] || cols[0];
-  const valueKey = hasKey(config.valueKey)
-    ? config.valueKey!
-    : fuzzyMatch(config.valueKey) || numericCols[0] || cols[1];
+  const isHorizontalBar = config.type === 'horizontal_bar';
+  const yKeyIsNumeric = yKey != null && columnLooksNumeric(yKey, sampleRows);
+  const xKeyIsNumeric = xKey != null && columnLooksNumeric(xKey, sampleRows);
 
-  // Log when resolution was needed (helps debugging in dev)
+  // horizontal_bar: xKey = category (Y axis), yKey = numeric (X axis). LLMs often swap these.
+  if (isHorizontalBar) {
+    if (!yKeyIsNumeric && xKeyIsNumeric) {
+      const prevX = xKey;
+      xKey = yKey ?? nonNumericCols.find((c) => c !== prevX) ?? nonNumericCols[0] ?? xKey;
+      yKey = prevX;
+    } else if (!yKeyIsNumeric && numericCols.length > 0) {
+      if (!xKey || xKey === yKey || columnLooksNumeric(xKey, sampleRows)) {
+        xKey =
+          nonNumericCols.find((c) => c !== yKey) ||
+          nonNumericCols[0] ||
+          cols.find((c) => !numericCols.includes(c)) ||
+          xKey;
+      }
+      yKey = numericCols.find((c) => c !== xKey) || numericCols[0];
+    }
+  } else if (!yKeyIsNumeric && numericCols.length > 0) {
+    // Vertical bar/line: yKey must be numeric; xKey is usually categorical.
+    if (columnLooksNumeric(xKey, sampleRows) && !columnLooksNumeric(yKey ?? '', sampleRows)) {
+      const prevX = xKey;
+      xKey =
+        nonNumericCols.find((c) => c !== yKey) ||
+        nonNumericCols[0] ||
+        cols.find((c) => !numericCols.includes(c)) ||
+        xKey;
+      yKey = numericCols.find((c) => c !== xKey) || prevX;
+    } else if (yKey) {
+      yKey = numericCols.find((c) => c !== xKey) || numericCols[0];
+    }
+  }
+
+  const nameKey =
+    resolveExisting(config.nameKey) || nonNumericCols[0] || cols[0];
+  const valueKey =
+    resolveExisting(config.valueKey) ||
+    numericCols.find((c) => c !== nameKey) ||
+    numericCols[0] ||
+    cols[1];
+
   if (
     (config.xKey && config.xKey !== xKey) ||
     (config.yKey && config.yKey !== yKey)
@@ -528,7 +566,7 @@ function renderChart(config: VisualizationConfig, data: any[], w: number, h: num
     const cols = Object.keys(chartData[0]);
     const sampleRows = chartData.slice(0, Math.min(5, chartData.length));
     const numericCols = cols.filter(
-      (c) => c !== resolved.xKey && sampleRows.some((row) => typeof row[c] === 'number'),
+      (c) => c !== resolved.xKey && columnLooksNumeric(c, sampleRows),
     );
     if (numericCols.length >= 2) {
       resolved.yKeys = numericCols;
@@ -551,7 +589,7 @@ function renderChart(config: VisualizationConfig, data: any[], w: number, h: num
   ) {
     const yKeysToCheck = resolved.yKeys ?? (resolved.yKey ? [resolved.yKey] : []);
     const hasAnyNumericValue = yKeysToCheck.some((k) =>
-      chartData.some((row) => row[k] != null && typeof row[k] === 'number'),
+      chartData.some((row) => isNumericCellValue(row[k])),
     );
     if (!hasAnyNumericValue && yKeysToCheck.length > 0) {
       const cols = Object.keys(chartData[0]);

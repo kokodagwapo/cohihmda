@@ -46,6 +46,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { RESEARCH_TOPIC_SUGGESTIONS } from "@/lib/unifiedChatSuggestedPrompts";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import { UserSharePicker } from "@/components/common/UserSharePicker";
 import {
@@ -87,19 +88,6 @@ function PhaseBadge({ phase }: { phase: string }) {
   const c = config[phase] || { label: phase, variant: "outline" as const };
   return <Badge variant={c.variant}>{c.label}</Badge>;
 }
-
-// ============================================================================
-// Topic Suggestions
-// ============================================================================
-
-const TOPIC_SUGGESTIONS = [
-  "Overall pipeline health and conversion performance",
-  "LO scorecard: compute TTS scores, tier distribution (Top/Second/Bottom), and identify performance outliers",
-  "Risk patterns and credit exposure: FICO, LTV, DTI distribution and high-risk concentrations",
-  "Turn time trends and operational efficiency by role (processor, underwriter, closer)",
-  "Product mix and channel analysis: loan type, purpose, and program breakdown",
-  "Revenue drivers: margin analysis, BPS by LO/channel, and revenue concentration",
-];
 
 // ============================================================================
 // Session Sidebar
@@ -883,7 +871,7 @@ export default function ResearchAnalyst() {
                     <div data-tour="research-suggestions">
                       <p className="text-xs text-muted-foreground mb-2">Or try one of these:</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {TOPIC_SUGGESTIONS.map((topic) => (
+                        {RESEARCH_TOPIC_SUGGESTIONS.map((topic) => (
                           <button
                             key={topic}
                             onClick={() => setTopicInput(topic)}

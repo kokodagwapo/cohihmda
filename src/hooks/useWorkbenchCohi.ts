@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import {
   isUnifiedChatClientEnabled,
 } from '@/lib/unifiedChatEnvelope';
+import { CHAT_TYPE_DEFAULT_SUGGESTIONS } from '@/lib/unifiedChatSuggestedPrompts';
 import { createUnifiedChatClient } from '@/lib/unifiedChatClient';
 import { sendUnifiedWorkbenchStream } from '@/lib/unifiedChatSend';
 import type {
@@ -121,12 +122,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         'Compare this to prior year performance',
       ];
     }
-    return [
-      'Prepare a board-ready overview of this month\'s performance',
-      'Summarize pipeline health and pull-through trends',
-      'What needs my attention right now?',
-      'Build an executive dashboard with key KPIs',
-    ];
+    return CHAT_TYPE_DEFAULT_SUGGESTIONS.workbench;
   }, [sourceInsight?.headline]);
 
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>(defaultSuggestions);
@@ -554,12 +550,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
     setMessages([]);
     setConversationId(null);
     messageIdCounter.current = 0;
-    setSuggestedQuestions([
-      'What dashboards are available?',
-      'Add the Company Scorecard',
-      'Show me loan volume by branch',
-      'Explain pull-through rate',
-    ]);
+    setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS.workbench);
   }, []);
 
   return {
@@ -568,5 +559,6 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
     suggestedQuestions,
     sendMessage,
     clearMessages,
+    buildCanvasSnapshot,
   };
 }

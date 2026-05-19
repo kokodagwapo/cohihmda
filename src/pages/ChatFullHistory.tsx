@@ -2,7 +2,7 @@
  * Full unified chat history (COHI-403 §7).
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Folder, Loader2, X } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
@@ -21,6 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
+import {
+  formatChatTypeLabel,
+  getChatTypePillClassName,
+} from "@/lib/unifiedChatTypeStyles";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
 import {
@@ -39,6 +43,25 @@ import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
+
+function HistoryMetaPill({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-none",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
 
 function FolderListCard({
   title,
@@ -388,16 +411,20 @@ export default function ChatFullHistory() {
                     <p className="font-medium text-slate-900 dark:text-white truncate">
                       {row.title}
                     </p>
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-1.5">
                       {row.folder_id && (
-                        <>
-                          {getFolderNameById(row.folder_id, folders) ??
-                            "Folder"}{" "}
-                          ·{" "}
-                        </>
+                        <HistoryMetaPill className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                          {getFolderNameById(row.folder_id, folders) ?? "Folder"}
+                        </HistoryMetaPill>
                       )}
-                      {row.chat_type} ·{" "}
-                      {new Date(row.updated_at).toLocaleString()}
+                      <HistoryMetaPill
+                        className={getChatTypePillClassName(row.chat_type)}
+                      >
+                        {formatChatTypeLabel(row.chat_type)}
+                      </HistoryMetaPill>
+                      <span className="text-slate-400 dark:text-slate-500">
+                        {new Date(row.updated_at).toLocaleString()}
+                      </span>
                     </p>
                   </button>
                   <ConversationMoveMenu

@@ -56,7 +56,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -80,6 +80,10 @@ import {
   workbenchArtifactHandoffPath,
 } from "@/lib/unifiedChatEnvelope";
 import { cohiChatNavigationState, useChatShell } from "@/contexts/ChatShellContext";
+import {
+  COHI_WORKBENCH_EDIT_WIDGET_EVENT,
+  navigateForWorkbenchChatSubmit,
+} from "@/lib/workbench/workbenchChatHandoff";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { PAGE_INSIGHTS_CARD } from "@/components/cohi/pageContentStyles";
 import { CHAT_SHELL_VIEW_TRANSITION } from "@/hooks/useChatShellAnimatedHeight";
@@ -125,6 +129,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChatShellExpandControls } from "@/components/cohi/ChatShellExpandControls";
 import { CohiChatDockChip } from "@/components/cohi/CohiChatDockChip";
+import {
+  ChatTypeSuggestedPromptCards,
+  resolveChatTypePromptCardsLayout,
+} from "@/components/cohi/ChatTypeSuggestedPromptCards";
+import type { UnifiedChatType } from "@/lib/unifiedChatClient";
 
 const CHAT_EXPORT_FORMAT_KEY = "cohi-chat-preferred-export-format";
 
@@ -448,7 +457,23 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pendingSuggestionRef = useRef<{
+    question: string;
+    chatType: UnifiedChatType;
+    forceNewConversation: boolean;
+  } | null>(null);
+  const CHAT_INPUT_MAX_HEIGHT_PX = 128;
+
+  const resizeChatInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, CHAT_INPUT_MAX_HEIGHT_PX);
+    el.style.height = `${next}px`;
+    el.style.overflowY =
+      el.scrollHeight > CHAT_INPUT_MAX_HEIGHT_PX ? "auto" : "hidden";
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -501,12 +526,42 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const setActiveResearchDeepAnalysis =
     unifiedSession?.setResearchDeepAnalysis ?? setResearchDeepAnalysis;
 
+  const navigateWorkbenchOnSubmit = useCallback(
+    (forceNewConversation: boolean) => {
+      if (
+        activeChatType === "workbench" &&
+        isUnifiedChatClientEnabled()
+      ) {
+        navigateForWorkbenchChatSubmit(navigate, { forceNewConversation });
+      }
+    },
+    [activeChatType, navigate],
+  );
+
   useEffect(() => {
     if (!isUnifiedChatClientEnabled()) return;
     if (!allowedChatTypes.includes(activeChatType)) {
       setActiveChatType(allowedChatTypes[0] ?? "chat");
     }
   }, [allowedChatTypes, activeChatType, setActiveChatType]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{ message?: string }>
+      ).detail;
+      if (!detail?.message?.trim()) return;
+      setActiveChatType("workbench");
+      if (isUnifiedChatClientEnabled()) {
+        navigateForWorkbenchChatSubmit(navigate, { forceNewConversation: false });
+      }
+      void sendMessage(detail.message.trim());
+    };
+    window.addEventListener(COHI_WORKBENCH_EDIT_WIDGET_EVENT, handler);
+    return () =>
+      window.removeEventListener(COHI_WORKBENCH_EDIT_WIDGET_EVENT, handler);
+  }, [sendMessage, setActiveChatType, navigate]);
+
   useEffect(() => {
     if (layout === "shell") return;
     const docEl = document.documentElement;
@@ -881,6 +936,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     const forceNewConversation = isShellCompact;
     expandShellIfCompact();
 
+    if (!uploadedFile) {
+      navigateWorkbenchOnSubmit(forceNewConversation);
+    }
+
     if (uploadedFile) {
       if (forceNewConversation) {
         await newSession();
@@ -999,23 +1058,70 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   /**
    * Handle key press (Enter to send)
    */
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
+  useEffect(() => {
+    resizeChatInput();
+  }, [input, resizeChatInput]);
+
+  const dispatchSuggestion = useCallback(
+    (question: string, forceNewConversation: boolean) => {
+      expandShellIfCompact();
+      navigateWorkbenchOnSubmit(forceNewConversation);
+      setInput(question);
+      sendMessage(question, { forceNewConversation });
+    },
+    [
+      expandShellIfCompact,
+      navigateWorkbenchOnSubmit,
+      sendMessage,
+    ],
+  );
+
   /**
-   * Handle suggested question click
+   * Handle suggested question click (optionally for a different chat type).
    */
-  const handleSuggestionClick = (question: string) => {
-    expandShellIfCompact();
-    setInput(question);
-    sendMessage(question, {
-      forceNewConversation: isShellCompact,
-    });
-  };
+  const handleSuggestionClick = useCallback(
+    (question: string, targetChatType?: UnifiedChatType) => {
+      const forceNewConversation = isShellCompact;
+      const chatTypeForSend = targetChatType ?? activeChatType;
+
+      if (chatTypeForSend !== activeChatType) {
+        pendingSuggestionRef.current = {
+          question,
+          chatType: chatTypeForSend,
+          forceNewConversation,
+        };
+        setActiveChatType(chatTypeForSend);
+        return;
+      }
+
+      dispatchSuggestion(question, forceNewConversation);
+    },
+    [
+      activeChatType,
+      dispatchSuggestion,
+      isShellCompact,
+      setActiveChatType,
+    ],
+  );
+
+  useEffect(() => {
+    const pending = pendingSuggestionRef.current;
+    if (!pending || pending.chatType !== activeChatType) return;
+    pendingSuggestionRef.current = null;
+    dispatchSuggestion(pending.question, pending.forceNewConversation);
+  }, [activeChatType, dispatchSuggestion]);
+
+  const promptCardsLayout = resolveChatTypePromptCardsLayout(
+    layout,
+    shellExpandMode,
+  );
 
   /**
    * Save a single visualization to workbench as a new canvas
@@ -2148,26 +2254,23 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -16 }}
                   transition={{ duration: 0.35 }}
-                  className="py-12 px-2"
+                  className={cn(
+                    "px-2 w-full min-w-0",
+                    promptCardsLayout === "row"
+                      ? "py-6 flex justify-center"
+                      : "py-8",
+                  )}
                 >
-                  {/* Suggested Questions – minimalist */}
-                  <div className="space-y-1 max-w-[300px] mx-auto">
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-medium mb-4 text-center">
-                      Try asking
-                    </p>
-                    {suggestedQuestions.slice(0, 4).map((question, index) => (
-                      <motion.button
-                        key={index}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: 0.1 + index * 0.05 }}
-                        onClick={() => handleSuggestionClick(question)}
-                        className="group block w-full text-left py-2.5 px-0 text-[13px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-150 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 last:border-0"
-                      >
-                        <span className="font-normal">{question}</span>
-                      </motion.button>
-                    ))}
-                  </div>
+                  <ChatTypeSuggestedPromptCards
+                    allowedTypes={allowedChatTypes}
+                    layout={promptCardsLayout}
+                    activeChatType={activeChatType}
+                    maxPromptsPerCard={promptCardsLayout === "row" ? 3 : 6}
+                    onPromptClick={handleSuggestionClick}
+                    className={cn(
+                      promptCardsLayout === "grid" && "max-w-2xl mx-auto",
+                    )}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -2309,7 +2412,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               />
             </>
           )}
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-end">
             {isUnifiedChatClientEnabled() && (
               <ChatTypeSelect
                 value={activeChatType}
@@ -2351,18 +2454,26 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               <Paperclip className="w-4 h-4" />
             </Button>
 
-            <Input
+            <Textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
+              rows={1}
+              onChange={(e) => {
+                setInput(e.target.value);
+                resizeChatInput();
+              }}
+              onKeyDown={handleInputKeyDown}
               placeholder={
                 uploadedFile
                   ? "Ask about this file..."
                   : "What important info do I need to know today?"
               }
               disabled={isLoading || isUploading}
-              className="flex-1 rounded-xl border-slate-200/80 dark:border-slate-600/60 bg-white dark:bg-slate-800/50 focus-visible:ring-2 focus-visible:ring-blue-500/30"
+              className={cn(
+                "flex-1 min-h-10 max-h-32 resize-none py-2.5 leading-snug",
+                "rounded-xl border-slate-200/80 dark:border-slate-600/60 bg-white dark:bg-slate-800/50",
+                "focus-visible:ring-2 focus-visible:ring-blue-500/30 overflow-y-hidden",
+              )}
             />
             <Button
               onClick={handleSend}
@@ -2810,6 +2921,16 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                 {renderMarkdownText(messageContent)}
               </div>
             )}
+
+            {!isUser &&
+              message.workbenchActionsAppliedCount != null &&
+              message.workbenchActionsAppliedCount > 0 && (
+                <p className="px-4 pb-2 text-xs font-medium text-violet-600 dark:text-violet-400">
+                  Applied {message.workbenchActionsAppliedCount} widget
+                  {message.workbenchActionsAppliedCount !== 1 ? "s" : ""} to
+                  canvas
+                </p>
+              )}
 
             {!isUser && message.insightBuilderDraft && (
               <InsightBuilderPreviewCard

@@ -34,7 +34,6 @@ export function CohiChatSessionProvider({ children }: { children: ReactNode }) {
 
   const [chatType, setChatType] = useState<UnifiedChatType>("chat");
   const [researchDeepAnalysis, setResearchDeepAnalysis] = useState(false);
-
   const chat = useCohiChat({
     tenantId,
     enabled: unified && isAuthenticated,

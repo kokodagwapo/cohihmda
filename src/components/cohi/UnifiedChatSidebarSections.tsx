@@ -5,6 +5,18 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
   ChevronRight,
   Clock,
   Folder,
@@ -50,6 +62,28 @@ const SIDEBAR_HISTORY_LIMIT = 5;
 /** Fetch enough recents to populate folder nesting in the sidebar. */
 const SIDEBAR_FETCH_LIMIT = 50;
 
+type ConversationDragSource = "history" | "folder";
+
+/** Unique per sidebar row — same chat can appear in History and inside a folder. */
+const conversationDragId = (
+  source: ConversationDragSource,
+  conversationId: string,
+) => `${source}:conversation:${conversationId}`;
+
+const folderDropId = (folderId: string) => `folder:${folderId}`;
+
+type ConversationDragData = {
+  type: "conversation";
+  conversationId: string;
+  currentFolderId: string | null;
+  title: string;
+};
+
+type FolderDropData = {
+  type: "folder";
+  folderId: string;
+};
+
 export interface UnifiedChatSidebarSectionsProps {
   tenantId?: string;
   isDarkMode?: boolean;
@@ -65,8 +99,17 @@ type FolderDialogMode =
   | { kind: "create"; parentId?: string | null }
   | { kind: "rename"; folderId: string; initialName: string };
 
+function ConversationDragPreview({ title }: { title: string }) {
+  return (
+    <div className="flex min-w-[180px] max-w-[240px] items-center rounded-md border border-slate-200 bg-white px-2 py-2 text-sm font-medium text-slate-800 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+      <span className="truncate">{title}</span>
+    </div>
+  );
+}
+
 function ConversationRow({
   conversation,
+  dragSource,
   folders,
   resumeConversation,
   moveConversationToFolder,
@@ -74,6 +117,7 @@ function ConversationRow({
   style,
 }: {
   conversation: ConversationRow;
+  dragSource: ConversationDragSource;
   folders: FolderRow[];
   resumeConversation: (id: string, chatType: string) => void;
   moveConversationToFolder: (
@@ -83,15 +127,35 @@ function ConversationRow({
   onItemActivate?: () => void;
   style?: CSSProperties;
 }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: conversationDragId(dragSource, conversation.id),
+    data: {
+      type: "conversation",
+      conversationId: conversation.id,
+      currentFolderId: conversation.folder_id ?? null,
+      title: conversation.title,
+    } satisfies ConversationDragData,
+  });
+
+  const dragStyle: CSSProperties = {
+    ...style,
+    opacity: isDragging ? 0 : undefined,
+  };
+
   return (
-    <div className="flex items-center gap-0.5 group" style={style}>
+    <div ref={setNodeRef} className="flex items-center gap-0.5 group" style={dragStyle}>
       <button
         type="button"
-        className="flex-1 min-w-0 text-left text-sm truncate rounded-md px-2 py-2 min-h-[36px] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+        className={cn(
+          "flex-1 min-w-0 text-left text-sm truncate rounded-md px-2 py-2 min-h-[36px] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60",
+          "cursor-grab active:cursor-grabbing",
+        )}
         onClick={() => {
           resumeConversation(conversation.id, conversation.chat_type);
           onItemActivate?.();
         }}
+        {...listeners}
+        {...attributes}
       >
         {conversation.title}
       </button>
@@ -144,9 +208,21 @@ function FolderTreeNode({
   const hasNestedContent =
     childFolders.length > 0 || conversationsInFolder.length > 0;
 
+  const { isOver, setNodeRef } = useDroppable({
+    id: folderDropId(folder.id),
+    data: { type: "folder", folderId: folder.id } satisfies FolderDropData,
+  });
+
   return (
     <div>
-      <div className="flex items-center gap-0.5 group">
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "flex items-center gap-0.5 group rounded-md transition-colors",
+          isOver &&
+            "bg-blue-50 ring-2 ring-blue-400/70 dark:bg-blue-950/40 dark:ring-blue-500/60",
+        )}
+      >
         <button
           type="button"
           className={cn(
@@ -154,6 +230,7 @@ function FolderTreeNode({
             isExpanded
               ? "bg-slate-100 dark:bg-slate-800/40 text-slate-900 dark:text-slate-100"
               : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60",
+            isOver && "bg-transparent",
           )}
           style={{ paddingLeft: `${8 + depth * 12}px` }}
           onClick={() => toggleFolderExpanded(folder.id)}
@@ -255,6 +332,7 @@ function FolderTreeNode({
             <ConversationRow
               key={conversation.id}
               conversation={conversation}
+              dragSource="folder"
               folders={folders}
               resumeConversation={resumeConversation}
               moveConversationToFolder={moveConversationToFolder}
@@ -446,6 +524,7 @@ function HistoryListBody({
         <ConversationRow
           key={conversation.id}
           conversation={conversation}
+          dragSource="history"
           folders={folders}
           resumeConversation={resumeConversation}
           moveConversationToFolder={moveConversationToFolder}
@@ -482,6 +561,22 @@ export function UnifiedChatSidebarSections({
   const [folderDialogMode, setFolderDialogMode] =
     useState<FolderDialogMode | null>(null);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [activeConversationDrag, setActiveConversationDrag] =
+    useState<ConversationDragData | null>(null);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  const handleConversationDragOver = (event: DragOverEvent) => {
+    const data = event.over?.data.current;
+    if (data?.type !== "folder") return;
+    const folderId = data.folderId as string;
+    setExpandedFolderIds((prev) => {
+      if (prev.has(folderId)) return prev;
+      return new Set(prev).add(folderId);
+    });
+  };
 
   const toggleFolderExpanded = (folderId: string) => {
     setExpandedFolderIds((prev) => {
@@ -549,6 +644,54 @@ export function UnifiedChatSidebarSections({
     }
   };
 
+  const handleConversationDragStart = (event: DragStartEvent) => {
+    const data = event.active.data.current as ConversationDragData | undefined;
+    if (data?.type === "conversation") {
+      setActiveConversationDrag(data);
+    }
+  };
+
+  const handleConversationDragEnd = async (event: DragEndEvent) => {
+    setActiveConversationDrag(null);
+
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeData = active.data.current as ConversationDragData | undefined;
+    const overData = over.data.current as FolderDropData | undefined;
+    if (activeData?.type !== "conversation" || overData?.type !== "folder") {
+      return;
+    }
+
+    const { conversationId, currentFolderId } = activeData;
+    const { folderId } = overData;
+    const folderName = folders.find((f) => f.id === folderId)?.name;
+
+    if (currentFolderId === folderId) {
+      toast({
+        title: folderName
+          ? `Chat is already in ${folderName}`
+          : "Chat is already in this folder",
+      });
+      return;
+    }
+
+    try {
+      await handleMoveConversationToFolder(conversationId, folderId);
+      toast({
+        title: "Moved to folder",
+        description: folderName,
+      });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Could not move chat",
+        description:
+          err instanceof Error ? err.message : "Something went wrong.",
+      });
+    }
+  };
+
   const handleMoveFolder = async (folderId: string, parentId: string | null) => {
     await moveFolder(folderId, parentId);
     if (parentId) {
@@ -586,7 +729,14 @@ export function UnifiedChatSidebarSections({
   };
 
   return (
-    <div className={cn(isExpanded ? "" : "space-y-0", className)}>
+    <DndContext
+      sensors={dndSensors}
+      onDragStart={handleConversationDragStart}
+      onDragOver={handleConversationDragOver}
+      onDragEnd={(e) => void handleConversationDragEnd(e)}
+      onDragCancel={() => setActiveConversationDrag(null)}
+    >
+      <div className={cn(isExpanded ? "" : "space-y-0", className)}>
       <FolderNameDialog
         mode={folderDialogMode}
         open={folderDialogOpen}
@@ -638,6 +788,12 @@ export function UnifiedChatSidebarSections({
           </Button>
         </div>
       )}
-    </div>
+      </div>
+      <DragOverlay dropAnimation={null}>
+        {activeConversationDrag ? (
+          <ConversationDragPreview title={activeConversationDrag.title} />
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }

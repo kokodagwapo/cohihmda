@@ -33,6 +33,7 @@ import { useLocation } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 import { RESEARCH_SHELL_EXPAND_EVENT } from "@/lib/unifiedChatEnvelope";
+import { dispatchWorkbenchFlushDraftLayout } from "@/lib/workbench/workbenchDraftLayoutCache";
 
 
 
@@ -83,6 +84,8 @@ export function ChatShellProvider({ children }: { children: ReactNode }) {
       return;
 
     }
+
+    dispatchWorkbenchFlushDraftLayout();
 
     setModeState(next);
 

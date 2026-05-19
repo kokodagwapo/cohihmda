@@ -11,10 +11,26 @@ import {
   parseGlobalFromBlocks,
   type UnifiedChatBlock,
 } from "@/lib/unifiedChatEnvelope";
+import { serializeWidgetCatalog } from "@/utils/widgetCatalogSerializer";
+import type { WidgetAction, CanvasStateSnapshot } from "@/types/widgetActions";
+import {
+  deliverWorkbenchWidgetActions,
+  filterExecutableWorkbenchActions,
+  getOrCreateActiveWorkbenchDraftScope,
+  resetActiveWorkbenchDraftSession,
+} from "@/lib/workbench/workbenchChatHandoff";
+import {
+  getWorkbenchCanvasIdForDraft,
+  getWorkbenchCanvasSnapshotForDraft,
+} from "@/lib/workbench/workbenchCanvasBridge";
 import {
   createUnifiedChatClient,
   type UnifiedChatType,
 } from "@/lib/unifiedChatClient";
+import {
+  CHAT_TYPE_DEFAULT_SUGGESTIONS,
+  DEFAULT_CHAT_SUGGESTIONS,
+} from "@/lib/unifiedChatSuggestedPrompts";
 import {
   sendUnifiedGlobalStream,
   sendUnifiedWorkbenchStream,
@@ -96,6 +112,9 @@ export interface ChatMessage {
   navigationHints?: { label: string; path: string }[];
   insightBuilderDraft?: import("@/lib/unifiedChatEnvelope").InsightBuilderDraftPreview;
   visualizationArtifactId?: string;
+  /** Workbench mode: actions returned for this turn */
+  workbenchActions?: WidgetAction[];
+  workbenchActionsAppliedCount?: number;
 }
 
 export interface CohiChatResponse {
@@ -130,6 +149,19 @@ export interface UseCohiChatOptions {
   researchDeepAnalysis?: boolean;
 }
 
+function emptyWorkbenchCanvasState(): CanvasStateSnapshot {
+  return { groups: [], standaloneWidgets: [], totalItems: 0 };
+}
+
+function buildWorkbenchRequestContext(draftScopeId: string): Record<string, unknown> {
+  const canvasState =
+    getWorkbenchCanvasSnapshotForDraft(draftScopeId) ?? emptyWorkbenchCanvasState();
+  return {
+    canvasState,
+    widgetCatalog: serializeWidgetCatalog(),
+  };
+}
+
 // ============================================================================
 // Hook
 // ============================================================================
@@ -147,18 +179,44 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [legacyRef, setLegacyRef] = useState<string | null>(null);
-  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([
-    "What's important to know today?",
-    "Show me loan volume by month",
-    "What are the FHA requirements?",
-    "Top loan officers by revenue",
-  ]);
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>(
+    DEFAULT_CHAT_SUGGESTIONS,
+  );
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
 
   const messageIdCounter = useRef(0);
   const defaultTenantIdRef = useRef<string | null | undefined>(undefined);
+
+  const [workbenchSavedCanvasId, setWorkbenchSavedCanvasId] = useState<
+    string | null
+  >(null);
+
+  const resetWorkbenchChatSession = useCallback(() => {
+    resetActiveWorkbenchDraftSession();
+    setWorkbenchSavedCanvasId(null);
+  }, []);
+
+  useEffect(() => {
+    if (chatType !== "workbench") return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ canvasId?: string; draftScopeId?: string }>)
+        .detail;
+      if (detail?.canvasId && detail.draftScopeId) {
+        const activeDraft = getOrCreateActiveWorkbenchDraftScope();
+        if (detail.draftScopeId === activeDraft) {
+          setWorkbenchSavedCanvasId(detail.canvasId);
+        }
+      }
+    };
+    window.addEventListener("workbench:canvas-saved", handler);
+    return () => window.removeEventListener("workbench:canvas-saved", handler);
+  }, [chatType]);
+
+  useEffect(() => {
+    setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
+  }, [chatType]);
 
   /** Resolve tenant for request */
   const getEffectiveTenantId = useCallback(async (): Promise<string | null> => {
@@ -276,6 +334,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setSuggestedQuestions([]);
         setLegacyRef(null);
         setSessionId(null);
+        // Draft scope + canvas nav are owned by navigateForWorkbenchChatSubmit (panel);
+        // only clear saved-canvas binding when starting a new conversation.
+        if (chatType === "workbench") {
+          setWorkbenchSavedCanvasId(null);
+        }
         setMessages([userMessage, loadingMessage]);
       } else {
         setMessages((prev) => [...prev, userMessage, loadingMessage]);
@@ -293,15 +356,24 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           }));
 
           if (chatType === "workbench") {
-            const draftScopeId = forceNew
-              ? crypto.randomUUID()
-              : (sessionId ?? crypto.randomUUID());
+            const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+
+            const savedCanvasId =
+              workbenchSavedCanvasId ??
+              getWorkbenchCanvasIdForDraft(draftScopeId);
+            if (savedCanvasId && savedCanvasId !== workbenchSavedCanvasId) {
+              setWorkbenchSavedCanvasId(savedCanvasId);
+            }
+
+            const scopeId = savedCanvasId ?? draftScopeId;
+            const scopeType = savedCanvasId ? ("canvas" as const) : ("draft" as const);
+
             const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
               client,
               message: question.trim(),
               conversationId: activeSessionId,
-              scope: { type: "draft", id: draftScopeId },
-              context: {},
+              scope: { type: scopeType, id: scopeId },
+              context: buildWorkbenchRequestContext(draftScopeId),
               history,
               onStreamText: (text) => {
                 setMessages((prev) =>
@@ -314,6 +386,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               },
             });
             setSessionId(conversationId);
+
+            const autoActions = filterExecutableWorkbenchActions(parsed.actions);
+            if (autoActions.length > 0) {
+              deliverWorkbenchWidgetActions(draftScopeId, autoActions);
+            }
+
             const assistantMessage: ChatMessage = {
               id: assistantMessageId,
               role: "assistant",
@@ -321,6 +399,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 ? `${parsed.message}\n${parsed.error}`
                 : parsed.message,
               timestamp: new Date(),
+              workbenchActions: parsed.actions,
+              workbenchActionsAppliedCount: autoActions.length,
             };
             setMessages((prev) =>
               prev.map((m) =>
@@ -448,6 +528,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       chatType,
       researchDeepAnalysis,
       applyUnifiedStreamEvent,
+      workbenchSavedCanvasId,
+      resetWorkbenchChatSession,
     ]
   );
 
@@ -540,17 +622,27 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           };
 
           if (chatType === "workbench") {
-            const draftScopeId = sessionId ?? crypto.randomUUID();
+            const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+            const savedCanvasId =
+              workbenchSavedCanvasId ??
+              getWorkbenchCanvasIdForDraft(draftScopeId);
+            const scopeId = savedCanvasId ?? draftScopeId;
+            const scopeType = savedCanvasId ? ("canvas" as const) : ("draft" as const);
+
             const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
               client,
               message: composed,
               conversationId: sessionId,
-              scope: { type: "draft", id: draftScopeId },
-              context: {},
+              scope: { type: scopeType, id: scopeId },
+              context: buildWorkbenchRequestContext(draftScopeId),
               history,
               onStreamText,
             });
             setSessionId(conversationId);
+            const autoActions = filterExecutableWorkbenchActions(parsed.actions);
+            if (autoActions.length > 0) {
+              deliverWorkbenchWidgetActions(draftScopeId, autoActions);
+            }
             const assistantMessage: ChatMessage = {
               id: assistantMessageId,
               role: "assistant",
@@ -558,6 +650,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 ? `${parsed.message}\n${parsed.error}`
                 : parsed.message,
               timestamp: new Date(),
+              workbenchActions: parsed.actions,
+              workbenchActionsAppliedCount: autoActions.length,
             };
             setMessages((prev) =>
               prev.map((m) =>
@@ -672,19 +766,16 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       chatType,
       researchDeepAnalysis,
       applyUnifiedStreamEvent,
+      workbenchSavedCanvasId,
     ]
   );
   const clearMessages = useCallback(() => {
     setMessages([]);
     setSessionId(null);
     setLegacyRef(null);
-    setSuggestedQuestions([
-      "What's important to know today?",
-      "Show me loan volume by month",
-      "What are the FHA requirements?",
-      "Top loan officers by revenue",
-    ]);
-  }, []);
+    resetWorkbenchChatSession();
+    setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
+  }, [resetWorkbenchChatSession, chatType]);
 
   // ===========================================================================
   // Session management
@@ -804,12 +895,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
         setMessages(loadedMessages);
         setSessionId(targetSessionId);
-        setSuggestedQuestions([
-          "What's important to know today?",
-          "Show me loan volume by month",
-          "What are the FHA requirements?",
-          "Top loan officers by revenue",
-        ]);
+        setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
       } catch (error) {
         console.error("[CohiChat] Failed to load session:", error);
       } finally {
@@ -887,6 +973,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     clearMessages();
     setSessionId(null);
     setIsLoading(false);
+    resetWorkbenchChatSession();
     if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
       return;
     }
@@ -907,7 +994,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     } catch (error) {
       console.error("[CohiChat] Failed to create new session:", error);
     }
-  }, [clearMessages, fetchSessions, getEffectiveTenantId]);
+  }, [clearMessages, fetchSessions, getEffectiveTenantId, resetWorkbenchChatSession]);
 
   return {
     messages,

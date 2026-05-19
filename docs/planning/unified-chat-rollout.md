@@ -45,9 +45,13 @@ WHERE expires_at < NOW();
 
 Rerun is safe (`DELETE` is idempotent). A later epic can promote this to a worker if the table grows fast; until then the 10-day TTL keeps it bounded for typical chat volumes.
 
+## COHI-389 AC3 — platform tenant (deferred Wave 4)
+
+`assertPlatformTenantScope` is **not** wired into v1 request handling until the unified request schema defines cross-tenant / `platformTenantId` inputs. See `docs/planning/wave4-jira-implementation-status.md`.
+
 ## Limitations (until hardened)
 
-- **Sessions:** With `VITE_UNIFIED_CHAT=true`, legacy chat session sidebar uses empty list until the client lists `GET /api/chat/v1/conversations`.
+- **Sessions:** With `VITE_UNIFIED_CHAT=true`, use `GET /api/chat/v1/conversations` via `UnifiedChatClient` / `useCohiChat.fetchSessions` (W1-7).
 
 ## Prompt module overrides (COHI-390 AC3)
 
@@ -78,3 +82,25 @@ The script prints a single JSON line summary: `{ tenantId, inserted, skipped, to
 | Pause | If errors exceed ~5% of `total` for a tenant, stop further tenants and inspect logs before continuing. |
 | Rollback | Reverse a tenant with `DELETE FROM public.unified_chat_conversations WHERE legacy_source = 'research_lab' AND messages = '[]'::jsonb;` — only deletes script-inserted shells, not user messages. |
 | Verify | After backfill, `GET /api/chat/v1/conversations?chat_type=research` with `UNIFIED_CHAT_HISTORY_DUAL_READ=true` should match `research_sessions` counts; spot-check a few rows. |
+
+## Wave 5 — centralization UX flag bundle (COHI-404–406)
+
+Staging demo for the meeting-spec shell, history, IA, and modes UX. This is **separate** from Wave 6 production cutover (**COHI-398**).
+
+| Layer | Variable | Wave 5 usage |
+| ----- | -------- | ------------- |
+| Frontend | `VITE_UNIFIED_CHAT=true` | Required: horizontal shell, v1 send/history, mode selector, sidebar §6.4 sections |
+| API | `UNIFIED_CHAT_ENABLED=true` | Required: `/api/chat/v1/*` routes |
+| API | `UNIFIED_CHAT_PERSIST=true` | Required for durable history/folders |
+| History | `UNIFIED_CHAT_HISTORY_DUAL_READ=true` | Required on staging before **403**/**405** history QA (merged Research rows) |
+| Tenant DB | Migrations **129**, **130**, **131** | Idempotency, `folder_id` / legacy columns, `unified_chat_folders` |
+
+**Staging checklist (after flags + backfill):**
+
+1. Apply migration **131** per tenant (`unified_chat_folders`).
+2. Run `backfill-unified-chat-legacy.ts` per tenant (see above).
+3. Enable the flag bundle on staging; reload the app (Vite env is build-time).
+4. Spot-check: shell expand modes, Research auto full-page, `/chat/history`, legacy `/research-lab` and `/research?session=` redirects, sidebar Folders/History, Communications Center in top nav (no Research Lab pill), `GET /api/chat/v1/permissions` gating chat types.
+5. Network tab: user sends use `POST /api/chat/v1/messages:stream` only (no `/api/cohi-chat/ask` on global chat).
+
+**Rollback (Wave 5 UI only):** Set `VITE_UNIFIED_CHAT` off and redeploy the frontend; server flags can stay on. Users revert to the right-rail / legacy Research entry until re-enabled.
