@@ -15,6 +15,8 @@ export interface UnifiedChatTurnRecord {
   role: "user" | "assistant";
   content?: string;
   blocks?: unknown[];
+  /** Turn-level metadata (e.g. insightBuilderPhase) for history restore. */
+  metadata?: Record<string, unknown>;
   turnId?: string;
   at: string;
 }
@@ -76,6 +78,7 @@ export async function appendUnifiedChatTurns(args: {
   conversationId: string;
   userMessage: string;
   assistantBlocks: unknown[];
+  assistantMetadata?: Record<string, unknown>;
   assistantTurnId: string;
   scopeType?: string;
   scopeKey?: string | null;
@@ -96,6 +99,9 @@ export async function appendUnifiedChatTurns(args: {
   const assistantTurn: UnifiedChatTurnRecord = {
     role: "assistant",
     blocks: args.assistantBlocks,
+    ...(args.assistantMetadata && Object.keys(args.assistantMetadata).length > 0
+      ? { metadata: args.assistantMetadata }
+      : {}),
     turnId: args.assistantTurnId,
     at: new Date().toISOString(),
   };

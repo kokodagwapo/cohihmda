@@ -728,6 +728,7 @@ async function handleInsightBuilderStream(
         conversationId,
         userMessage: body.message,
         assistantBlocks: streamResult.blocks,
+        assistantMetadata: streamResult.metadata,
         assistantTurnId: turnId,
         scopeType: body.scope?.type,
         scopeKey:
@@ -949,6 +950,7 @@ async function handlePostMessage(
           conversationId: result.conversationId,
           userMessage: body.message,
           assistantBlocks: result.turn.blocks,
+          assistantMetadata: result.metadata,
           assistantTurnId: result.turn.id,
           scopeType: body.scope?.type,
           scopeKey:

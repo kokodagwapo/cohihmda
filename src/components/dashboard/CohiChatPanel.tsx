@@ -443,7 +443,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     Record<string, VisualizationConfig["type"]>
   >({});
   const isMobile = useIsMobile();
-  const { mode: shellExpandMode, setMode: setShellExpandMode } = useChatShell();
+  const {
+    mode: shellExpandMode,
+    setMode: setShellExpandMode,
+    isChatHomePage,
+  } = useChatShell();
   const isShellCompact = layout === "shell" && shellExpandMode === "compact";
   const isStackedInsetShell =
     layout === "shell" &&
@@ -526,9 +530,14 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const setActiveResearchDeepAnalysis =
     unifiedSession?.setResearchDeepAnalysis ?? setResearchDeepAnalysis;
 
-  const insightBuilderApprovedThroughIdx = useMemo(() => {
+  /** Only the latest assistant draft preview may be edited; older drafts stay read-only. */
+  const lastInsightBuilderDraftIdx = useMemo(() => {
     if (activeChatType !== "insight_builder") return -1;
-    return messages.findIndex((m) => m.insightBuilderPhase === "approved");
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "assistant" && m.insightBuilderDraft) return i;
+    }
+    return -1;
   }, [messages, activeChatType]);
 
   const navigateWorkbenchOnSubmit = useCallback(
@@ -1127,6 +1136,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     layout,
     shellExpandMode,
   );
+  const isTallEmptyPromptCards =
+    messages.length === 0 && promptCardsLayout === "row";
 
   /**
    * Save a single visualization to workbench as a new canvas
@@ -2104,9 +2115,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 )}
               </Button>
             )}
-            {layout === "shell" && (
+            {layout === "shell" && !isChatHomePage && (
               <ChatShellExpandControls variant="header" />
             )}
+            {!(layout === "shell" && isChatHomePage) && (
             <Button
               variant="ghost"
               size="icon"
@@ -2142,6 +2154,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 <Expand className="w-4 h-4" />
               )}
             </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -2239,7 +2252,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           key="shell-messages"
           ref={messagesScrollRef}
           initial={{ opacity: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
+          animate={
+            isTallEmptyPromptCards
+              ? { opacity: 1 }
+              : { opacity: 1, height: "auto" }
+          }
           exit={{ opacity: 0, height: 0, marginTop: 0, paddingTop: 0, paddingBottom: 0 }}
           transition={{
             ...CHAT_SHELL_VIEW_TRANSITION,
@@ -2247,7 +2264,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             height: { duration: 0.32, ease: CHAT_SHELL_VIEW_TRANSITION.ease },
           }}
           className={cn(
-            "flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-5 min-w-0 min-h-0",
+            "flex-1 overflow-x-hidden px-4 sm:px-5 min-w-0 min-h-0",
+            isTallEmptyPromptCards
+              ? "overflow-y-hidden flex flex-col justify-center"
+              : "overflow-y-auto",
             isStackedInsetShell && "bg-transparent",
           )}
         >
@@ -2262,7 +2282,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   className={cn(
                     "px-2 w-full min-w-0",
                     promptCardsLayout === "row"
-                      ? "py-6 flex justify-center"
+                      ? "py-3 flex justify-center"
                       : "py-8",
                   )}
                 >
@@ -2345,8 +2365,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   chatTenantId={tenantId}
                   insightBuilderReadOnly={
                     !!message.insightBuilderDraft &&
-                    insightBuilderApprovedThroughIdx >= 0 &&
-                    idx <= insightBuilderApprovedThroughIdx
+                    (message.insightBuilderPhase === "approved" ||
+                      idx !== lastInsightBuilderDraftIdx)
                   }
                 />
               </motion.div>

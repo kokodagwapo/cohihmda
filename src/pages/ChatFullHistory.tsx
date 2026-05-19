@@ -27,6 +27,7 @@ import {
 } from "@/lib/unifiedChatTypeStyles";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
+import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
 import {
   buildFolderBreadcrumb,
   conversationMatchesFolderFilter,
@@ -402,10 +403,9 @@ export default function ChatFullHistory() {
                     type="button"
                     className="flex-1 min-w-0 text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/50"
                     onClick={() =>
-                      navigate(
-                        `/insights?resume=${encodeURIComponent(row.id)}&mode=${row.chat_type}`,
-                        { state: cohiChatResumeNavigationState() },
-                      )
+                      navigate(buildUnifiedChatResumePath(row.id, row.chat_type), {
+                        state: cohiChatResumeNavigationState(),
+                      })
                     }
                   >
                     <p className="font-medium text-slate-900 dark:text-white truncate">

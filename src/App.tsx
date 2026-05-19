@@ -84,6 +84,8 @@ import HelpCenter from "./pages/HelpCenter";
 import FeedbackPage from "./pages/Feedback";
 import FeedbackDetailPage from "./pages/FeedbackDetail";
 import DataChat from "./pages/DataChat";
+import CohiChatHome from "./pages/CohiChatHome";
+import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
 
 import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
@@ -131,18 +133,6 @@ function Handle404Redirect() {
   return null;
 }
 
-function RootRoute() {
-  const { isAuthenticated, user, isLoading } = useAuth();
-  if (isLoading) return null;
-  if (isAuthenticated) {
-    if (user?.persona === "tenant_canvas_only_user") {
-      return <Navigate to="/workbench" replace />;
-    }
-    return <Navigate to="/insights" replace />;
-  }
-  return <Index />;
-}
-
 function FullAccessOnly({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   if (user?.persona === "tenant_canvas_only_user") {
@@ -151,7 +141,7 @@ function FullAccessOnly({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Legacy `/research/session?session=` → unified insights resume (COHI-403). */
+/** Legacy `/research/session?session=` → unified chat home resume (COHI-403). */
 function LegacyResearchIndexRedirect() {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
@@ -159,7 +149,7 @@ function LegacyResearchIndexRedirect() {
   if (session) {
     return (
       <Navigate
-        to={`/insights?resume=${encodeURIComponent(session)}&mode=research`}
+        to={buildUnifiedChatResumePath(session, "research")}
         state={{ resumeChat: true }}
         replace
       />
@@ -175,13 +165,13 @@ function LegacyResearchSessionRedirect() {
   if (session) {
     return (
       <Navigate
-        to={`/insights?resume=${encodeURIComponent(session)}&mode=research`}
+        to={buildUnifiedChatResumePath(session, "research")}
         state={{ resumeChat: true }}
         replace
       />
     );
   }
-  return <Navigate to="/insights?mode=research" replace />;
+  return <Navigate to="/?mode=research" replace />;
 }
 
 const App = () => (
@@ -207,8 +197,7 @@ const App = () => (
               <Handle404Redirect />
               <ScrollToTop />
               <Routes>
-              {/* Public routes */}
-              <Route path="/" element={<RootRoute />} />
+              {/* Public routes — marketing at /landing; authenticated chat home at / (protected) */}
               <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -218,6 +207,8 @@ const App = () => (
 
               {/* Protected routes - require authentication; canvas_only users see only CanvasOnlyLayout on /my-dashboard* */}
               <Route element={<ProtectedRoute><AccessModeGate /></ProtectedRoute>}>
+              <Route path="/" element={<CohiChatHome />} />
+              <Route path="/cohi-chat" element={<Navigate to="/" replace />} />
               <Route path="/settings" element={<UserSettings />} />
                 <Route path="/insights" element={<Dashboard />} />
                 <Route path="/chat/history" element={<ChatFullHistory />} />

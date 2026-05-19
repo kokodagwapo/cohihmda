@@ -60,7 +60,11 @@ const COMMON_COLUMN_NAMES = new Set([
   "loan_amount",
 ]);
 
-function draftPreviewBlock(draft: InsightBuilderDraft): UnifiedBlock {
+function draftPreviewBlock(
+  draft: InsightBuilderDraft,
+  options?: { approved?: boolean },
+): UnifiedBlock {
+  const approved = options?.approved === true;
   return {
     type: "artifacts",
     items: [
@@ -70,7 +74,10 @@ function draftPreviewBlock(draft: InsightBuilderDraft): UnifiedBlock {
         meta: {
           insightBuilderPreview: true,
           draft,
-          actions: ["approve", "request_changes"],
+          insightBuilderPhase: approved ? "approved" : "preview",
+          ...(approved
+            ? { approved: true }
+            : { actions: ["approve", "request_changes"] }),
         },
       },
     ],
@@ -374,7 +381,7 @@ export async function runInsightBuilderTurn(args: {
             ? `Your insight prompt **${validated.draft.title}** has been saved to [My Prompts](/insights). You can edit it anytime from the My Insights tab.`
             : "Approved, but saving to My Prompts failed — try again from `/insights`.",
         },
-        draftPreviewBlock(validated.draft),
+        draftPreviewBlock(validated.draft, { approved: true }),
       ],
       metadata: {
         insightBuilderPhase: "approved",

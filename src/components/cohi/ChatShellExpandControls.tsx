@@ -27,8 +27,12 @@ export function ChatShellExpandControls({
   className,
   variant = "toolbar",
 }: ChatShellExpandControlsProps) {
-  const { mode, setMode } = useChatShell();
+  const { mode, setMode, isChatHomePage } = useChatShell();
   const isMobile = useIsMobile();
+
+  if (isChatHomePage) {
+    return null;
+  }
   const visibleModes = isMobile
     ? MODES.filter((m) => m.id !== "split")
     : MODES;

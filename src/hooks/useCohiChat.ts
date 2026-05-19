@@ -871,6 +871,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             role?: string;
             content?: string;
             blocks?: UnifiedChatBlock[];
+            metadata?: Record<string, unknown>;
             at?: string;
           }>;
           const loadedMessages: ChatMessage[] = raw
@@ -885,7 +886,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 };
               }
               const blocks = Array.isArray(m.blocks) ? m.blocks : [];
-              const parsed = parseGlobalFromBlocks(blocks);
+              const parsed = parseGlobalFromBlocks(blocks, m.metadata);
               return {
                 id: `loaded-${i}`,
                 role: "assistant" as const,

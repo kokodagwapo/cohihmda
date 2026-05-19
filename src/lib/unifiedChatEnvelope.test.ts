@@ -3,6 +3,7 @@ import {
   parseGlobalUnifiedEnvelope,
   parseGlobalFromBlocks,
   parseInsightBuilderDraftFromBlocks,
+  inferInsightBuilderPhase,
   dispatchResearchShellExpandIfNeeded,
   RESEARCH_SHELL_EXPAND_EVENT,
 } from "./unifiedChatEnvelope";
@@ -72,6 +73,89 @@ describe("parseInsightBuilderDraftFromBlocks", () => {
       },
     ]);
     expect(draft?.title).toBe("Weekly pipeline");
+  });
+});
+
+describe("inferInsightBuilderPhase", () => {
+  const approvedDraftBlock = {
+    type: "artifacts" as const,
+    items: [
+      {
+        kind: "file",
+        ref: "insight_builder_preview",
+        meta: {
+          insightBuilderPreview: true,
+          insightBuilderPhase: "approved",
+          approved: true,
+          draft: {
+            title: "Weekly pipeline",
+            prompt_text: "Summarize pipeline health",
+            schedule: "batch",
+            specifiers: {},
+          },
+        },
+      },
+    ],
+  };
+
+  it("reads approved phase from turn metadata", () => {
+    expect(
+      inferInsightBuilderPhase([], "", { insightBuilderPhase: "approved" }),
+    ).toBe("approved");
+  });
+
+  it("reads approved phase from artifact block meta", () => {
+    expect(
+      inferInsightBuilderPhase(
+        [approvedDraftBlock],
+        "Your insight prompt **Weekly pipeline** has been saved to [My Prompts](/insights).",
+      ),
+    ).toBe("approved");
+  });
+
+  it("infers approved from saved-to-My-Prompts copy for legacy persisted turns", () => {
+    expect(
+      inferInsightBuilderPhase(
+        [
+          {
+            type: "artifacts",
+            items: [
+              {
+                kind: "file",
+                ref: "insight_builder_preview",
+                meta: {
+                  insightBuilderPreview: true,
+                  actions: ["approve", "request_changes"],
+                  draft: {
+                    title: "Legacy prompt",
+                    prompt_text: "Legacy body",
+                    schedule: "batch",
+                    specifiers: {},
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        "Your insight prompt **Legacy prompt** has been saved to [My Prompts](/insights).",
+      ),
+    ).toBe("approved");
+  });
+
+  it("parseGlobalFromBlocks restores approved phase for history reload", () => {
+    const parsed = parseGlobalFromBlocks(
+      [
+        {
+          type: "text",
+          markdown:
+            "Your insight prompt **Weekly pipeline** has been saved to [My Prompts](/insights).",
+        },
+        approvedDraftBlock,
+      ],
+      { insightBuilderPhase: "approved" },
+    );
+    expect(parsed.insightBuilderPhase).toBe("approved");
+    expect(parsed.insightBuilderDraft?.title).toBe("Weekly pipeline");
   });
 });
 

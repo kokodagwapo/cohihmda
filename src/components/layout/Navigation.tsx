@@ -732,7 +732,9 @@ export function Navigation(
     if (location.pathname.startsWith("/workbench/distributions")) {
       return "Communications Center";
     }
-    if (location.pathname === "/cohi-chat") return "Cohi Chat";
+    if (location.pathname === "/" || location.pathname === "/cohi-chat") {
+      return "Cohi Chat";
+    }
     return "Navigation";
   };
 

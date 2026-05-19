@@ -179,6 +179,50 @@ export function parseInsightBuilderDraftFromBlocks(
   return undefined;
 }
 
+function normalizeInsightBuilderPhase(
+  value: unknown,
+): InsightBuilderPhase | undefined {
+  return value === "gathering" || value === "preview" || value === "approved"
+    ? value
+    : undefined;
+}
+
+/** Resolve insight builder phase from persisted turn metadata and/or artifact blocks. */
+export function inferInsightBuilderPhase(
+  blocks: UnifiedChatBlock[],
+  message: string,
+  metadata?: Record<string, unknown>,
+): InsightBuilderPhase | undefined {
+  const fromMeta = normalizeInsightBuilderPhase(metadata?.insightBuilderPhase);
+  if (fromMeta) return fromMeta;
+
+  for (const b of blocks) {
+    if (b.type !== "artifacts" || !Array.isArray(b.items)) continue;
+    for (const item of b.items) {
+      const meta = item?.meta as Record<string, unknown> | undefined;
+      if (!meta?.insightBuilderPreview) continue;
+      const fromBlock = normalizeInsightBuilderPhase(meta.insightBuilderPhase);
+      if (fromBlock) return fromBlock;
+      if (meta.approved === true) return "approved";
+      if (
+        Array.isArray(meta.actions) &&
+        meta.actions.length === 0 &&
+        meta.draft
+      ) {
+        return "approved";
+      }
+    }
+  }
+
+  if (!parseInsightBuilderDraftFromBlocks(blocks)) return undefined;
+
+  if (/has been saved to|saved to \[My Prompts\]/i.test(message)) {
+    return "approved";
+  }
+
+  return "preview";
+}
+
 /** Build fields from stored assistant `blocks` or a stream result. */
 export function parseGlobalFromBlocks(
   blocks: UnifiedChatBlock[],
@@ -229,11 +273,11 @@ export function parseGlobalUnifiedEnvelope(
         }
       : sources;
 
-  const phase = meta.insightBuilderPhase;
-  const insightBuilderPhase =
-    phase === "gathering" || phase === "preview" || phase === "approved"
-      ? phase
-      : undefined;
+  const insightBuilderPhase = inferInsightBuilderPhase(
+    blocks,
+    message.trim(),
+    meta,
+  );
 
   return {
     message: message.trim() || "(no response)",

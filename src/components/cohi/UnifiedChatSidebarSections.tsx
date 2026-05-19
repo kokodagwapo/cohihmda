@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { useUnifiedChatHistory } from "@/hooks/useUnifiedChatHistory";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
+import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
 import {
   groupConversationsByFolder,
   groupFoldersByParent,
@@ -628,10 +629,9 @@ export function UnifiedChatSidebarSections({
     .slice(0, SIDEBAR_HISTORY_LIMIT);
 
   const resumeConversation = (id: string, chatType: string) => {
-    navigate(
-      `/insights?resume=${encodeURIComponent(id)}&mode=${encodeURIComponent(chatType)}`,
-      { state: cohiChatResumeNavigationState() },
-    );
+    navigate(buildUnifiedChatResumePath(id, chatType), {
+      state: cohiChatResumeNavigationState(),
+    });
   };
 
   const handleMoveConversationToFolder = async (

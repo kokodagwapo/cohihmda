@@ -17,7 +17,7 @@ export interface UserSettings {
 const DEFAULT_SETTINGS: UserSettings = {
   appearance: {
     theme: 'system',
-    defaultPage: '/insights',
+    defaultPage: '/',
     sidebarCollapsed: false,
   },
 };

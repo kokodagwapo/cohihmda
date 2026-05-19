@@ -14,7 +14,7 @@ export function Footer({ variant = 'default', className }: FooterProps) {
   const location = useLocation();
   const { isEditMode, setIsEditMode, isAuthenticated } = useEdit();
   const isDashboard = location.pathname === '/insights';
-  const isLandingPage = location.pathname === '/';
+  const isLandingPage = location.pathname === '/landing';
   const isSplitPane = variant === 'splitPane';
 
   if (isSplitPane) {
