@@ -31,15 +31,32 @@ function* chunkText(text: string): Generator<string> {
   }
 }
 
+export type StreamEmitter = (ev: Record<string, unknown>) => void;
+
+export function createStreamEmitter(res: Response): StreamEmitter {
+  return makeEmitter(res);
+}
+
 export function emitValidatedStreamWithDeltas(
   res: Response,
   conversationId: string,
   turnId: string,
   blocks: Array<Record<string, unknown>>,
   streamMetadata?: Record<string, unknown>,
+  opts?: {
+    /** When true, text block skips synthetic chunking (caller already emitted token deltas). */
+    skipTextDeltas?: boolean;
+    /** Reuse an emitter that already sent turn.started / block.started for index 0. */
+    emit?: StreamEmitter;
+    skipTurnStarted?: boolean;
+    /** Block index that already received block.started (and optional deltas). */
+    primedTextBlockIndex?: number;
+  },
 ) {
-  const emit = makeEmitter(res);
-  emit({ event: "turn.started", conversationId, turnId });
+  const emit = opts?.emit ?? makeEmitter(res);
+  if (!opts?.skipTurnStarted) {
+    emit({ event: "turn.started", conversationId, turnId });
+  }
 
   blocks.forEach((block, blockIndex) => {
     const rawType = String(block.type || "text");
@@ -54,15 +71,21 @@ export function emitValidatedStreamWithDeltas(
     ]);
     const blockType = allowedBt.has(rawType) ? rawType : "text";
 
-    emit({
-      event: "block.started",
-      conversationId,
-      turnId,
-      blockIndex,
-      blockType,
-    });
+    if (opts?.primedTextBlockIndex !== blockIndex) {
+      emit({
+        event: "block.started",
+        conversationId,
+        turnId,
+        blockIndex,
+        blockType,
+      });
+    }
 
-    if (blockType === "text" && typeof block.markdown === "string") {
+    if (
+      blockType === "text" &&
+      typeof block.markdown === "string" &&
+      !(opts?.skipTextDeltas && blockIndex === 0)
+    ) {
       for (const delta of chunkText(block.markdown)) {
         emit({
           event: "block.delta",

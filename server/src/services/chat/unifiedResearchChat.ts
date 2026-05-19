@@ -19,6 +19,7 @@ import {
 import type { UnifiedBlock } from "./unifiedChatMappers.js";
 import { assertSqlAllowedByPolicy } from "./sqlAndMetricsRouter.js";
 import type { PolicyDecision } from "./unifiedChatPolicy.js";
+import { RESEARCH_SHELL_EXPAND_METADATA } from "./researchShellMetadata.js";
 
 /**
  * Explicit policy gate before kicking off (or resuming) the Research Lab
@@ -100,6 +101,7 @@ export async function runUnifiedResearchTurn(args: {
         researchSessionId: session.id,
         phase: session.phase,
         policyDecisionId: args.policy.decisionId,
+        ...RESEARCH_SHELL_EXPAND_METADATA,
       },
     };
   }
@@ -122,6 +124,7 @@ export async function runUnifiedResearchTurn(args: {
       phase,
       mode,
       policyDecisionId: args.policy.decisionId,
+      ...RESEARCH_SHELL_EXPAND_METADATA,
     },
   };
 }

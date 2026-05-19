@@ -105,6 +105,8 @@ export async function getOpenAIKey(tenantId?: string): Promise<string> {
 import {
   executeSafeTenantSql,
 } from "../metrics/safeSqlExecutor.js";
+import { runSqlThroughRouter } from "../chat/sqlAndMetricsRouter.js";
+import type { PolicyDecision } from "../chat/unifiedChatPolicy.js";
 import type { LoanAccessFilter } from "../userLoanAccessService.js";
 import { mergeLoanAccessWithParameterizedSql } from "../metrics/accessEnforcer.js";
 
@@ -123,6 +125,14 @@ export interface SafeExecuteSqlOptions {
  * Run a validated read-only query. When the SQL template contains `$1`…`$n`,
  * pass the same number of bound parameters (Postgres `node-pg` style).
  */
+const RESEARCH_SQL_POLICY: PolicyDecision = {
+  allowed: true,
+  decisionId: "research_sql_router",
+  chatType: "research",
+  retrieval: "allow",
+  sqlExecution: "scoped",
+};
+
 export async function safeExecuteSQL(
   sql: string,
   tenantPool: pg.Pool,
@@ -130,28 +140,43 @@ export async function safeExecuteSQL(
   opts?: SafeExecuteSqlOptions
 ): Promise<QueryResult> {
   const tenantKey = opts?.tenantId?.trim() || "_research_legacy_";
-  let execSql = sql;
-  let execParams = params;
-  if (opts?.accessFilter?.sql) {
-    const merged = mergeLoanAccessWithParameterizedSql(sql, params, opts.accessFilter);
-    execSql = merged.sql;
-    execParams = merged.params;
-  }
+  return runSqlThroughRouter(
+    {
+      source: "research_lab",
+      chatType: "research",
+      tenantId: tenantKey,
+      userId: "research_agent",
+    },
+    RESEARCH_SQL_POLICY,
+    async () => {
+      let execSql = sql;
+      let execParams = params;
+      if (opts?.accessFilter?.sql) {
+        const merged = mergeLoanAccessWithParameterizedSql(
+          sql,
+          params,
+          opts.accessFilter,
+        );
+        execSql = merged.sql;
+        execParams = merged.params;
+      }
 
-  const r = await executeSafeTenantSql(
-    execSql,
-    tenantPool,
-    tenantKey,
-    execParams,
-    { statementTimeoutMs: 30_000 }
+      const r = await executeSafeTenantSql(
+        execSql,
+        tenantPool,
+        tenantKey,
+        execParams,
+        { statementTimeoutMs: 30_000 },
+      );
+      const rows = r.rows.slice(0, 1000);
+      return {
+        rows,
+        rowCount: r.rowCount,
+        fields: r.fields,
+        executionTimeMs: r.executionTimeMs,
+      };
+    },
   );
-  const rows = r.rows.slice(0, 1000);
-  return {
-    rows,
-    rowCount: r.rowCount,
-    fields: r.fields,
-    executionTimeMs: r.executionTimeMs,
-  };
 }
 
 export { maxPgPlaceholderIndex } from "../metrics/safeSqlExecutor.js";

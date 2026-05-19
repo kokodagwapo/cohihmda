@@ -5,6 +5,12 @@
 
 import { createHash } from "crypto";
 import type { UnifiedConversationChatType } from "./unifiedConversationService.js";
+import {
+  GLOBAL_COHI_CHAT_PROMPT_CORE,
+  WORKBENCH_COHI_PROMPT_CORE,
+  INSIGHT_BUILDER_PROMPT_CORE,
+  researchLabPromptCore,
+} from "./sharedPromptModules.js";
 
 export interface PromptComposeContext {
   chatType: UnifiedConversationChatType;
@@ -31,34 +37,26 @@ type PromptModuleDef = {
 /** Global Cohi chat — condensed from cohiChatService system behavior. */
 const MODULE_GLOBAL_CHAT: PromptModuleDef = {
   id: "global.cohi_chat",
-  version: "1",
-  build: () =>
-    "You are Cohi, an AI assistant for mortgage lending analytics. Answer clearly using tenant-scoped data policies. Prefer actionable insights.",
+  version: "2",
+  build: () => GLOBAL_COHI_CHAT_PROMPT_CORE,
 };
 
 const MODULE_WORKBENCH: PromptModuleDef = {
   id: "workbench.canvas",
-  version: "1",
-  build: () =>
-    "You are Cohi in workbench mode. Help users create and modify dashboard widgets using validated actions only.",
+  version: "2",
+  build: () => WORKBENCH_COHI_PROMPT_CORE,
 };
 
 const MODULE_INSIGHT_BUILDER: PromptModuleDef = {
   id: "insight_builder.author",
-  version: "1",
-  build: () =>
-    `You are Cohi in Insight builder mode. Help the user author a My Insights custom prompt.
-Ask follow-up questions when schedule, scope, filters, or prompt wording are missing or ambiguous.
-When you have enough information, summarize a draft with: title, schedule (batch|on_demand), prompt_text, and specifiers (JSON object).
-Do not claim the prompt was saved until the user approves a preview card.
-If the user denies a draft, ask what to change.`,
+  version: "2",
+  build: () => INSIGHT_BUILDER_PROMPT_CORE,
 };
 
 const MODULE_RESEARCH: PromptModuleDef = {
   id: "research.lab",
-  version: "1",
-  build: (ctx) =>
-    `You are Cohi in Research mode.${ctx.deepAnalysis ? " Deep analysis is enabled." : ""} Investigations use the Research Lab pipeline (timeline, findings, report).`,
+  version: "2",
+  build: (ctx) => researchLabPromptCore(ctx.deepAnalysis),
 };
 
 // Research pipeline stage modules (COHI-390 / COHI-402 — audit attribution only).

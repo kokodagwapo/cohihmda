@@ -17,7 +17,19 @@ export type UnifiedChatBlock =
   | { type: "citations"; items: { title?: string; snippet?: string }[] }
   | { type: "visualization"; artifactId?: string; config: unknown }
   | { type: "actions"; items: unknown[]; teachingNotes?: string }
-  | { type: "artifacts"; items: unknown[] }
+  | {
+      type: "artifacts";
+      items: Array<{
+        kind: "ppt_export" | "canvas_build" | "file" | "chart_ref" | string;
+        ref: string;
+        meta?: {
+          insightBuilderPreview?: boolean;
+          draft?: Record<string, unknown>;
+          actions?: string[];
+          [key: string]: unknown;
+        };
+      }>;
+    }
   | { type: "navigation_hints"; items: { label: string; path: string }[] }
   | { type: "safety"; reason: string; category?: string };
 
@@ -31,6 +43,13 @@ export interface UnifiedChatV1Response {
     sources?: { dataQuery?: boolean; knowledgeBase?: string[] };
     [key: string]: unknown;
   };
+}
+
+/** Allowlisted workbench handoff for visualization artifactId (Wave 5 §8). */
+export function workbenchArtifactHandoffPath(artifactId: string): string {
+  const id = artifactId.trim();
+  if (!id) return "/workbench";
+  return `/workbench?artifactId=${encodeURIComponent(id)}`;
 }
 
 export function isUnifiedChatClientEnabled(): boolean {
@@ -63,6 +82,8 @@ function withTenant(basePath: string, tid: string | null): string {
   return `${basePath}${sep}tenant_id=${encodeURIComponent(tid)}`;
 }
 
+export { createUnifiedChatClient, WORKBENCH_HUB_SCOPE_IDS } from "@/lib/unifiedChatClient";
+
 export async function resolveDefaultTenantId(
   explicit?: string | null,
 ): Promise<string | null> {
@@ -87,13 +108,75 @@ export async function resolveDefaultTenantId(
   }
 }
 
+/** Custom event for COHI-404 shell auto full-page (meeting spec §4.6). */
+export const RESEARCH_SHELL_EXPAND_EVENT = "cohi-research-shell-expand";
+
+export function dispatchResearchShellExpandIfNeeded(
+  metadata?: Record<string, unknown>,
+): void {
+  if (
+    typeof window === "undefined" ||
+    !metadata?.researchShellExpand
+  ) {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent(RESEARCH_SHELL_EXPAND_EVENT, { detail: metadata }),
+  );
+}
+
+export interface InsightBuilderDraftPreview {
+  title: string;
+  prompt_text: string;
+  schedule: "batch" | "on_demand";
+  specifiers: Record<string, unknown>;
+}
+
 export interface ParsedGlobalUnifiedFields {
   message: string;
   visualization?: unknown;
+  /** COHI-394 stable viz handoff id from visualization blocks */
+  visualizationArtifactId?: string;
   sqlQuery?: string;
   sources?: { dataQuery?: boolean; knowledgeBase?: string[] };
   suggestedQuestions?: string[];
   navigationHints?: { label: string; path: string }[];
+  insightBuilderDraft?: InsightBuilderDraftPreview;
+}
+
+/** Extract insight builder preview draft from assistant blocks (COHI-406). */
+export function parseInsightBuilderDraftFromBlocks(
+  blocks: UnifiedChatBlock[],
+): InsightBuilderDraftPreview | undefined {
+  for (const b of blocks) {
+    if (b.type !== "artifacts" || !Array.isArray(b.items)) continue;
+    for (const item of b.items) {
+      const meta = item?.meta as
+        | { insightBuilderPreview?: boolean; draft?: InsightBuilderDraftPreview }
+        | undefined;
+      if (meta?.insightBuilderPreview && meta.draft?.title && meta.draft?.prompt_text) {
+        return {
+          title: meta.draft.title,
+          prompt_text: meta.draft.prompt_text,
+          schedule: meta.draft.schedule === "on_demand" ? "on_demand" : "batch",
+          specifiers: meta.draft.specifiers ?? {},
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Build fields from stored assistant `blocks` or a stream result. */
+export function parseGlobalFromBlocks(
+  blocks: UnifiedChatBlock[],
+  metadata?: Record<string, unknown>,
+): ParsedGlobalUnifiedFields {
+  return parseGlobalUnifiedEnvelope({
+    conversationId: "",
+    turn: { id: "", blocks },
+    metadata,
+  });
 }
 
 export function parseGlobalUnifiedEnvelope(
@@ -102,6 +185,7 @@ export function parseGlobalUnifiedEnvelope(
   const blocks = env.turn.blocks;
   let message = "";
   let visualization: unknown;
+  let visualizationArtifactId: string | undefined;
   const kbFromCitations: string[] = [];
   let navigationHints: { label: string; path: string }[] | undefined;
 
@@ -110,6 +194,7 @@ export function parseGlobalUnifiedEnvelope(
       message = message ? `${message}\n\n${b.markdown}` : b.markdown;
     } else if (b.type === "visualization") {
       visualization = b.config;
+      if (b.artifactId) visualizationArtifactId = b.artifactId;
     } else if (b.type === "citations" && Array.isArray(b.items)) {
       for (const it of b.items) {
         if (it?.title) kbFromCitations.push(it.title);
@@ -135,10 +220,12 @@ export function parseGlobalUnifiedEnvelope(
   return {
     message: message.trim() || "(no response)",
     visualization,
+    visualizationArtifactId,
     sqlQuery: meta.sqlQuery as string | undefined,
     sources: mergedSources,
     suggestedQuestions: meta.suggestedQuestions as string[] | undefined,
     navigationHints,
+    insightBuilderDraft: parseInsightBuilderDraftFromBlocks(blocks),
   };
 }
 
@@ -195,13 +282,17 @@ export async function postUnifiedChatV1(
 export async function postUnifiedWorkbenchHubQuery(
   prompt: string,
   tenantId?: string | null,
+  hubScopeId?: string,
 ): Promise<string> {
   const env = await postUnifiedChatV1(
     {
       message: prompt.trim(),
       clientMessageId: crypto.randomUUID(),
       location: { surface: "workbench_hub" },
-      scope: { type: "workbench_hub" },
+      scope: {
+        type: "workbench_hub",
+        ...(hubScopeId ? { id: hubScopeId } : {}),
+      },
       history: [],
     },
     tenantId,

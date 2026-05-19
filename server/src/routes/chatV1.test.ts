@@ -18,6 +18,8 @@ const {
   listCanonicalMock,
   deleteMock,
   permsMock,
+  assertAllowedMock,
+  researchStreamMock,
 } = vi.hoisted(() => ({
   reserveMock: vi.fn(),
   processMock: vi.fn(),
@@ -25,6 +27,8 @@ const {
   listCanonicalMock: vi.fn(),
   deleteMock: vi.fn(),
   permsMock: vi.fn(),
+  assertAllowedMock: vi.fn(),
+  researchStreamMock: vi.fn(),
 }));
 
 vi.mock("../middleware/auth.js", () => ({
@@ -71,11 +75,11 @@ vi.mock("../services/chat/historyRepository.js", () => ({
 
 vi.mock("../services/chat/policyEngine.js", () => ({
   buildUnifiedChatPermissions: permsMock,
-  assertUnifiedChatAllowed: vi.fn(),
+  assertUnifiedChatAllowed: assertAllowedMock,
 }));
 
 vi.mock("../services/chat/unifiedResearchStream.js", () => ({
-  runUnifiedResearchStream: vi.fn(),
+  runUnifiedResearchStream: researchStreamMock,
 }));
 
 function buildApp(): Promise<express.Express> {
@@ -95,8 +99,23 @@ beforeEach(() => {
   listCanonicalMock.mockReset();
   deleteMock.mockReset();
   permsMock.mockReset();
+  assertAllowedMock.mockReset();
+  researchStreamMock.mockReset();
   appendMock.mockResolvedValue(undefined);
-  permsMock.mockResolvedValue({ cohiChat: true, chatTypes: ["chat"] });
+  permsMock.mockResolvedValue({
+    cohiChat: true,
+    chatTypes: ["chat", "research", "workbench"],
+  });
+  assertAllowedMock.mockResolvedValue({
+    ok: true,
+    decision: {
+      allowed: true,
+      decisionId: "pol_test",
+      chatType: "research",
+      retrieval: "allow",
+      sqlExecution: "allow",
+    },
+  });
 });
 
 describe("chatV1 — guard / validation / idempotency", () => {
@@ -154,6 +173,73 @@ describe("chatV1 — guard / validation / idempotency", () => {
     expect(res.status).toBe(200);
     expect(res.body.conversationId).toBe("550e8400-e29b-41d4-a716-446655440000");
     expect(res.body.turn.blocks[0].markdown).toBe("ack");
+    expect(appendMock).toHaveBeenCalled();
+  });
+});
+
+describe("chatV1 — POST /messages:stream research (COHI-402 AC4)", () => {
+  it("returns SSE with block.delta and researchShellExpand metadata", async () => {
+    process.env.UNIFIED_CHAT_ENABLED = "true";
+    reserveMock.mockResolvedValue("reserved");
+    const conversationId = "550e8400-e29b-41d4-a716-446655440000";
+    const turnId = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+
+    researchStreamMock.mockImplementation(
+      async (args: {
+        res: { write: (s: string) => void; end: () => void; status: (n: number) => unknown; setHeader: () => void };
+        conversationId: string;
+        turnId: string;
+      }) => {
+        args.res.status(200);
+        args.res.setHeader("Content-Type", "text/event-stream");
+        const emit = (payload: Record<string, unknown>) => {
+          args.res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        };
+        emit({
+          event: "turn.started",
+          conversationId: args.conversationId,
+          turnId: args.turnId,
+          metadata: { researchShellExpand: true, chatType: "research" },
+        });
+        emit({
+          event: "block.delta",
+          conversationId: args.conversationId,
+          turnId: args.turnId,
+          blockIndex: 0,
+          blockType: "text",
+          delta: "Planning",
+        });
+        emit({
+          event: "turn.completed",
+          conversationId: args.conversationId,
+          turnId: args.turnId,
+          metadata: { researchShellExpand: true, chatType: "research" },
+        });
+        return {
+          finalBlocks: [{ type: "text", markdown: "Planning" }],
+          metadata: { researchShellExpand: true, researchSessionId: "rs-1" },
+          legacyRef: "rs-1",
+        };
+      },
+    );
+
+    const app = await buildApp();
+    const res = await request(app)
+      .post("/api/chat/v1/messages:stream")
+      .send({
+        message: "Analyze branch 2001",
+        chat_type: "research",
+        clientMessageId: "6ba7b810-9dad-11d1-80b4-00c04fd430c9",
+        location: { surface: "data_chat_page" },
+        scope: { type: "global_session" },
+        options: { stream: true },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    expect(res.text).toContain("block.delta");
+    expect(res.text).toContain("researchShellExpand");
+    expect(researchStreamMock).toHaveBeenCalled();
     expect(appendMock).toHaveBeenCalled();
   });
 });

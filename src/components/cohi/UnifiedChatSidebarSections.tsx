@@ -1,0 +1,643 @@
+/**
+ * Sidebar History / Folders / Full History (COHI-405) — v1 client only.
+ */
+
+import { useEffect, useState, type CSSProperties } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  ChevronRight,
+  Clock,
+  Folder,
+  History,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useUnifiedChatHistory } from "@/hooks/useUnifiedChatHistory";
+import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
+import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
+import {
+  groupConversationsByFolder,
+  groupFoldersByParent,
+} from "@/lib/unifiedChatFolderUtils";
+import {
+  ConversationMoveMenu,
+  FolderMoveMenu,
+} from "@/components/cohi/UnifiedChatMoveMenus";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { SidebarExpandableSection } from "@/components/cohi/sidebarNavPrimitives";
+
+const SIDEBAR_HISTORY_LIMIT = 5;
+/** Fetch enough recents to populate folder nesting in the sidebar. */
+const SIDEBAR_FETCH_LIMIT = 50;
+
+export interface UnifiedChatSidebarSectionsProps {
+  tenantId?: string;
+  isDarkMode?: boolean;
+  isExpanded?: boolean;
+  className?: string;
+}
+
+type FolderRow = ReturnType<typeof useUnifiedChatHistory>["folders"][number];
+type ConversationRow =
+  ReturnType<typeof useUnifiedChatHistory>["conversations"][number];
+
+type FolderDialogMode =
+  | { kind: "create"; parentId?: string | null }
+  | { kind: "rename"; folderId: string; initialName: string };
+
+function ConversationRow({
+  conversation,
+  folders,
+  resumeConversation,
+  moveConversationToFolder,
+  onItemActivate,
+  style,
+}: {
+  conversation: ConversationRow;
+  folders: FolderRow[];
+  resumeConversation: (id: string, chatType: string) => void;
+  moveConversationToFolder: (
+    conversationId: string,
+    folderId: string | null,
+  ) => Promise<void>;
+  onItemActivate?: () => void;
+  style?: CSSProperties;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 group" style={style}>
+      <button
+        type="button"
+        className="flex-1 min-w-0 text-left text-sm truncate rounded-md px-2 py-2 min-h-[36px] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+        onClick={() => {
+          resumeConversation(conversation.id, conversation.chat_type);
+          onItemActivate?.();
+        }}
+      >
+        {conversation.title}
+      </button>
+      <ConversationMoveMenu
+        conversationId={conversation.id}
+        currentFolderId={conversation.folder_id}
+        folders={folders}
+        onMove={moveConversationToFolder}
+        triggerClassName="h-7 w-7 opacity-0 group-hover:opacity-100 shrink-0"
+      />
+    </div>
+  );
+}
+
+function FolderTreeNode({
+  folder,
+  depth,
+  foldersByParent,
+  conversationsByFolder,
+  expandedFolderIds,
+  toggleFolderExpanded,
+  deleteFolder,
+  onOpenFolderDialog,
+  moveFolder,
+  folders,
+  resumeConversation,
+  moveConversationToFolder,
+  onItemActivate,
+}: {
+  folder: FolderRow;
+  depth: number;
+  foldersByParent: Map<string | null, FolderRow[]>;
+  conversationsByFolder: Map<string, ConversationRow[]>;
+  expandedFolderIds: Set<string>;
+  toggleFolderExpanded: (folderId: string) => void;
+  deleteFolder: (id: string) => Promise<void>;
+  onOpenFolderDialog: (mode: FolderDialogMode) => void;
+  moveFolder: (folderId: string, parentId: string | null) => Promise<void>;
+  folders: FolderRow[];
+  resumeConversation: (id: string, chatType: string) => void;
+  moveConversationToFolder: (
+    conversationId: string,
+    folderId: string | null,
+  ) => Promise<void>;
+  onItemActivate?: () => void;
+}) {
+  const childFolders = foldersByParent.get(folder.id) ?? [];
+  const conversationsInFolder = conversationsByFolder.get(folder.id) ?? [];
+  const isExpanded = expandedFolderIds.has(folder.id);
+  const hasNestedContent =
+    childFolders.length > 0 || conversationsInFolder.length > 0;
+
+  return (
+    <div>
+      <div className="flex items-center gap-0.5 group">
+        <button
+          type="button"
+          className={cn(
+            "flex-1 min-w-0 text-left text-sm truncate rounded-md px-2 py-2 min-h-[36px] flex items-center gap-1",
+            isExpanded
+              ? "bg-slate-100 dark:bg-slate-800/40 text-slate-900 dark:text-slate-100"
+              : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60",
+          )}
+          style={{ paddingLeft: `${8 + depth * 12}px` }}
+          onClick={() => toggleFolderExpanded(folder.id)}
+        >
+          {hasNestedContent ? (
+            <ChevronRight
+              className={cn(
+                "h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform",
+                isExpanded && "rotate-90",
+              )}
+            />
+          ) : (
+            <span className="w-3.5 shrink-0" aria-hidden />
+          )}
+          <Folder className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span className="truncate">{folder.name}</span>
+        </button>
+        <FolderMoveMenu
+          folder={folder}
+          folders={folders}
+          onMove={moveFolder}
+          triggerClassName="h-7 w-7 opacity-0 group-hover:opacity-100 shrink-0"
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 shrink-0"
+              aria-label={`Folder actions for ${folder.name}`}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem
+              onClick={() =>
+                onOpenFolderDialog({
+                  kind: "create",
+                  parentId: folder.id,
+                })
+              }
+            >
+              <Plus className="h-3.5 w-3.5 mr-2" />
+              New subfolder
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                onOpenFolderDialog({
+                  kind: "rename",
+                  folderId: folder.id,
+                  initialName: folder.name,
+                })
+              }
+            >
+              <Pencil className="h-3.5 w-3.5 mr-2" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-red-600 focus:text-red-600"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Delete folder "${folder.name}"? Chats move to the parent or unsorted.`,
+                  )
+                ) {
+                  void deleteFolder(folder.id);
+                }
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-2" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {isExpanded && (
+        <div>
+          {childFolders.map((child) => (
+            <FolderTreeNode
+              key={child.id}
+              folder={child}
+              depth={depth + 1}
+              foldersByParent={foldersByParent}
+              conversationsByFolder={conversationsByFolder}
+              expandedFolderIds={expandedFolderIds}
+              toggleFolderExpanded={toggleFolderExpanded}
+              deleteFolder={deleteFolder}
+              onOpenFolderDialog={onOpenFolderDialog}
+              moveFolder={moveFolder}
+              folders={folders}
+              resumeConversation={resumeConversation}
+              moveConversationToFolder={moveConversationToFolder}
+              onItemActivate={onItemActivate}
+            />
+          ))}
+          {conversationsInFolder.map((conversation) => (
+            <ConversationRow
+              key={conversation.id}
+              conversation={conversation}
+              folders={folders}
+              resumeConversation={resumeConversation}
+              moveConversationToFolder={moveConversationToFolder}
+              onItemActivate={onItemActivate}
+              style={{ paddingLeft: `${20 + depth * 12}px` }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FolderNameDialog({
+  mode,
+  open,
+  onOpenChange,
+  onSubmit,
+}: {
+  mode: FolderDialogMode | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open || !mode) return;
+    setName(mode.kind === "rename" ? mode.initialName : "");
+  }, [open, mode]);
+
+  const handleSubmit = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    try {
+      await onSubmit(trimmed);
+      onOpenChange(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {mode?.kind === "rename"
+              ? "Rename folder"
+              : mode?.parentId
+                ? "New subfolder"
+                : "New folder"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <Label htmlFor="folder-name">Folder name</Label>
+          <Input
+            id="folder-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Q2 research"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={saving || !name.trim()}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {mode?.kind === "rename" ? "Save" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FolderListBody({
+  folders,
+  conversations,
+  expandedFolderIds,
+  toggleFolderExpanded,
+  deleteFolder,
+  onOpenFolderDialog,
+  moveFolder,
+  resumeConversation,
+  moveConversationToFolder,
+  onItemActivate,
+}: {
+  folders: FolderRow[];
+  conversations: ConversationRow[];
+  expandedFolderIds: Set<string>;
+  toggleFolderExpanded: (folderId: string) => void;
+  deleteFolder: (id: string) => Promise<void>;
+  onOpenFolderDialog: (mode: FolderDialogMode) => void;
+  moveFolder: (folderId: string, parentId: string | null) => Promise<void>;
+  resumeConversation: (id: string, chatType: string) => void;
+  moveConversationToFolder: (
+    conversationId: string,
+    folderId: string | null,
+  ) => Promise<void>;
+  onItemActivate?: () => void;
+}) {
+  const foldersByParent = groupFoldersByParent(folders);
+  const conversationsByFolder = groupConversationsByFolder(conversations);
+  const rootFolders = foldersByParent.get(null) ?? [];
+
+  return (
+    <div className="space-y-0.5 px-1 pb-1">
+      {rootFolders.map((folder) => (
+        <FolderTreeNode
+          key={folder.id}
+          folder={folder}
+          depth={0}
+          foldersByParent={foldersByParent}
+          conversationsByFolder={conversationsByFolder}
+          expandedFolderIds={expandedFolderIds}
+          toggleFolderExpanded={toggleFolderExpanded}
+          deleteFolder={deleteFolder}
+          onOpenFolderDialog={onOpenFolderDialog}
+          moveFolder={moveFolder}
+          folders={folders}
+          resumeConversation={resumeConversation}
+          moveConversationToFolder={moveConversationToFolder}
+          onItemActivate={onItemActivate}
+        />
+      ))}
+      {folders.length === 0 && (
+        <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">
+          No folders yet.
+        </p>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-8 w-full justify-start gap-1.5 text-xs mt-1"
+        onClick={() => onOpenFolderDialog({ kind: "create" })}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        New folder
+      </Button>
+    </div>
+  );
+}
+
+function HistoryListBody({
+  conversations,
+  folders,
+  resumeConversation,
+  moveConversationToFolder,
+  onItemActivate,
+}: {
+  conversations: ConversationRow[];
+  folders: FolderRow[];
+  resumeConversation: (id: string, chatType: string) => void;
+  moveConversationToFolder: (
+    conversationId: string,
+    folderId: string | null,
+  ) => Promise<void>;
+  onItemActivate?: () => void;
+}) {
+  if (conversations.length === 0) {
+    return (
+      <p className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">
+        No recent chats yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5 px-1 pb-1">
+      {conversations.map((conversation) => (
+        <ConversationRow
+          key={conversation.id}
+          conversation={conversation}
+          folders={folders}
+          resumeConversation={resumeConversation}
+          moveConversationToFolder={moveConversationToFolder}
+          onItemActivate={onItemActivate}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function UnifiedChatSidebarSections({
+  tenantId,
+  isDarkMode = false,
+  isExpanded = true,
+  className,
+}: UnifiedChatSidebarSectionsProps) {
+  const navigate = useNavigate();
+  const {
+    enabled,
+    conversations,
+    folders,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    moveFolder,
+    moveConversationToFolder,
+  } = useUnifiedChatHistory(tenantId, { recentLimit: SIDEBAR_FETCH_LIMIT });
+  const { toast } = useToast();
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [foldersExpanded, setFoldersExpanded] = useState(true);
+  const [historyExpanded, setHistoryExpanded] = useState(true);
+  const [folderDialogMode, setFolderDialogMode] =
+    useState<FolderDialogMode | null>(null);
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+
+  const toggleFolderExpanded = (folderId: string) => {
+    setExpandedFolderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  };
+
+  const openFolderDialog = (mode: FolderDialogMode) => {
+    setFolderDialogMode(mode);
+    setFolderDialogOpen(true);
+  };
+
+  const handleFolderDialogSubmit = async (name: string) => {
+    try {
+      if (folderDialogMode?.kind === "rename") {
+        await renameFolder(folderDialogMode.folderId, name);
+        toast({ title: "Folder renamed" });
+      } else {
+        const folder = await createFolder(name, folderDialogMode?.parentId);
+        if (folder?.id) {
+          setExpandedFolderIds((prev) => new Set(prev).add(folder.id));
+        }
+        toast({ title: "Folder created" });
+      }
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title:
+          folderDialogMode?.kind === "rename"
+            ? "Could not rename folder"
+            : "Could not create folder",
+        description:
+          err instanceof Error ? err.message : "Something went wrong.",
+      });
+      throw err;
+    }
+  };
+
+  if (!enabled || !isUnifiedChatClientEnabled()) return null;
+
+  const recentConversations = [...conversations]
+    .sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    )
+    .slice(0, SIDEBAR_HISTORY_LIMIT);
+
+  const resumeConversation = (id: string, chatType: string) => {
+    navigate(
+      `/insights?resume=${encodeURIComponent(id)}&mode=${encodeURIComponent(chatType)}`,
+      { state: cohiChatResumeNavigationState() },
+    );
+  };
+
+  const handleMoveConversationToFolder = async (
+    conversationId: string,
+    folderId: string | null,
+  ) => {
+    await moveConversationToFolder(conversationId, folderId);
+    if (folderId) {
+      setExpandedFolderIds((prev) => new Set(prev).add(folderId));
+    }
+  };
+
+  const handleMoveFolder = async (folderId: string, parentId: string | null) => {
+    await moveFolder(folderId, parentId);
+    if (parentId) {
+      setExpandedFolderIds((prev) => new Set(prev).add(parentId));
+    }
+    toast({ title: "Folder moved" });
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    await deleteFolder(folderId);
+    setExpandedFolderIds((prev) => {
+      const next = new Set(prev);
+      next.delete(folderId);
+      return next;
+    });
+  };
+
+  const folderListProps = {
+    folders,
+    conversations,
+    expandedFolderIds,
+    toggleFolderExpanded,
+    deleteFolder: handleDeleteFolder,
+    onOpenFolderDialog: openFolderDialog,
+    moveFolder: handleMoveFolder,
+    resumeConversation,
+    moveConversationToFolder: handleMoveConversationToFolder,
+  };
+
+  const historyListProps = {
+    conversations: recentConversations,
+    folders,
+    resumeConversation,
+    moveConversationToFolder: handleMoveConversationToFolder,
+  };
+
+  return (
+    <div className={cn(isExpanded ? "" : "space-y-0", className)}>
+      <FolderNameDialog
+        mode={folderDialogMode}
+        open={folderDialogOpen}
+        onOpenChange={setFolderDialogOpen}
+        onSubmit={handleFolderDialogSubmit}
+      />
+      <SidebarExpandableSection
+        isDarkMode={isDarkMode}
+        isExpanded={isExpanded}
+        sectionExpanded={foldersExpanded}
+        onToggleSection={() => setFoldersExpanded((v) => !v)}
+        icon={Folder}
+        label="Folders"
+        flyoutWidth="w-56"
+        flyoutChildren={
+          <FolderListBody {...folderListProps} />
+        }
+      >
+        <FolderListBody {...folderListProps} />
+      </SidebarExpandableSection>
+
+      <SidebarExpandableSection
+        isDarkMode={isDarkMode}
+        isExpanded={isExpanded}
+        sectionExpanded={historyExpanded}
+        onToggleSection={() => setHistoryExpanded((v) => !v)}
+        onCollapsedClick={() => navigate("/chat/history")}
+        icon={Clock}
+        label="History"
+        flyoutWidth="w-64"
+        flyoutChildren={
+          <HistoryListBody {...historyListProps} />
+        }
+      >
+        <HistoryListBody {...historyListProps} />
+      </SidebarExpandableSection>
+
+      {isExpanded && (
+        <div className="px-1 pt-1 pb-2">
+          <Button
+            variant="outline"
+            className="w-full justify-center gap-2 h-9 text-sm font-medium"
+            asChild
+          >
+            <Link to="/chat/history">
+              <History className="h-4 w-4" />
+              Full History
+            </Link>
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}

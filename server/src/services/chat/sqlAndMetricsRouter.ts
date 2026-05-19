@@ -93,5 +93,4 @@ export async function runSqlThroughRouter<T>(
 export const SQL_ROUTER_KNOWN_BYPASS_PATHS = [
   "metricsAiService (standalone metrics UI — not unified v1)",
   "onboardingAnalysisAgent (onboarding only)",
-  "research.dataAnalystAgent per-question SQL (legacy coverage; pipeline-boundary policy gate enforced — see unifiedResearchChat.assertResearchPolicyOrThrow)",
 ] as const;

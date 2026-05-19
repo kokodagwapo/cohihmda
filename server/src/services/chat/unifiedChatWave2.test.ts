@@ -39,6 +39,7 @@ describe("COHI-388/389/390/392 wave-2 units", () => {
       message: "nope",
       decisionId: "x",
       chatType: "chat",
+      retrieval: "deny",
       sqlExecution: "deny",
     });
     expect(r.ok).toBe(false);
@@ -50,6 +51,7 @@ describe("COHI-388/389/390/392 wave-2 units", () => {
       allowed: true,
       decisionId: "x",
       chatType: "chat",
+      retrieval: "allow",
       sqlExecution: "allow",
     });
     expect(r.ok).toBe(true);

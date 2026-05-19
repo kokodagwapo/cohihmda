@@ -10,9 +10,9 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { api } from '@/lib/api';
 import {
   isUnifiedChatClientEnabled,
-  postUnifiedChatV1,
-  parseWorkbenchUnifiedEnvelope,
 } from '@/lib/unifiedChatEnvelope';
+import { createUnifiedChatClient } from '@/lib/unifiedChatClient';
+import { sendUnifiedWorkbenchStream } from '@/lib/unifiedChatSend';
 import type {
   WorkbenchChatMessage,
   WidgetAction,
@@ -154,11 +154,66 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
           setConversationId(null);
           return;
         }
-        if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
-          return;
-        }
         const tid = await resolveEffectiveTenantId(tenantId);
         if (!tid || cancelled) return;
+
+        if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
+          const scopeType = canvasId ? 'canvas' : 'draft';
+          const client = createUnifiedChatClient(tid);
+          const rows = await client.listConversations({
+            scope_type: scopeType,
+            scope_key: conversationScopeId,
+            chat_type: 'workbench',
+            limit: 1,
+          });
+          if (cancelled) return;
+          const row = rows[0];
+          if (row) {
+            const detail = await client.getConversation(row.id);
+            if (cancelled) return;
+            setConversationId(detail.id);
+            const raw = (detail.messages ?? []) as Array<{
+              role?: string;
+              content?: string;
+              blocks?: Array<{ type?: string; markdown?: string; items?: unknown[]; teachingNotes?: string }>;
+              at?: string;
+            }>;
+            const loadedMessages: WorkbenchChatMessage[] = [];
+            for (const m of raw) {
+              if (m.role === 'user' && m.content) {
+                loadedMessages.push({
+                  id: `wb-loaded-u-${loadedMessages.length}`,
+                  role: 'user',
+                  content: m.content,
+                  timestamp: new Date(m.at ?? Date.now()),
+                });
+              } else if (m.role === 'assistant' && Array.isArray(m.blocks)) {
+                let content = '';
+                let actions: WidgetAction[] | undefined;
+                let teachingNotes: string | undefined;
+                for (const b of m.blocks) {
+                  if (b.type === 'text' && b.markdown) content = b.markdown;
+                  if (b.type === 'actions' && b.items) {
+                    actions = b.items as WidgetAction[];
+                    teachingNotes = b.teachingNotes;
+                  }
+                }
+                loadedMessages.push({
+                  id: `wb-loaded-a-${loadedMessages.length}`,
+                  role: 'assistant',
+                  content: content || 'I processed your request.',
+                  actions,
+                  teachingNotes,
+                  timestamp: new Date(m.at ?? Date.now()),
+                });
+              }
+            }
+            if (loadedMessages.length > 0) {
+              setMessages(loadedMessages);
+            }
+          }
+          return;
+        }
 
         const base = `/api/cohi-chat/workbench/conversations?canvasId=${encodeURIComponent(conversationScopeId)}&limit=1`;
         const response = await api.request<{
@@ -342,28 +397,26 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         let response: WorkbenchCohiResponse;
 
         if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
-          const env = await postUnifiedChatV1(
-            {
-              message: content.trim(),
-              conversationId: conversationId ?? undefined,
-              clientMessageId: crypto.randomUUID(),
-              location: {
-                surface: 'workbench_canvas',
-                route:
-                  typeof window !== 'undefined'
-                    ? window.location.pathname
-                    : undefined,
-              },
-              scope: canvasId
-                ? { type: 'canvas', id: conversationScopeId ?? undefined }
-                : { type: 'draft', id: conversationScopeId ?? undefined },
-              context: { canvasState, widgetCatalog },
-              history,
+          const client = createUnifiedChatClient(effectiveTid);
+          const streamResult = await sendUnifiedWorkbenchStream({
+            client,
+            message: content.trim(),
+            conversationId,
+            scope: canvasId
+              ? { type: 'canvas', id: conversationScopeId ?? undefined }
+              : { type: 'draft', id: conversationScopeId ?? undefined },
+            context: { canvasState, widgetCatalog },
+            history,
+            onStreamText: (text) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === loadingId ? { ...m, content: text, isLoading: true } : m,
+                ),
+              );
             },
-            effectiveTid,
-          );
-          setConversationId(env.conversationId);
-          response = parseWorkbenchUnifiedEnvelope(env);
+          });
+          setConversationId(streamResult.conversationId);
+          response = streamResult.parsed;
         } else {
           response = await api.request<WorkbenchCohiResponse>(
             withTenant('/api/cohi-chat/workbench', effectiveTid),

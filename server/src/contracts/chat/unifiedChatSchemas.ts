@@ -279,7 +279,11 @@ export const unifiedChatResponseSchema: Record<string, unknown> = {
                     enum: ["ppt_export", "canvas_build", "file", "chart_ref"],
                   },
                   ref: { type: "string" },
-                  meta: { type: "object" },
+                  meta: {
+                    type: "object",
+                    description:
+                      "Opaque per-artifact metadata (e.g. insightBuilderPreview from insightBuilderTurn).",
+                  },
                 },
               },
             },

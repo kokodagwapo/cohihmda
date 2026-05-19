@@ -36,6 +36,7 @@ import { validateUnifiedStreamEvent } from "./unifiedChatSchemas.js";
 import { researchArtifactBlock } from "./unifiedResearchChat.js";
 import { assertSqlAllowedByPolicy } from "./sqlAndMetricsRouter.js";
 import type { PolicyDecision } from "./unifiedChatPolicy.js";
+import { RESEARCH_SHELL_EXPAND_METADATA } from "./researchShellMetadata.js";
 
 export interface UnifiedResearchStreamArgs {
   req: AuthRequest;
@@ -100,6 +101,11 @@ export async function runUnifiedResearchStream(
     event: "turn.started",
     conversationId: args.conversationId,
     turnId: args.turnId,
+    metadata: {
+      chatType: "research",
+      researchSessionId: sessionId,
+      ...RESEARCH_SHELL_EXPAND_METADATA,
+    },
   });
   emit({
     event: "block.started",
@@ -229,6 +235,12 @@ export async function runUnifiedResearchStream(
       chatType: "research",
       researchSessionId: sessionId,
       phase: finalSession.phase,
+      ...RESEARCH_SHELL_EXPAND_METADATA,
+      contextManifest: [
+        { tier: "identity", included: true, truncated: false },
+        { tier: "research_pipeline", included: true, truncated: false },
+        { tier: "retrieval", included: true, truncated: false },
+      ],
     },
   });
 
@@ -240,6 +252,7 @@ export async function runUnifiedResearchStream(
       phase: finalSession.phase,
       mode,
       policyDecisionId: args.policy.decisionId,
+      ...RESEARCH_SHELL_EXPAND_METADATA,
     },
     legacyRef: sessionId!,
   };

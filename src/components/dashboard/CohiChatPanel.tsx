@@ -67,6 +67,22 @@ import {
   VisualizationConfig,
 } from "@/hooks/useCohiChat";
 import { ChatHistorySidebar } from "@/components/dashboard/ChatHistorySidebar";
+import {
+  ChatTypeSelect,
+  ResearchDeepAnalysisToggle,
+} from "@/components/cohi/ChatTypeSelector";
+import { UnifiedChatRebindBanner } from "@/components/cohi/UnifiedChatRebindBanner";
+import { useUnifiedChatPermissions } from "@/hooks/useUnifiedChatPermissions";
+import { InsightBuilderPreviewCard } from "@/components/cohi/InsightBuilderPreviewCard";
+import { UnifiedChatResearchWorkspace } from "@/components/cohi/UnifiedChatResearchWorkspace";
+import {
+  isUnifiedChatClientEnabled,
+  workbenchArtifactHandoffPath,
+} from "@/lib/unifiedChatEnvelope";
+import { cohiChatNavigationState, useChatShell } from "@/contexts/ChatShellContext";
+import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
+import { PAGE_INSIGHTS_CARD } from "@/components/cohi/pageContentStyles";
+import { CHAT_SHELL_VIEW_TRANSITION } from "@/hooks/useChatShellAnimatedHeight";
 import { DynamicVisualization } from "@/components/visualizations/DynamicVisualization";
 import {
   EnhancedVisualization,
@@ -107,6 +123,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
+import { ChatShellExpandControls } from "@/components/cohi/ChatShellExpandControls";
 import { CohiChatDockChip } from "@/components/cohi/CohiChatDockChip";
 
 const CHAT_EXPORT_FORMAT_KEY = "cohi-chat-preferred-export-format";
@@ -125,6 +142,10 @@ interface CohiChatPanelProps {
   onOpen?: () => void;
   tenantId?: string;
   className?: string;
+  /** `shell` = horizontal band (COHI-404); `rail` = legacy right slide-over. */
+  layout?: "rail" | "shell";
+  /** Hide in-panel session history when app sidebar owns history (COHI-403/405). */
+  hideInPanelHistory?: boolean;
 }
 
 
@@ -393,6 +414,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   onOpen,
   tenantId,
   className,
+  layout = "rail",
+  hideInPanelHistory = false,
 }) => {
   const { toast } = useToast();
   const { pathname } = useLocation();
@@ -411,7 +434,19 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     Record<string, VisualizationConfig["type"]>
   >({});
   const isMobile = useIsMobile();
+  const { mode: shellExpandMode, setMode: setShellExpandMode } = useChatShell();
+  const isShellCompact = layout === "shell" && shellExpandMode === "compact";
+  const isStackedInsetShell =
+    layout === "shell" &&
+    (shellExpandMode === "compact" || shellExpandMode === "tall");
 
+  const expandShellIfCompact = useCallback(() => {
+    if (layout === "shell" && shellExpandMode === "compact") {
+      setShellExpandMode("tall");
+    }
+  }, [layout, shellExpandMode, setShellExpandMode]);
+
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -426,8 +461,54 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [isMobile, isOpen]);
 
-  // When the panel is docked (not fullscreen / not mobile), reserve matching width on #root so KPIs and main content stay visible.
+  const [chatType, setChatType] = useState<
+    import("@/lib/unifiedChatClient").UnifiedChatType
+  >("chat");
+  const [researchDeepAnalysis, setResearchDeepAnalysis] = useState(false);
+  const unifiedSession = useOptionalCohiChatSession();
+  const allowedChatTypes = useUnifiedChatPermissions(tenantId);
+
+  const legacyChat = useCohiChat({
+    tenantId,
+    enabled: isOpen && !unifiedSession,
+    chatType,
+    researchDeepAnalysis,
+  });
+
+  const {
+    messages,
+    isLoading,
+    sessionId: currentSessionId,
+    legacyRef,
+    suggestedQuestions,
+    sendMessage,
+    addConversationTurn,
+    clearMessages,
+    newSession,
+    chatSessions,
+    isLoadingSessions,
+    isLoadingSession,
+    fetchSessions,
+    loadSession,
+    deleteSession,
+    renameSession,
+  } = unifiedSession ?? legacyChat;
+
+  const activeChatType = unifiedSession?.chatType ?? chatType;
+  const setActiveChatType = unifiedSession?.setChatType ?? setChatType;
+  const activeResearchDeepAnalysis =
+    unifiedSession?.researchDeepAnalysis ?? researchDeepAnalysis;
+  const setActiveResearchDeepAnalysis =
+    unifiedSession?.setResearchDeepAnalysis ?? setResearchDeepAnalysis;
+
   useEffect(() => {
+    if (!isUnifiedChatClientEnabled()) return;
+    if (!allowedChatTypes.includes(activeChatType)) {
+      setActiveChatType(allowedChatTypes[0] ?? "chat");
+    }
+  }, [allowedChatTypes, activeChatType, setActiveChatType]);
+  useEffect(() => {
+    if (layout === "shell") return;
     const docEl = document.documentElement;
     const docked = isOpen && !isFullscreen && !isMobile;
     if (!docked) {
@@ -447,25 +528,24 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       docEl.style.setProperty("--cohi-global-chat-reserve", "0px");
       docEl.removeAttribute("data-cohi-chat-open");
     };
-  }, [isOpen, isFullscreen, isMobile]);
+  }, [isOpen, isFullscreen, isMobile, layout]);
 
-  const {
-    messages,
-    isLoading,
-    sessionId: currentSessionId,
-    suggestedQuestions,
-    sendMessage,
-    addConversationTurn,
-    clearMessages,
-    newSession,
-    chatSessions,
-    isLoadingSessions,
-    isLoadingSession,
-    fetchSessions,
-    loadSession,
-    deleteSession,
-    renameSession,
-  } = useCohiChat({ tenantId, enabled: isOpen });
+  useEffect(() => {
+    const onResume = (e: Event) => {
+      const detail = (e as CustomEvent<{
+        conversationId: string;
+        chatType: import("@/lib/unifiedChatClient").UnifiedChatType;
+      }>).detail;
+      if (!detail?.conversationId) return;
+      if (layout === "shell") {
+        setShellExpandMode("full");
+      }
+      setActiveChatType(detail.chatType ?? "chat");
+      void loadSession(detail.conversationId);
+    };
+    window.addEventListener("cohi-chat-resume", onResume);
+    return () => window.removeEventListener("cohi-chat-resume", onResume);
+  }, [loadSession, setActiveChatType, layout, setShellExpandMode]);
 
   const [showHistory, setShowHistory] = useState(false);
   const [preferredExportFormat, setPreferredExportFormat] =
@@ -475,9 +555,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       return stored === "pdf" ? "pdf" : "ppt";
     });
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages change (scroll the panel only, not the page)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = messagesScrollRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
   // --- "Open in Workbench" handler ---
@@ -589,12 +671,14 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     [tenantId],
   );
 
-  // Focus input when panel opens
+  // Focus input when panel opens without scrolling the host page (e.g. /insights shell)
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    const id = window.setTimeout(() => {
+      inputRef.current?.focus({ preventScroll: layout === "shell" });
+    }, 100);
+    return () => window.clearTimeout(id);
+  }, [isOpen, layout]);
 
   /**
    * Handle voice recording
@@ -794,7 +878,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const handleSend = async () => {
     if ((!input.trim() && !uploadedFile) || isLoading) return;
 
+    const forceNewConversation = isShellCompact;
+    expandShellIfCompact();
+
     if (uploadedFile) {
+      if (forceNewConversation) {
+        await newSession();
+      }
       setIsUploading(true);
       try {
         const formData = new FormData();
@@ -846,7 +936,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         setIsUploading(false);
       }
     } else {
-      sendMessage(input.trim());
+      sendMessage(input.trim(), { forceNewConversation });
       setInput("");
     }
   };
@@ -920,8 +1010,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
    * Handle suggested question click
    */
   const handleSuggestionClick = (question: string) => {
+    expandShellIfCompact();
     setInput(question);
-    sendMessage(question);
+    sendMessage(question, {
+      forceNewConversation: isShellCompact,
+    });
   };
 
   /**
@@ -1791,41 +1884,50 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     pathname.startsWith("/workbench/");
 
   if (!isOpen) {
+    if (layout === "shell") return null;
     if (!onOpen) return null;
-    // Workbench + embedded dashboard wire their own dock chip so only one launcher shows.
     if (hideFloatingDockChip) return null;
-
     return <CohiChatDockChip onClick={onOpen} />;
   }
 
-  return (
-    <>
-      <div
-        className="fixed inset-0 z-[90] bg-slate-900/5 dark:bg-slate-950/30 backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+  const panelBody = (
       <motion.div
         data-testid="cohi-chat-panel"
-        initial={{ x: 500, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: 500, opacity: 0 }}
+        initial={layout === "shell" ? false : { x: 500, opacity: 0 }}
+        animate={layout === "shell" ? undefined : { x: 0, opacity: 1 }}
+        exit={layout === "shell" ? undefined : { x: 500, opacity: 0 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className={cn(
-          "fixed flex flex-col overflow-hidden",
-          "bg-gradient-to-b from-violet-50/95 via-white/95 to-rose-50/80 dark:from-slate-950/98 dark:via-indigo-950/30 dark:to-slate-950/98 backdrop-blur-xl",
-          "border-l border-violet-200/50 dark:border-indigo-900/50",
-          "shadow-[0_-4px_24px_-4px_rgba(139,92,246,0.06),0_0_1px_rgba(0,0,0,0.02)] dark:shadow-[0_-4px_32px_-4px_rgba(99,102,241,0.12),0_0_1px_rgba(255,255,255,0.04)]",
-          isFullscreen || isMobile
-            ? "left-0 right-0 top-0 bottom-0 z-[9999] w-full h-full"
-            : "right-2 top-[70px] h-[calc(100%-70px)] z-[100] rounded-2xl",
-          !isFullscreen &&
+          layout === "shell"
+            ? cn(
+                "relative flex flex-col overflow-hidden w-full",
+                isShellCompact ? "shrink-0" : "flex-1 min-h-0 h-full",
+                isStackedInsetShell && PAGE_INSIGHTS_CARD,
+              )
+            : "fixed flex flex-col overflow-hidden",
+          !isStackedInsetShell &&
+            "bg-gradient-to-b from-violet-50/95 via-white/95 to-rose-50/80 dark:from-slate-950/98 dark:via-indigo-950/30 dark:to-slate-950/98 backdrop-blur-xl",
+          layout !== "shell" &&
+            "border-l border-violet-200/50 dark:border-indigo-900/50 shadow-[0_-4px_24px_-4px_rgba(139,92,246,0.06),0_0_1px_rgba(0,0,0,0.02)] dark:shadow-[0_-4px_32px_-4px_rgba(99,102,241,0.12),0_0_1px_rgba(255,255,255,0.04)]",
+          layout !== "shell" &&
+            (isFullscreen || isMobile
+              ? "left-0 right-0 top-0 bottom-0 z-[9999] w-full h-full"
+              : "right-2 top-[70px] h-[calc(100%-70px)] z-[100] rounded-2xl"),
+          layout !== "shell" &&
+            !isFullscreen &&
             "w-[min(520px,calc(100vw-24px))] sm:w-[496px]",
           className
         )}
       >
         {/* Header – pastel, modern */}
-        <div className="relative z-[20] flex items-center justify-between gap-2 sm:gap-3 px-4 sm:px-5 py-3.5 border-b border-violet-100/80 dark:border-indigo-900/60 bg-gradient-to-r from-violet-50/90 to-indigo-50/80 dark:from-indigo-950/50 dark:to-violet-950/40">
+        <div
+          className={cn(
+            "relative z-[20] flex items-center justify-between gap-2 sm:gap-3 px-4 sm:px-5 py-3.5 shrink-0",
+            isStackedInsetShell
+              ? "border-b border-slate-200/60 dark:border-slate-700/60"
+              : "border-b border-violet-100/80 dark:border-indigo-900/60 bg-gradient-to-r from-violet-50/90 to-indigo-50/80 dark:from-indigo-950/50 dark:to-violet-950/40",
+          )}
+        >
           <div className="flex items-start gap-2 sm:gap-3 min-w-0 flex-1">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/25 ring-1 ring-white/30">
               <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
@@ -1833,7 +1935,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <div className="min-w-0 flex-1 py-0.5">
               <div className="flex items-center gap-2 min-w-0">
                 <h2 className="text-[15px] sm:text-base font-semibold text-slate-800 dark:text-white tracking-tight truncate min-w-0">
-                  Cohi Insights
+                  Cohi Chat
                 </h2>
                 <Badge
                   variant="secondary"
@@ -1848,20 +1950,22 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              data-chat-history-toggle="true"
-              className={cn(
-                "h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors",
-                showHistory && "bg-violet-100/80 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300"
-              )}
-              onClick={() => setShowHistory((prev) => !prev)}
-              title="Chat history"
-              aria-pressed={showHistory}
-            >
-              <Clock className="w-4 h-4" />
-            </Button>
+            {!hideInPanelHistory && (
+              <Button
+                variant="ghost"
+                size="icon"
+                data-chat-history-toggle="true"
+                className={cn(
+                  "h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors",
+                  showHistory && "bg-violet-100/80 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300"
+                )}
+                onClick={() => setShowHistory((prev) => !prev)}
+                title="Chat history"
+                aria-pressed={showHistory}
+              >
+                <Clock className="w-4 h-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -1889,14 +1993,39 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 )}
               </Button>
             )}
+            {layout === "shell" && (
+              <ChatShellExpandControls variant="header" />
+            )}
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
-              onClick={() => setIsFullscreen(!isFullscreen)}
-              title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              className={cn(
+                "h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors",
+                layout === "shell" &&
+                  shellExpandMode === "full" &&
+                  "bg-violet-100/80 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300",
+              )}
+              onClick={() => {
+                if (layout === "shell") {
+                  setShellExpandMode(shellExpandMode === "full" ? "tall" : "full");
+                  return;
+                }
+                setIsFullscreen(!isFullscreen);
+              }}
+              title={
+                layout === "shell"
+                  ? shellExpandMode === "full"
+                    ? "Exit full page"
+                    : "Full page"
+                  : isFullscreen
+                    ? "Exit fullscreen"
+                    : "Fullscreen"
+              }
+              aria-pressed={layout === "shell" ? shellExpandMode === "full" : isFullscreen}
             >
-              {isFullscreen ? (
+              {layout === "shell" && shellExpandMode === "full" ? (
+                <Shrink className="w-4 h-4" />
+              ) : isFullscreen ? (
                 <Shrink className="w-4 h-4" />
               ) : (
                 <Expand className="w-4 h-4" />
@@ -1933,6 +2062,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            {layout !== "shell" && (
             <Button
               variant="ghost"
               size="icon"
@@ -1942,10 +2072,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             >
               <X className="w-4 h-4" />
             </Button>
+            )}
           </div>
         </div>
 
-        {/* Chat History Sidebar */}
+        {!hideInPanelHistory && (
         <ChatHistorySidebar
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
@@ -1959,11 +2090,56 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           onRenameSession={renameSession}
           onNewSession={newSession}
         />
+        )}
+
+        {activeChatType === "research" && isUnifiedChatClientEnabled() && (
+          <AnimatePresence initial={false}>
+            {!isShellCompact && (
+              <motion.div
+                key="research-workspace"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={CHAT_SHELL_VIEW_TRANSITION}
+                className={cn(
+                  "overflow-hidden min-h-0",
+                  shellExpandMode === "full" ? "flex-1 flex flex-col" : "shrink-0",
+                )}
+              >
+                <UnifiedChatResearchWorkspace
+                  key={legacyRef ?? "research-empty"}
+                  researchSessionId={legacyRef}
+                  tenantId={tenantId}
+                  messages={messages}
+                  chatLoading={isLoading}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        )}
 
         {/* Messages – native scrollable div (not Radix ScrollArea) because Radix
             wraps children in <div style="display:table;min-width:100%"> which lets
             intrinsic-width children like Recharts bleed past the panel's right edge. */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 min-w-0">
+        <AnimatePresence initial={false}>
+        {!isShellCompact &&
+          !(activeChatType === "research" && isUnifiedChatClientEnabled()) && (
+        <motion.div
+          key="shell-messages"
+          ref={messagesScrollRef}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0, marginTop: 0, paddingTop: 0, paddingBottom: 0 }}
+          transition={{
+            ...CHAT_SHELL_VIEW_TRANSITION,
+            opacity: { duration: 0.22, ease: CHAT_SHELL_VIEW_TRANSITION.ease },
+            height: { duration: 0.32, ease: CHAT_SHELL_VIEW_TRANSITION.ease },
+          }}
+          className={cn(
+            "flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-5 min-w-0 min-h-0",
+            isStackedInsetShell && "bg-transparent",
+          )}
+        >
           <div className="space-y-5 min-w-0 w-full">
             <AnimatePresence>
               {messages.length === 0 && (
@@ -2056,16 +2232,29 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                     })
                   }
                   preferredExportFormat={preferredExportFormat}
+                  sendMessage={sendMessage}
+                  isLoading={isLoading}
                 />
               </motion.div>
             ))}
 
             <div ref={messagesEndRef} />
           </div>
-        </div>
+        </motion.div>
+        )}
+        </AnimatePresence>
 
         {/* Suggestions */}
-        {messages.length > 0 && suggestedQuestions.length > 0 && !isLoading && (
+        <AnimatePresence initial={false}>
+        {!isShellCompact && messages.length > 0 && suggestedQuestions.length > 0 && !isLoading && (
+          <motion.div
+            key="shell-suggestions"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={CHAT_SHELL_VIEW_TRANSITION}
+            className="overflow-hidden shrink-0"
+          >
           <div className="px-4 py-2.5 border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/40">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
               <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0 font-medium">
@@ -2082,10 +2271,19 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               ))}
             </div>
           </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* Input – soft UI, clear hierarchy */}
-        <div className="p-4 border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/50 dark:bg-slate-900/50">
+        <div
+          className={cn(
+            "p-4 shrink-0",
+            isStackedInsetShell
+              ? "border-t border-slate-200/60 dark:border-slate-700/60"
+              : "border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/50 dark:bg-slate-900/50",
+          )}
+        >
           {uploadedFile && (
             <div className="flex items-center gap-2 mb-3 p-2.5 bg-blue-50/80 dark:bg-blue-900/25 rounded-xl text-sm border border-blue-200/50 dark:border-blue-800/50">
               {getFileIcon(uploadedFile.name)}
@@ -2102,7 +2300,23 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               </Button>
             </div>
           )}
-          <div className="flex gap-2">
+          {isUnifiedChatClientEnabled() && (
+            <>
+              <UnifiedChatRebindBanner
+                tenantId={tenantId}
+                conversationId={currentSessionId}
+                chatType={activeChatType}
+              />
+            </>
+          )}
+          <div className="flex gap-2 items-center">
+            {isUnifiedChatClientEnabled() && (
+              <ChatTypeSelect
+                value={activeChatType}
+                onChange={setActiveChatType}
+                allowedTypes={allowedChatTypes}
+              />
+            )}
             {/* Voice Button */}
             <Button
               variant={isListening ? "destructive" : "outline"}
@@ -2165,8 +2379,27 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               )}
             </Button>
           </div>
+          {isUnifiedChatClientEnabled() && activeChatType === "research" && (
+            <ResearchDeepAnalysisToggle
+              className="mt-2.5"
+              checked={activeResearchDeepAnalysis}
+              onCheckedChange={setActiveResearchDeepAnalysis}
+            />
+          )}
         </div>
       </motion.div>
+  );
+
+  return (
+    <>
+      {layout !== "shell" && (
+        <div
+          className="fixed inset-0 z-[90] bg-slate-900/5 dark:bg-slate-950/30 backdrop-blur-[2px]"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      {panelBody}
 
       {/* Drilldown Sheet – appears in front of chat overlay (z-[110] above chat z-[100]) */}
       <Sheet open={drilldownOpen} onOpenChange={setDrilldownOpen}>
@@ -2462,6 +2695,8 @@ interface EnhancedChatMessageBubbleProps {
   onEmailWithScreenshot?: (viz: VisualizationConfig, messageId: string) => void;
   onEmailWithLink?: (viz: VisualizationConfig) => void;
   preferredExportFormat?: QuickExportFormat;
+  sendMessage?: (text: string) => void | Promise<void>;
+  isLoading?: boolean;
 }
 
 const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
@@ -2482,6 +2717,8 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   onEmailWithScreenshot,
   onEmailWithLink,
   preferredExportFormat = "ppt",
+  sendMessage,
+  isLoading = false,
 }) => {
   const isUser = message.role === "user";
   const styling = !isUser ? getMessageStyling(message.content) : null;
@@ -2574,6 +2811,23 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
               </div>
             )}
 
+            {!isUser && message.insightBuilderDraft && (
+              <InsightBuilderPreviewCard
+                draft={message.insightBuilderDraft}
+                disabled={isLoading}
+                onApprove={(draft) => {
+                  void sendMessage?.(
+                    `Approve insight prompt: ${draft.title}\n${draft.prompt_text}`,
+                  );
+                }}
+                onDeny={() => {
+                  void sendMessage?.(
+                    "I'd like to change this draft. What should be different?",
+                  );
+                }}
+              />
+            )}
+
             {!isUser &&
               message.navigationHints &&
               message.navigationHints.length > 0 && (
@@ -2582,15 +2836,28 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                     Go to
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    {message.navigationHints.map((h) => (
-                      <RouterLink
-                        key={`${h.path}-${h.label}`}
-                        to={h.path}
-                        className="inline-flex items-center rounded-lg border border-blue-200/90 dark:border-blue-800/80 bg-blue-50/90 dark:bg-blue-950/35 px-2.5 py-1.5 text-xs font-medium text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/45 transition-colors"
-                      >
-                        {h.label}
-                      </RouterLink>
-                    ))}
+                    {message.navigationHints.map((h) => {
+                      const isWorkbenchTarget =
+                        h.path.startsWith("/workbench") ||
+                        h.path.startsWith("/my-dashboard");
+                      return (
+                        <RouterLink
+                          key={`${h.path}-${h.label}`}
+                          to={h.path}
+                          state={cohiChatNavigationState()}
+                          className={cn(
+                            "inline-flex items-center rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+                            isWorkbenchTarget
+                              ? "border-violet-200/90 dark:border-violet-800/80 bg-violet-50/90 dark:bg-violet-950/35 text-violet-800 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-900/45"
+                              : "border-blue-200/90 dark:border-blue-800/80 bg-blue-50/90 dark:bg-blue-950/35 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/45",
+                          )}
+                        >
+                          {isWorkbenchTarget && !/workbench/i.test(h.label)
+                            ? `Open in Workbench — ${h.label}`
+                            : h.label}
+                        </RouterLink>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -2710,6 +2977,19 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5 justify-end ml-auto max-w-full">
+                        {message.visualizationArtifactId && (
+                          <RouterLink
+                            to={workbenchArtifactHandoffPath(
+                              message.visualizationArtifactId,
+                            )}
+                            state={cohiChatNavigationState()}
+                            className="inline-flex items-center h-8 rounded-md px-2.5 text-[11px] font-medium gap-1.5 border border-violet-200/90 dark:border-violet-800/80 bg-violet-50/90 dark:bg-violet-950/35 text-violet-800 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-900/45"
+                            data-testid="cohi-chat-open-workbench-artifact"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                            Open in Workbench
+                          </RouterLink>
+                        )}
                         <div className="flex items-center overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
                           <Button
                             variant="ghost"

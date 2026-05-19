@@ -175,15 +175,17 @@ paths:
         Server emits schema-valid `ChatStreamEvent` lines (`data: {...}`) per
         `docs/planning/schemas/cohi-chat-unified/chat-event-stream.schema.json`.
 
-        - For `chat_type` in {`chat`, `insight_builder`, `workbench`}: server
-          completes the full turn first, then streams blocks as `block.started`
-          → `block.delta`* → `block.completed` → `turn.completed` (COHI-388).
-        - For `chat_type=research`: the Research Lab pipeline runs live and its
-          timeline / plan / agent / synthesis events are mapped to `block.delta`
-          updates on a timeline text block, followed by a final `artifacts`
-          block referencing the Research session (Wave 3 Locked decision #1,
-          Option B). Legacy `GET /api/research/sessions/:id/stream` may remain
-          for backward compatibility but is **not** the primary contract.
+        - For `chat_type=chat` (global / data-chat): **true LLM token**
+          `block.delta` events during completion (COHI-388 Option C), then
+          `block.completed` → `turn.completed`.
+        - For `chat_type` in {`insight_builder`, `workbench`}: server completes
+          the turn, then streams blocks with `block.delta` chunking where
+          applicable.
+        - For `chat_type=research`: Research Lab pipeline runs live; timeline
+          events map to `block.delta` on the primary text block, then
+          `artifacts` + `turn.completed`. Legacy
+          `GET /api/research/sessions/:id/stream` is not required on the happy
+          path.
       operationId: postUnifiedChatMessageStream
       security:
         - bearerAuth: []
@@ -320,6 +322,12 @@ components:
             COHI-403 ships folders DDL (see migration 130 comment).
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        phase:
+          type: string
+          nullable: true
+          description: |
+            Research Lab session phase when present (dual-read list from
+            legacy research_sessions). Omitted for non-research rows.
 
     UnifiedConversationDetail:
       allOf:

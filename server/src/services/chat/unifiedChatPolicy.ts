@@ -38,6 +38,8 @@ export interface PolicyDecision {
   message?: string;
   decisionId: string;
   chatType: UnifiedConversationChatType;
+  /** Knowledge retrieval gate (COHI-391). */
+  retrieval: "allow" | "deny";
   /** SQL execution posture for this mode (COHI-392). */
   sqlExecution: "allow" | "deny" | "scoped";
   research?: {
@@ -166,7 +168,7 @@ function normalizeChatType(input?: UnifiedConversationChatType): UnifiedConversa
 function buildModeDecision(
   chatType: UnifiedConversationChatType,
   deepAnalysis?: boolean,
-): Pick<PolicyDecision, "sqlExecution" | "research"> {
+): Pick<PolicyDecision, "sqlExecution" | "research" | "retrieval"> {
   const research = {
     quotasEnforced: chatType === "research",
     deepAnalysisAllowed: chatType === "research",
@@ -177,13 +179,17 @@ function buildModeDecision(
   };
   switch (chatType) {
     case "workbench":
-      return { sqlExecution: "scoped", research: undefined };
+      return { sqlExecution: "scoped", retrieval: "allow", research: undefined };
     case "research":
-      return { sqlExecution: "scoped", research: { ...research, deepAnalysisAllowed: !!deepAnalysis || true } };
+      return {
+        sqlExecution: "scoped",
+        retrieval: "allow",
+        research: { ...research, deepAnalysisAllowed: !!deepAnalysis || true },
+      };
     case "insight_builder":
-      return { sqlExecution: "deny", research: undefined };
+      return { sqlExecution: "deny", retrieval: "deny", research: undefined };
     default:
-      return { sqlExecution: "allow", research: undefined };
+      return { sqlExecution: "allow", retrieval: "allow", research: undefined };
   }
 }
 
@@ -205,6 +211,7 @@ export async function evaluateUnifiedChatPolicy(
         message: "You don't have access to Cohi Chat",
         decisionId,
         chatType,
+        retrieval: "deny",
         sqlExecution: "deny",
       };
     }
@@ -216,6 +223,7 @@ export async function evaluateUnifiedChatPolicy(
         message: "Deep analysis is only available in Research mode",
         decisionId,
         chatType,
+        retrieval: "deny",
         sqlExecution: "deny",
       };
     }
@@ -233,6 +241,7 @@ export async function evaluateUnifiedChatPolicy(
       message: e?.message || "Policy check failed",
       decisionId,
       chatType,
+      retrieval: "deny",
       sqlExecution: "deny",
     };
   }

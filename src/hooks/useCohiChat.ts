@@ -8,9 +8,22 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import {
   isUnifiedChatClientEnabled,
-  postUnifiedChatV1,
-  parseGlobalUnifiedEnvelope,
+  parseGlobalFromBlocks,
+  type UnifiedChatBlock,
 } from "@/lib/unifiedChatEnvelope";
+import {
+  createUnifiedChatClient,
+  type UnifiedChatType,
+} from "@/lib/unifiedChatClient";
+import {
+  sendUnifiedGlobalStream,
+  sendUnifiedWorkbenchStream,
+} from "@/lib/unifiedChatSend";
+
+export interface SendMessageOptions {
+  /** Start a new server conversation (e.g. compact shell send). */
+  forceNewConversation?: boolean;
+}
 
 // ============================================================================
 // Types
@@ -81,6 +94,8 @@ export interface ChatMessage {
   };
   /** In-app links suggested by Cohi (from unified envelope or legacy API) */
   navigationHints?: { label: string; path: string }[];
+  insightBuilderDraft?: import("@/lib/unifiedChatEnvelope").InsightBuilderDraftPreview;
+  visualizationArtifactId?: string;
 }
 
 export interface CohiChatResponse {
@@ -109,6 +124,10 @@ export interface UseCohiChatOptions {
   tenantId?: string;
   enabled?: boolean;
   onError?: (error: Error) => void;
+  /** Unified v1 chat_type (default `chat`; use `research` when mode selector lands in COHI-406). */
+  chatType?: UnifiedChatType;
+  /** Research-only: deep analysis toggle (§4.2). */
+  researchDeepAnalysis?: boolean;
 }
 
 // ============================================================================
@@ -116,11 +135,18 @@ export interface UseCohiChatOptions {
 // ============================================================================
 
 export function useCohiChat(options: UseCohiChatOptions = {}) {
-  const { tenantId, enabled = true, onError } = options;
+  const {
+    tenantId,
+    enabled = true,
+    onError,
+    chatType = "chat",
+    researchDeepAnalysis = false,
+  } = options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [legacyRef, setLegacyRef] = useState<string | null>(null);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([
     "What's important to know today?",
     "Show me loan volume by month",
@@ -200,12 +226,31 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     return `msg-${Date.now()}-${messageIdCounter.current}`;
   }, []);
 
+  const applyUnifiedStreamEvent = useCallback(
+    (ev: import("@/lib/unifiedChatClient").ChatStreamEvent) => {
+      if (ev.conversationId) {
+        setSessionId(ev.conversationId);
+      }
+      if (chatType === "research" && ev.metadata) {
+        const researchSessionId = ev.metadata.researchSessionId;
+        if (typeof researchSessionId === "string" && researchSessionId) {
+          setLegacyRef(researchSessionId);
+        }
+      }
+    },
+    [chatType],
+  );
+
   /**
    * Send a question and get AI response
    */
   const sendMessage = useCallback(
-    async (question: string) => {
+    async (question: string, options?: SendMessageOptions) => {
       if (!question.trim() || isLoading) return;
+
+      const forceNew = options?.forceNewConversation ?? false;
+      const priorMessages = forceNew ? [] : messages;
+      const activeSessionId = forceNew ? null : sessionId;
 
       const userMessageId = generateMessageId();
       const assistantMessageId = generateMessageId();
@@ -227,45 +272,108 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         isLoading: true,
       };
 
-      setMessages((prev) => [...prev, userMessage, loadingMessage]);
+      if (forceNew) {
+        setSuggestedQuestions([]);
+        setLegacyRef(null);
+        setSessionId(null);
+        setMessages([userMessage, loadingMessage]);
+      } else {
+        setMessages((prev) => [...prev, userMessage, loadingMessage]);
+      }
       setIsLoading(true);
 
       try {
         const effectiveTenantId = await getEffectiveTenantId();
 
         if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
-          const env = await postUnifiedChatV1(
-            {
+          const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+          const history = priorMessages.slice(-6).map((m) => ({
+            role: m.role,
+            content: m.content,
+          }));
+
+          if (chatType === "workbench") {
+            const draftScopeId = forceNew
+              ? crypto.randomUUID()
+              : (sessionId ?? crypto.randomUUID());
+            const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
+              client,
               message: question.trim(),
-              conversationId: sessionId ?? undefined,
-              clientMessageId: crypto.randomUUID(),
-              location: { surface: "data_chat_page" },
-              scope: { type: "global_session" },
-              history: messages.slice(-6).map((m) => ({
-                role: m.role,
-                content: m.content,
-              })),
-            },
-            tenantId ?? effectiveTenantId,
-          );
-          setSessionId(env.conversationId);
-          const parsed = parseGlobalUnifiedEnvelope(env);
-          const assistantMessage: ChatMessage = {
-            id: assistantMessageId,
-            role: "assistant",
-            content: parsed.message,
-            visualization: parsed.visualization as VisualizationConfig | undefined,
-            data: undefined,
-            timestamp: new Date(),
-            sqlQuery: parsed.sqlQuery,
-            sources: parsed.sources,
-            navigationHints: parsed.navigationHints,
-          };
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
-          );
-          if (parsed.suggestedQuestions?.length) {
-            setSuggestedQuestions(parsed.suggestedQuestions);
+              conversationId: activeSessionId,
+              scope: { type: "draft", id: draftScopeId },
+              context: {},
+              history,
+              onStreamText: (text) => {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMessageId
+                      ? { ...m, content: text, isLoading: true }
+                      : m,
+                  ),
+                );
+              },
+            });
+            setSessionId(conversationId);
+            const assistantMessage: ChatMessage = {
+              id: assistantMessageId,
+              role: "assistant",
+              content: parsed.error
+                ? `${parsed.message}\n${parsed.error}`
+                : parsed.message,
+              timestamp: new Date(),
+            };
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? assistantMessage : m,
+              ),
+            );
+            if (parsed.suggestedQuestions?.length) {
+              setSuggestedQuestions(parsed.suggestedQuestions);
+            }
+          } else {
+            const { conversationId, parsed } = await sendUnifiedGlobalStream({
+              client,
+              message: question.trim(),
+              chatType,
+              conversationId: activeSessionId,
+              history,
+              deepAnalysis: researchDeepAnalysis,
+              onStreamEvent: applyUnifiedStreamEvent,
+              onStreamText: (text) => {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMessageId
+                      ? { ...m, content: text, isLoading: true }
+                      : m,
+                  ),
+                );
+              },
+            });
+            setSessionId(conversationId);
+            const assistantMessage: ChatMessage = {
+              id: assistantMessageId,
+              role: "assistant",
+              content: parsed.message,
+              visualization: parsed.visualization as VisualizationConfig | undefined,
+              data: undefined,
+              timestamp: new Date(),
+              sqlQuery: parsed.sqlQuery,
+              sources: parsed.sources,
+              navigationHints: parsed.navigationHints,
+              insightBuilderDraft: parsed.insightBuilderDraft,
+              visualizationArtifactId: parsed.visualizationArtifactId,
+            };
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
+            );
+            if (parsed.suggestedQuestions?.length) {
+              setSuggestedQuestions(parsed.suggestedQuestions);
+            }
+            if (chatType === "research") {
+              void client.getConversation(conversationId).then((row) => {
+                if (row.legacy_ref) setLegacyRef(row.legacy_ref);
+              });
+            }
           }
         } else {
           const endpoint = effectiveTenantId
@@ -276,8 +384,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             method: "POST",
             body: JSON.stringify({
               question: question.trim(),
-              sessionId,
-              conversationHistory: messages.slice(-6).map((m) => ({
+              sessionId: activeSessionId,
+              conversationHistory: priorMessages.slice(-6).map((m) => ({
                 id: m.id,
                 role: m.role,
                 content: m.content,
@@ -337,6 +445,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       sessionId,
       tenantId,
       onError,
+      chatType,
+      researchDeepAnalysis,
+      applyUnifiedStreamEvent,
     ]
   );
 
@@ -413,38 +524,82 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
         if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
           const composed = `Refinement: ${refinement}\n\nPrevious question: ${lastUserMessage.content}\nPrevious answer (excerpt): ${lastAssistantMessage.content.slice(0, 4000)}`;
-          const env = await postUnifiedChatV1(
-            {
-              message: composed,
-              conversationId: sessionId ?? undefined,
-              clientMessageId: crypto.randomUUID(),
-              location: { surface: "data_chat_page" },
-              scope: { type: "global_session" },
-              history: messages.slice(-6).map((m) => ({
-                role: m.role,
-                content: m.content,
-              })),
-            },
-            tenantId ?? effectiveTenantId,
-          );
-          setSessionId(env.conversationId);
-          const parsed = parseGlobalUnifiedEnvelope(env);
-          const assistantMessage: ChatMessage = {
-            id: assistantMessageId,
-            role: "assistant",
-            content: parsed.message,
-            visualization: parsed.visualization as VisualizationConfig | undefined,
-            data: undefined,
-            timestamp: new Date(),
-            sqlQuery: parsed.sqlQuery,
-            sources: parsed.sources,
-            navigationHints: parsed.navigationHints,
+          const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+          const history = messages.slice(-6).map((m) => ({
+            role: m.role,
+            content: m.content,
+          }));
+          const onStreamText = (text: string) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId
+                  ? { ...m, content: text, isLoading: true }
+                  : m,
+              ),
+            );
           };
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
-          );
-          if (parsed.suggestedQuestions?.length) {
-            setSuggestedQuestions(parsed.suggestedQuestions);
+
+          if (chatType === "workbench") {
+            const draftScopeId = sessionId ?? crypto.randomUUID();
+            const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
+              client,
+              message: composed,
+              conversationId: sessionId,
+              scope: { type: "draft", id: draftScopeId },
+              context: {},
+              history,
+              onStreamText,
+            });
+            setSessionId(conversationId);
+            const assistantMessage: ChatMessage = {
+              id: assistantMessageId,
+              role: "assistant",
+              content: parsed.error
+                ? `${parsed.message}\n${parsed.error}`
+                : parsed.message,
+              timestamp: new Date(),
+            };
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? assistantMessage : m,
+              ),
+            );
+            if (parsed.suggestedQuestions?.length) {
+              setSuggestedQuestions(parsed.suggestedQuestions);
+            }
+          } else {
+            const { conversationId, parsed } = await sendUnifiedGlobalStream({
+              client,
+              message: composed,
+              chatType,
+              conversationId: sessionId,
+              history,
+              deepAnalysis: researchDeepAnalysis,
+              onStreamEvent: applyUnifiedStreamEvent,
+              onStreamText,
+            });
+            setSessionId(conversationId);
+            const assistantMessage: ChatMessage = {
+              id: assistantMessageId,
+              role: "assistant",
+              content: parsed.message,
+              visualization: parsed.visualization as VisualizationConfig | undefined,
+              data: undefined,
+              timestamp: new Date(),
+              sqlQuery: parsed.sqlQuery,
+              sources: parsed.sources,
+              navigationHints: parsed.navigationHints,
+              insightBuilderDraft: parsed.insightBuilderDraft,
+              visualizationArtifactId: parsed.visualizationArtifactId,
+            };
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? assistantMessage : m,
+              ),
+            );
+            if (parsed.suggestedQuestions?.length) {
+              setSuggestedQuestions(parsed.suggestedQuestions);
+            }
           }
         } else {
           const endpoint = effectiveTenantId
@@ -514,15 +669,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       onError,
       sessionId,
       tenantId,
+      chatType,
+      researchDeepAnalysis,
+      applyUnifiedStreamEvent,
     ]
   );
-
-  /**
-   * Clear chat history
-   */
   const clearMessages = useCallback(() => {
     setMessages([]);
     setSessionId(null);
+    setLegacyRef(null);
     setSuggestedQuestions([
       "What's important to know today?",
       "Show me loan volume by month",
@@ -539,18 +694,31 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    * Fetch the list of saved chat sessions
    */
   const fetchSessions = useCallback(async () => {
-    if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
-      setChatSessions([]);
-      return;
-    }
     setIsLoadingSessions(true);
     try {
       const effectiveTenantId = await getEffectiveTenantId();
+      if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+        const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+        const rows = await client.listConversations({
+          scope_type: "global_session",
+          limit: 50,
+        });
+        setChatSessions(
+          rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            messageCount: 0,
+            lastMessageAt: r.updated_at,
+            createdAt: r.created_at ?? r.updated_at,
+          })),
+        );
+        return;
+      }
       const qs = effectiveTenantId
         ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
         : "";
       const response = await api.request<{ sessions: ChatSession[] }>(
-        `/api/cohi-chat/sessions${qs}`
+        `/api/cohi-chat/sessions${qs}`,
       );
       setChatSessions(response.sessions || []);
     } catch (error) {
@@ -558,19 +726,58 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     } finally {
       setIsLoadingSessions(false);
     }
-  }, [getEffectiveTenantId]);
+  }, [getEffectiveTenantId, tenantId]);
 
   /**
    * Load a specific session's messages into the chat
    */
   const loadSession = useCallback(
     async (targetSessionId: string) => {
-      if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
-        return;
-      }
       setIsLoadingSession(true);
       try {
         const effectiveTenantId = await getEffectiveTenantId();
+        if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+          const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+          const row = await client.getConversation(targetSessionId);
+          const raw = (row.messages ?? []) as Array<{
+            role?: string;
+            content?: string;
+            blocks?: UnifiedChatBlock[];
+            at?: string;
+          }>;
+          const loadedMessages: ChatMessage[] = raw
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m, i) => {
+              if (m.role === "user") {
+                return {
+                  id: `loaded-${i}`,
+                  role: "user" as const,
+                  content: m.content ?? "",
+                  timestamp: new Date(m.at ?? Date.now()),
+                };
+              }
+              const blocks = Array.isArray(m.blocks) ? m.blocks : [];
+              const parsed = parseGlobalFromBlocks(blocks);
+              return {
+                id: `loaded-${i}`,
+                role: "assistant" as const,
+                content: parsed.message,
+                visualization: parsed.visualization as
+                  | VisualizationConfig
+                  | undefined,
+                timestamp: new Date(m.at ?? Date.now()),
+                sqlQuery: parsed.sqlQuery,
+                sources: parsed.sources,
+                navigationHints: parsed.navigationHints,
+                insightBuilderDraft: parsed.insightBuilderDraft,
+                visualizationArtifactId: parsed.visualizationArtifactId,
+              };
+            });
+          setMessages(loadedMessages);
+          setSessionId(targetSessionId);
+          setLegacyRef(row.legacy_ref ?? null);
+          return;
+        }
         const qs = effectiveTenantId
           ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
           : "";
@@ -609,7 +816,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setIsLoadingSession(false);
       }
     },
-    [getEffectiveTenantId]
+    [getEffectiveTenantId, tenantId],
   );
 
   /**
@@ -622,12 +829,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
       try {
         const effectiveTenantId = await getEffectiveTenantId();
-        const qs = effectiveTenantId
-          ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
-          : "";
-        await api.request(`/api/cohi-chat/sessions/${targetSessionId}${qs}`, {
-          method: "DELETE",
-        });
+        if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+          const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+          await client.deleteConversation(targetSessionId);
+        } else {
+          const qs = effectiveTenantId
+            ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+            : "";
+          await api.request(`/api/cohi-chat/sessions/${targetSessionId}${qs}`, {
+            method: "DELETE",
+          });
+        }
 
         if (sessionId === targetSessionId) {
           clearMessages();
@@ -638,7 +850,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setChatSessions(previousSessions);
       }
     },
-    [chatSessions, clearMessages, getEffectiveTenantId, sessionId]
+    [chatSessions, clearMessages, getEffectiveTenantId, sessionId, tenantId],
   );
 
   /**
@@ -674,6 +886,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const newSession = useCallback(async () => {
     clearMessages();
     setSessionId(null);
+    setIsLoading(false);
     if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
       return;
     }
@@ -700,6 +913,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     messages,
     isLoading,
     sessionId,
+    legacyRef,
     suggestedQuestions,
     sendMessage,
     addConversationTurn,

@@ -19,16 +19,26 @@ import { isUnifiedChatApiEnabled } from "../services/chat/unifiedChatConfig.js";
 import { tryReserveClientMessageId } from "../services/chat/unifiedChatIdempotency.js";
 import {
   processUnifiedChatMessage,
+  shouldUseWorkbench,
   type UnifiedChatRequestBody,
 } from "../services/chat/unifiedChatOrchestrator.js";
+import { runUnifiedGlobalStream } from "../services/chat/unifiedChatGlobalStream.js";
 import {
   appendUnifiedChatTurns,
   getUnifiedConversation,
   createUnifiedConversation,
   deleteUnifiedConversation,
+  patchUnifiedConversation,
   rebindUnifiedConversation,
   type UnifiedConversationChatType,
 } from "../services/chat/unifiedConversationService.js";
+import {
+  listUnifiedChatFolders,
+  createUnifiedChatFolder,
+  renameUnifiedChatFolder,
+  moveUnifiedChatFolder,
+  deleteUnifiedChatFolder,
+} from "../services/chat/unifiedChatFolderService.js";
 import { listCanonicalHistory } from "../services/chat/historyRepository.js";
 import {
   assertUnifiedChatAllowed,
@@ -170,6 +180,9 @@ router.get(
       const scopeType = first(q.scope_type) ?? first(q["scope.type"]);
       const scopeKey = first(q.scope_key) ?? first(q["scope.id"]);
       const chatType = first(q.chat_type) as UnifiedConversationChatType | undefined;
+      const search = first(q.q) ?? first(q.search);
+      const folderId = first(q.folder_id);
+      const includeSubfolders = first(q.include_subfolders) !== "false";
       const limitRaw = first(q.limit);
       const offsetRaw = first(q.offset);
       const limitParsed = limitRaw !== undefined ? parseInt(limitRaw, 10) : undefined;
@@ -191,8 +204,11 @@ router.get(
         scopeType: scopeType || undefined,
         scopeKey: scopeKey !== undefined ? scopeKey : undefined,
         chatType: normalizedChatType,
+        search: search || undefined,
         limit,
         offset,
+        folderId: folderId || undefined,
+        includeSubfolders,
       });
       res.json({
         conversations: rows.map((r) => ({
@@ -206,6 +222,9 @@ router.get(
           legacy_ref: r.legacy_ref ?? null,
           legacy_source: r.legacy_source ?? null,
           folder_id: r.folder_id ?? null,
+          ...(r.phase != null && r.phase !== ""
+            ? { phase: r.phase }
+            : {}),
           created_at: r.created_at ?? r.updated_at,
           updated_at: r.updated_at,
         })),
@@ -353,6 +372,223 @@ router.delete(
       res.status(500).json({
         error: "internal_error",
         message: err.message || "Failed to delete conversation",
+      });
+    }
+  },
+);
+
+router.patch(
+  "/conversations/:id",
+  unifiedChatGuard,
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const idParam = req.params.id;
+      const id = Array.isArray(idParam) ? idParam[0] : idParam;
+      if (!id || !isUuid(id)) {
+        return res.status(400).json({ error: "validation_error", message: "Invalid conversation id" });
+      }
+      const body = req.body as { title?: string; folder_id?: string | null };
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (!tenantId || !userId) {
+        return res.status(400).json({
+          error: "bad_request",
+          message: "Tenant and user context required",
+        });
+      }
+      const updated = await patchUnifiedConversation({
+        tenantId,
+        userId,
+        conversationId: id,
+        title: body.title,
+        folderId: body.folder_id,
+      });
+      if (!updated) {
+        return res.status(404).json({ error: "not_found", message: "Conversation not found" });
+      }
+      res.json({
+        id: updated.id,
+        title: updated.title,
+        scope: { type: updated.scope_type, id: updated.scope_key ?? undefined },
+        chat_type: updated.chat_type,
+        legacy_ref: updated.legacy_ref,
+        legacy_source: updated.legacy_source,
+        folder_id: updated.folder_id,
+        messages: updated.messages,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at,
+      });
+    } catch (err: any) {
+      console.error("[chat/v1/conversations PATCH] Error:", err);
+      res.status(500).json({
+        error: "internal_error",
+        message: err.message || "Failed to update conversation",
+      });
+    }
+  },
+);
+
+router.get(
+  "/folders",
+  unifiedChatGuard,
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (!tenantId || !userId) {
+        return res.status(400).json({
+          error: "bad_request",
+          message: "Tenant and user context required",
+        });
+      }
+      const folders = await listUnifiedChatFolders({ tenantId, userId });
+      res.json({ folders });
+    } catch (err: any) {
+      console.error("[chat/v1/folders GET] Error:", err);
+      res.status(500).json({
+        error: "internal_error",
+        message: err.message || "Failed to list folders",
+      });
+    }
+  },
+);
+
+router.post(
+  "/folders",
+  unifiedChatGuard,
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const body = req.body as { name?: string; parent_id?: string | null };
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (!tenantId || !userId) {
+        return res.status(400).json({
+          error: "bad_request",
+          message: "Tenant and user context required",
+        });
+      }
+      const folder = await createUnifiedChatFolder({
+        tenantId,
+        userId,
+        name: body.name ?? "",
+        parentId: body.parent_id ?? null,
+      });
+      res.status(201).json({ folder });
+    } catch (err: any) {
+      const status = Number(err.statusCode) > 0 ? err.statusCode : 500;
+      res.status(status).json({
+        error: status === 400 ? "validation_error" : "internal_error",
+        message: err.message || "Failed to create folder",
+      });
+    }
+  },
+);
+
+router.patch(
+  "/folders/:id",
+  unifiedChatGuard,
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const idParam = req.params.id;
+      const id = Array.isArray(idParam) ? idParam[0] : idParam;
+      if (!id || !isUuid(id)) {
+        return res.status(400).json({ error: "validation_error", message: "Invalid folder id" });
+      }
+      const body = req.body as { name?: string; parent_id?: string | null | undefined };
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (!tenantId || !userId) {
+        return res.status(400).json({
+          error: "bad_request",
+          message: "Tenant and user context required",
+        });
+      }
+      let folder:
+        | Awaited<ReturnType<typeof renameUnifiedChatFolder>>
+        | Awaited<ReturnType<typeof moveUnifiedChatFolder>>
+        | null = null;
+      if (body.parent_id !== undefined) {
+        folder = await moveUnifiedChatFolder({
+          tenantId,
+          userId,
+          folderId: id,
+          parentId: body.parent_id ?? null,
+        });
+        if (!folder) {
+          return res.status(404).json({ error: "not_found", message: "Folder not found" });
+        }
+      }
+      if (body.name !== undefined) {
+        folder = await renameUnifiedChatFolder({
+          tenantId,
+          userId,
+          folderId: id,
+          name: body.name ?? "",
+        });
+        if (!folder) {
+          return res.status(404).json({ error: "not_found", message: "Folder not found" });
+        }
+      }
+      if (!folder) {
+        return res.status(400).json({
+          error: "validation_error",
+          message: "Provide name and/or parent_id to update a folder",
+        });
+      }
+      res.json({ folder });
+    } catch (err: any) {
+      const status = Number(err.statusCode) > 0 ? err.statusCode : 500;
+      res.status(status).json({
+        error: status === 400 ? "validation_error" : "internal_error",
+        message: err.message || "Failed to rename folder",
+      });
+    }
+  },
+);
+
+router.delete(
+  "/folders/:id",
+  unifiedChatGuard,
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const idParam = req.params.id;
+      const id = Array.isArray(idParam) ? idParam[0] : idParam;
+      if (!id || !isUuid(id)) {
+        return res.status(400).json({ error: "validation_error", message: "Invalid folder id" });
+      }
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (!tenantId || !userId) {
+        return res.status(400).json({
+          error: "bad_request",
+          message: "Tenant and user context required",
+        });
+      }
+      const deleted = await deleteUnifiedChatFolder({ tenantId, userId, folderId: id });
+      if (!deleted) {
+        return res.status(404).json({ error: "not_found", message: "Folder not found" });
+      }
+      res.status(204).send();
+    } catch (err: any) {
+      console.error("[chat/v1/folders DELETE] Error:", err);
+      res.status(500).json({
+        error: "internal_error",
+        message: err.message || "Failed to delete folder",
       });
     }
   },
@@ -554,6 +790,55 @@ async function handlePostMessage(
 
     if (options.stream && body.chat_type === "research") {
       await handleResearchStream(req, res, body, tenantId, userId);
+      return;
+    }
+
+    if (options.stream && !shouldUseWorkbench(body)) {
+      const gate = await assertUnifiedChatAllowed(req, {
+        surface: body.location?.surface as any,
+        scopeType: body.scope?.type as any,
+        chatType: body.chat_type === "insight_builder" ? "insight_builder" : "chat",
+        deepAnalysis: body.options?.research?.deepAnalysis,
+      });
+      if (gate.ok === false) {
+        res.status(403).json({ error: gate.code, message: gate.message });
+        return;
+      }
+      const policy = gate.decision;
+      let conversationId = body.conversationId ?? randomUUID();
+      const turnId = randomUUID();
+      const streamResult = await runUnifiedGlobalStream({
+        req,
+        res,
+        conversationId,
+        turnId,
+        message: body.message,
+        history: body.history,
+        policy,
+        includeRag: body.options?.includeRag,
+        streamMetadata: { chatType: policy.chatType },
+      });
+      res.end();
+      if (process.env.UNIFIED_CHAT_PERSIST !== "false") {
+        try {
+          await appendUnifiedChatTurns({
+            tenantId,
+            userId,
+            conversationId,
+            userMessage: body.message,
+            assistantBlocks: streamResult.blocks,
+            assistantTurnId: turnId,
+            scopeType: body.scope?.type,
+            scopeKey:
+              body.scope?.type === "workbench_hub" && body.scope?.id
+                ? body.scope.id
+                : body.scope?.id ?? null,
+            chatType: policy.chatType,
+          });
+        } catch (persistErr: any) {
+          console.warn("[chat/v1 global stream] Persist skipped:", persistErr?.message);
+        }
+      }
       return;
     }
 

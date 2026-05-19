@@ -85,9 +85,13 @@ import {
 } from "@/components/ui/popover";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
+import { cn } from "@/lib/utils";
 import { SeedDataButton } from "@/components/dashboard/SeedDataButton";
 import { useToast } from "@/hooks/use-toast";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { Footer } from "@/components/layout/Footer";
+import { useChatShell } from "@/contexts/ChatShellContext";
+import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { DashboardContainer } from "@/components/dashboard/DashboardContainer";
 import { useDashboardState } from "@/hooks/useDashboardState";
 import { useDashboardFilters } from "@/hooks/useDashboardFilters";
@@ -198,6 +202,9 @@ const Dashboard = () => {
 
   // Use auth from AuthContext - this component is protected by ProtectedRoute
   const isAuthenticated = authContextAuthenticated;
+  const unifiedChatShell = isUnifiedChatClientEnabled();
+  const { isStackedInsetLayout, mode: chatShellMode } = useChatShell();
+  const isSplitChatLayout = unifiedChatShell && chatShellMode === "split";
 
   // User state for greeting - derive from AuthContext user
   const [displayName, setDisplayName] = useState<string | null>(null);
@@ -1319,7 +1326,26 @@ const Dashboard = () => {
           setTrendsModal={setTrendsModal}
         />
 
-        <div className="w-full h-full min-w-0 max-w-full overflow-x-hidden px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12 relative z-10">
+        <div
+          data-dashboard-scroll-root={isSplitChatLayout ? "" : undefined}
+          className={cn(
+            "w-full min-w-0 max-w-full overflow-x-hidden relative z-10",
+            isSplitChatLayout
+              ? "flex flex-col flex-1 min-h-0 overflow-y-auto"
+              : cn(
+                  "h-full pb-4 sm:pb-8 md:pb-12",
+                  unifiedChatShell && isStackedInsetLayout
+                    ? "px-3 sm:px-6 md:px-8 lg:px-12 pt-0 mt-4 sm:mt-6 md:mt-8"
+                    : "px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8",
+                ),
+          )}
+        >
+          <div
+            className={cn(
+              isSplitChatLayout &&
+                "flex-1 px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12",
+            )}
+          >
           {/* Insights Section - Minimalist */}
           {isAuthenticated && (
             <div className="section-insights mb-16 md:mb-20 w-full min-w-0 max-w-full">
@@ -1358,6 +1384,8 @@ const Dashboard = () => {
 
             </div>
           )}
+          </div>
+          {isSplitChatLayout && <Footer variant="splitPane" />}
         </div>
 
         {/* Contact Modal */}

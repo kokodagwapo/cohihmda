@@ -125,7 +125,7 @@ export function normalizeChatType(body: UnifiedChatRequestBody): UnifiedChatType
   return "chat";
 }
 
-function shouldUseWorkbench(body: UnifiedChatRequestBody): boolean {
+export function shouldUseWorkbench(body: UnifiedChatRequestBody): boolean {
   if (normalizeChatType(body) === "workbench") return true;
   const st = body.scope?.type;
   const surf = body.location?.surface;
@@ -237,7 +237,11 @@ async function executeGlobalChatBranch(
       userId: chatContext.userId,
     },
     policy,
-    () => processCohiQuestion(body.message.trim(), chatContext, convHistory),
+    () =>
+      processCohiQuestion(body.message.trim(), chatContext, convHistory, {
+        includeRag:
+          policy.retrieval !== "deny" && body.options?.includeRag !== false,
+      }),
   );
 
   const vizArtifactId = resp.visualization
@@ -258,7 +262,8 @@ async function executeGlobalChatBranch(
       contextManifest: baseContextManifest(body, [
         {
           tier: "retrieval",
-          included: body.options?.includeRag !== false,
+          included:
+            policy.retrieval !== "deny" && body.options?.includeRag !== false,
           truncated: false,
         },
       ]),

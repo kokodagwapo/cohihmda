@@ -62,6 +62,9 @@ import FalloutForecast from "./pages/FalloutForecast";
 import FalloutLoanDetail from "./pages/FalloutLoanDetail";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
+import { ChatShellProvider } from "@/contexts/ChatShellContext";
+import { CohiChatSessionProvider } from "@/contexts/CohiChatSessionContext";
+import ChatFullHistory from "./pages/ChatFullHistory";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 import { TutorialProvider } from "@/contexts/TutorialContext";
 import { WelcomeTourTrigger } from "@/components/tutorial/WelcomeTourTrigger";
@@ -148,6 +151,39 @@ function FullAccessOnly({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Legacy `/research/session?session=` → unified insights resume (COHI-403). */
+function LegacyResearchIndexRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const session = params.get("session");
+  if (session) {
+    return (
+      <Navigate
+        to={`/insights?resume=${encodeURIComponent(session)}&mode=research`}
+        state={{ resumeChat: true }}
+        replace
+      />
+    );
+  }
+  return <ResearchHub />;
+}
+
+function LegacyResearchSessionRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const session = params.get("session");
+  if (session) {
+    return (
+      <Navigate
+        to={`/insights?resume=${encodeURIComponent(session)}&mode=research`}
+        state={{ resumeChat: true }}
+        replace
+      />
+    );
+  }
+  return <Navigate to="/insights?mode=research" replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
@@ -163,6 +199,8 @@ const App = () => (
             <Toaster />
             <Sonner />
             <Router basename={import.meta.env.BASE_URL}>
+              <ChatShellProvider>
+              <CohiChatSessionProvider>
               <FullAccessOnly>
                 <AnalyticsPageViewTracker />
               </FullAccessOnly>
@@ -182,6 +220,7 @@ const App = () => (
               <Route element={<ProtectedRoute><AccessModeGate /></ProtectedRoute>}>
               <Route path="/settings" element={<UserSettings />} />
                 <Route path="/insights" element={<Dashboard />} />
+                <Route path="/chat/history" element={<ChatFullHistory />} />
                 <Route path="/legacy" element={<DashboardLegacy />} />
               <Route path="/loans" element={<Loans />} />
               <Route path="/my-dashboard" element={<Navigate to="/workbench" replace />} />
@@ -193,9 +232,13 @@ const App = () => (
               <Route path="/workbench/favorites" element={<Favorites />} />
               <Route path="/workbench/distributions" element={<Distributions />} />
               
-              {/* Research Lab */}
-              <Route path="/research" element={<ResearchHub />} />
-              <Route path="/research/session" element={<ResearchAnalyst />} />
+              {/* Research Lab — legacy entry points redirect to unified shell (COHI-403) */}
+              <Route path="/research-lab" element={<Navigate to="/insights?mode=research" replace />} />
+              <Route path="/research" element={<LegacyResearchIndexRedirect />} />
+              <Route
+                path="/research/session"
+                element={<LegacyResearchSessionRedirect />}
+              />
               <Route path="/research/data-explorer" element={<DataExplorer />} />
               <Route path="/data-chat" element={
                 <ProtectedRoute>
@@ -271,6 +314,8 @@ const App = () => (
                 <WelcomeTourTrigger />
                 <ActiveTourRunner />
               </FullAccessOnly>
+              </CohiChatSessionProvider>
+              </ChatShellProvider>
           </Router>
         </TooltipProvider>
         </EditProvider>

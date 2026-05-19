@@ -7,6 +7,7 @@
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import type { UnifiedConversationChatType } from "./unifiedConversationService.js";
 import { listUnifiedConversations } from "./unifiedConversationService.js";
+import { listUnifiedChatFolders } from "./unifiedChatFolderService.js";
 
 export interface CanonicalHistoryRow {
   conversation_id: string;
@@ -19,6 +20,8 @@ export interface CanonicalHistoryRow {
   legacy_source?: string | null;
   legacy_ref?: string | null;
   folder_id?: string | null;
+  /** Research Lab session phase when row comes from dual-read legacy list. */
+  phase?: string | null;
 }
 
 export interface HistoryListQuery {
@@ -27,8 +30,11 @@ export interface HistoryListQuery {
   scopeType?: string;
   scopeKey?: string | null;
   chatType?: UnifiedConversationChatType;
+  search?: string;
   limit?: number;
   offset?: number;
+  folderId?: string;
+  includeSubfolders?: boolean;
 }
 
 function isDualReadEnabled(): boolean {
@@ -44,14 +50,45 @@ function isDualReadEnabled(): boolean {
 export async function listCanonicalHistory(
   query: HistoryListQuery,
 ): Promise<CanonicalHistoryRow[]> {
+  let folderIds: string[] | undefined;
+  if (query.folderId) {
+    const folders = await listUnifiedChatFolders({
+      tenantId: query.tenantId,
+      userId: query.userId,
+    });
+    const includeSubfolders = query.includeSubfolders !== false;
+    if (includeSubfolders) {
+      const blocked = new Set<string>([query.folderId]);
+      const byParent = new Map<string, typeof folders>();
+      for (const folder of folders) {
+        if (!folder.parent_id) continue;
+        const siblings = byParent.get(folder.parent_id) ?? [];
+        siblings.push(folder);
+        byParent.set(folder.parent_id, siblings);
+      }
+      const walk = (id: string) => {
+        for (const child of byParent.get(id) ?? []) {
+          blocked.add(child.id);
+          walk(child.id);
+        }
+      };
+      walk(query.folderId);
+      folderIds = [...blocked];
+    } else {
+      folderIds = [query.folderId];
+    }
+  }
+
   const unified = await listUnifiedConversations({
     tenantId: query.tenantId,
     userId: query.userId,
     scopeType: query.scopeType,
     scopeKey: query.scopeKey,
     chatType: query.chatType,
+    search: query.search,
     limit: query.limit,
     offset: query.offset,
+    folderIds,
   });
 
   const rows: CanonicalHistoryRow[] = unified.map((r) => ({
@@ -67,12 +104,14 @@ export async function listCanonicalHistory(
     folder_id: r.folder_id,
   }));
 
-  if (!isDualReadEnabled()) {
-    return rows;
-  }
+  // Dual-read legacy rows have no folder_id and ignore SQL filters; skip when narrowed.
+  const skipDualRead =
+    Boolean(query.folderId) ||
+    Boolean(query.search?.trim()) ||
+    Boolean(query.scopeType) ||
+    (query.chatType != null && query.chatType !== "research");
 
-  // Skip the legacy join when the caller already narrowed to a non-research mode.
-  if (query.chatType && query.chatType !== "research") {
+  if (!isDualReadEnabled() || skipDualRead) {
     return rows;
   }
 
@@ -122,6 +161,7 @@ async function loadLegacyResearchRows(
     legacy_source: "research_lab",
     legacy_ref: row.id,
     folder_id: null,
+    phase: (row.phase as string | null) ?? null,
   }));
 }
 

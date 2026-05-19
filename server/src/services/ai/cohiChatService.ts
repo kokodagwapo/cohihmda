@@ -343,6 +343,87 @@ async function callOpenAI(
   return data.choices?.[0]?.message?.content || "";
 }
 
+/**
+ * Stream completion tokens from OpenAI (COHI-388 Option C).
+ */
+export async function callOpenAIStream(
+  messages: OpenAIChatMessage[],
+  apiKey: string,
+  onDelta: (text: string) => void,
+  options: { temperature?: number; maxTokens?: number } = {},
+): Promise<string> {
+  const model = process.env.COHI_CHAT_MODEL || "gpt-5.4";
+  const maxTokens = options.maxTokens ?? 2000;
+  const prefersCompletionTokens = /^(gpt-5|o3|o4)/i.test(model);
+
+  const baseBody: Record<string, unknown> = {
+    model,
+    messages,
+    temperature: options.temperature ?? 0.3,
+    stream: true,
+    ...(prefersCompletionTokens
+      ? { max_completion_tokens: maxTokens }
+      : { max_tokens: maxTokens }),
+  };
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(baseBody),
+  });
+
+  if (!response.ok) {
+    let errMsg = response.statusText;
+    try {
+      const err = (await response.json()) as { error?: { message?: string } };
+      errMsg = err.error?.message || errMsg;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`OpenAI API error: ${errMsg}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("OpenAI stream body unavailable");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const piece = parsed.choices?.[0]?.delta?.content;
+        if (piece) {
+          full += piece;
+          onDelta(piece);
+        }
+      } catch {
+        /* ignore partial JSON */
+      }
+    }
+  }
+
+  return full;
+}
+
 // ============================================================================
 // RAG Context Retrieval
 // ============================================================================
@@ -1548,10 +1629,12 @@ function mapComposerToGenerated(
 async function gatherAllContext(
   question: string,
   context: ChatContext,
-  conversationHistory: CohiChatMessage[]
+  conversationHistory: CohiChatMessage[],
+  opts?: { includeRag?: boolean },
 ): Promise<GatheredContext> {
   console.log(`[CohiChat] Gathering context for: "${question}"`);
 
+  const includeRag = opts?.includeRag !== false;
   const includeTopTieringContext = isTopTieringQuestion(question);
 
   let composerQuery: GeneratedQuery | null = null;
@@ -1572,9 +1655,18 @@ async function gatherAllContext(
     }
   }
 
+  const emptyRag: RAGContext = {
+    chunks: [],
+    sources: [],
+    formatted: "",
+    totalChunks: 0,
+  };
+
   const [ragContext, legacyQueryConfig, topTieringWeightsContext] =
     await Promise.all([
-      retrieveRAGContextForTenant(context.tenantId, question, 5, 0.3),
+      includeRag
+        ? retrieveRAGContextForTenant(context.tenantId, question, 5, 0.3)
+        : Promise.resolve(emptyRag),
       composerQuery
         ? Promise.resolve(null as GeneratedQuery | null)
         : generateQuery(question, context, conversationHistory),
@@ -1728,7 +1820,8 @@ async function gatherAllContext(
 async function generateUnifiedResponse(
   question: string,
   context: ChatContext,
-  gathered: GatheredContext
+  gathered: GatheredContext,
+  onTextDelta?: (delta: string) => void,
 ): Promise<CohiChatResponse> {
   const apiKey = await getOpenAIKey(context.tenantId);
   const recommendedHints = buildRecommendedNavigationHints(
@@ -1854,10 +1947,15 @@ async function generateUnifiedResponse(
     { role: "user", content: question },
   ];
 
-  const response = await callOpenAI(messages, apiKey, {
-    temperature: promptConfig.temperature,
-    maxTokens: promptConfig.max_tokens,
-  });
+  const response = onTextDelta
+    ? await callOpenAIStream(messages, apiKey, onTextDelta, {
+        temperature: promptConfig.temperature,
+        maxTokens: promptConfig.max_tokens,
+      })
+    : await callOpenAI(messages, apiKey, {
+        temperature: promptConfig.temperature,
+        maxTokens: promptConfig.max_tokens,
+      });
 
   // Build visualization if we have data
   let visualization: VisualizationConfig | undefined;
@@ -1932,7 +2030,8 @@ function generateGreetingResponse(): CohiChatResponse {
 export async function processCohiQuestion(
   question: string,
   context: ChatContext,
-  conversationHistory: CohiChatMessage[] = []
+  conversationHistory: CohiChatMessage[] = [],
+  options?: { includeRag?: boolean },
 ): Promise<CohiChatResponse> {
   try {
     console.log(
@@ -1976,14 +2075,13 @@ export async function processCohiQuestion(
       };
     }
 
-    // Gather all context in parallel (the key innovation!)
     const gathered = await gatherAllContext(
       question,
       context,
-      conversationHistory
+      conversationHistory,
+      { includeRag: options?.includeRag },
     );
 
-    // Generate unified response
     return await generateUnifiedResponse(question, context, gathered);
   } catch (error: any) {
     console.error("[CohiChat] Error processing question:", error);
@@ -2009,6 +2107,66 @@ export async function processCohiQuestion(
       ],
     };
   }
+}
+
+/**
+ * Global chat with live token streaming (COHI-388). Short-circuits match {@link processCohiQuestion}.
+ */
+export async function processCohiQuestionStreaming(
+  question: string,
+  context: ChatContext,
+  conversationHistory: CohiChatMessage[] = [],
+  options?: { includeRag?: boolean; onTextDelta?: (delta: string) => void },
+): Promise<CohiChatResponse> {
+  if (isGreeting(question)) {
+    return generateGreetingResponse();
+  }
+  if (isCohiGuidanceIntent(question) || isHelp(question)) {
+    const g = buildGuidanceResponse();
+    options?.onTextDelta?.(g.message);
+    return {
+      message: g.message,
+      navigationHints: sanitizeNavigationHints(g.hints),
+      suggestedQuestions: g.suggestedQuestions,
+    };
+  }
+
+  const expandedNav = expandEffectiveQuestionForNavigation(
+    question,
+    conversationHistory.map((m) => ({ role: m.role, content: m.content })),
+  ).trim();
+
+  const nav = resolveNavigationAnswer(expandedNav);
+  const navShortcutAllowed =
+    nav !== null &&
+    (isNavigationIntent(expandedNav) ||
+      isNavigationIntent(question.trim()) ||
+      (/^(yes|yeah|yep|please|ok|okay|sure)\b/i.test(question.trim()) &&
+        expandedNav !== question.trim()) ||
+      /\bgive me (a )?(page|link)\b/i.test(question.trim()));
+
+  if (navShortcutAllowed && nav) {
+    options?.onTextDelta?.(nav.message);
+    return {
+      message: nav.message,
+      navigationHints: buildRecommendedNavigationHints(expandedNav, false),
+      suggestedQuestions: nav.suggestedQuestions,
+    };
+  }
+
+  const gathered = await gatherAllContext(
+    question,
+    context,
+    conversationHistory,
+    { includeRag: options?.includeRag },
+  );
+
+  return generateUnifiedResponse(
+    question,
+    context,
+    gathered,
+    options?.onTextDelta,
+  );
 }
 
 // ============================================================================

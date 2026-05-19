@@ -71,4 +71,26 @@ test.describe("Unified Cohi Chat (v1 API)", () => {
       timeout: 15_000,
     });
   });
+
+  test("@COHI-404 unified shell on /insights without floating dock chip", async ({
+    userPage,
+  }) => {
+    await userPage.addInitScript(() => {
+      try {
+        sessionStorage.setItem("cohi_force_unified_chat", "1");
+      } catch {
+        /* ignore */
+      }
+    });
+
+    await mockUnifiedChatApis(userPage);
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      userPage.getByRole("button", { name: /Open Cohi Insights/i }),
+    ).toHaveCount(0);
+  });
 });

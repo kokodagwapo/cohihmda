@@ -150,14 +150,72 @@ export async function appendUnifiedChatTurns(args: {
   );
 }
 
+export async function patchUnifiedConversation(args: {
+  tenantId: string;
+  userId: string;
+  conversationId: string;
+  title?: string;
+  folderId?: string | null;
+}): Promise<UnifiedConversationDetail | null> {
+  const ok = await ensureTable(args.tenantId);
+  if (!ok) return null;
+  const pool = await tenantDbManager.getTenantPool(args.tenantId);
+  const sets: string[] = [];
+  const params: unknown[] = [args.conversationId, args.userId];
+  let i = 3;
+  if (args.title !== undefined) {
+    const title = args.title.trim().slice(0, 200) || "Chat";
+    sets.push(`title = $${i++}`);
+    params.push(title);
+  }
+  if (args.folderId !== undefined) {
+    sets.push(`folder_id = $${i++}`);
+    params.push(args.folderId);
+  }
+  if (sets.length === 0) {
+    return getUnifiedConversation({
+      tenantId: args.tenantId,
+      userId: args.userId,
+      conversationId: args.conversationId,
+    });
+  }
+  sets.push("updated_at = NOW()");
+  const r = await pool.query(
+    `
+    UPDATE public.unified_chat_conversations
+    SET ${sets.join(", ")}
+    WHERE id = $1::uuid AND user_id = $2::uuid
+    RETURNING id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, messages, created_at, updated_at
+    `,
+    params,
+  );
+  if (r.rows.length === 0) return null;
+  const row = r.rows[0];
+  return {
+    id: row.id,
+    title: row.title,
+    scope_type: row.scope_type,
+    scope_key: row.scope_key,
+    chat_type: row.chat_type,
+    legacy_ref: row.legacy_ref,
+    legacy_source: row.legacy_source ?? null,
+    folder_id: row.folder_id ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    messages: Array.isArray(row.messages) ? row.messages : [],
+  };
+}
+
 export async function listUnifiedConversations(args: {
   tenantId: string;
   userId: string;
   scopeType?: string;
   scopeKey?: string | null;
   chatType?: UnifiedConversationChatType;
+  search?: string;
   limit?: number;
   offset?: number;
+  folderIds?: string[];
 }): Promise<UnifiedConversationListRow[]> {
   const ok = await ensureTable(args.tenantId);
   if (!ok) return [];
@@ -188,6 +246,14 @@ export async function listUnifiedConversations(args: {
   if (args.chatType) {
     where.push(`chat_type = $${i++}::text`);
     params.push(args.chatType);
+  }
+  if (args.search?.trim()) {
+    where.push(`title ILIKE $${i++}::text`);
+    params.push(`%${args.search.trim()}%`);
+  }
+  if (args.folderIds && args.folderIds.length > 0) {
+    where.push(`folder_id = ANY($${i++}::uuid[])`);
+    params.push(args.folderIds);
   }
   const limitPh = `$${i++}::int`;
   params.push(limit);
