@@ -35,10 +35,16 @@ import {
   sendUnifiedGlobalStream,
   sendUnifiedWorkbenchStream,
 } from "@/lib/unifiedChatSend";
+import { insightBuilderApproveClientMessageId } from "@/lib/insightBuilderApproveIdempotency";
 
 export interface SendMessageOptions {
   /** Start a new server conversation (e.g. compact shell send). */
   forceNewConversation?: boolean;
+  /** Insight builder: pass edited draft and/or approve action. */
+  insightBuilder?: {
+    action?: "approve" | "revise";
+    draft?: import("@/lib/unifiedChatEnvelope").InsightBuilderDraftPreview;
+  };
 }
 
 // ============================================================================
@@ -111,6 +117,7 @@ export interface ChatMessage {
   /** In-app links suggested by Cohi (from unified envelope or legacy API) */
   navigationHints?: { label: string; path: string }[];
   insightBuilderDraft?: import("@/lib/unifiedChatEnvelope").InsightBuilderDraftPreview;
+  insightBuilderPhase?: import("@/lib/unifiedChatEnvelope").InsightBuilderPhase;
   visualizationArtifactId?: string;
   /** Workbench mode: actions returned for this turn */
   workbenchActions?: WidgetAction[];
@@ -187,6 +194,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const [isLoadingSession, setIsLoadingSession] = useState(false);
 
   const messageIdCounter = useRef(0);
+  const sendInFlightRef = useRef(false);
   const defaultTenantIdRef = useRef<string | null | undefined>(undefined);
 
   const [workbenchSavedCanvasId, setWorkbenchSavedCanvasId] = useState<
@@ -304,8 +312,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    */
   const sendMessage = useCallback(
     async (question: string, options?: SendMessageOptions) => {
-      if (!question.trim() || isLoading) return;
+      if (!question.trim() || isLoading || sendInFlightRef.current) return;
 
+      sendInFlightRef.current = true;
       const forceNew = options?.forceNewConversation ?? false;
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
@@ -411,13 +420,38 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
           } else {
+            const ibOpts = options?.insightBuilder;
+            let ibDraft = ibOpts?.draft;
+            if (chatType === "insight_builder" && !ibDraft) {
+              const lastWithDraft = [...priorMessages]
+                .reverse()
+                .find((m) => m.role === "assistant" && m.insightBuilderDraft);
+              ibDraft = lastWithDraft?.insightBuilderDraft;
+            }
+            const approveClientMessageId =
+              chatType === "insight_builder" &&
+              ibOpts?.action === "approve" &&
+              ibOpts.draft
+                ? await insightBuilderApproveClientMessageId(ibOpts.draft)
+                : undefined;
             const { conversationId, parsed } = await sendUnifiedGlobalStream({
               client,
               message: question.trim(),
               chatType,
               conversationId: activeSessionId,
+              clientMessageId: approveClientMessageId,
               history,
               deepAnalysis: researchDeepAnalysis,
+              context:
+                ibDraft && chatType === "insight_builder"
+                  ? { insightBuilderDraft: ibDraft }
+                  : undefined,
+              insightBuilder:
+                chatType === "insight_builder" && ibOpts?.action
+                  ? { action: ibOpts.action }
+                  : chatType === "insight_builder" && ibDraft
+                    ? { action: "revise" }
+                    : undefined,
               onStreamEvent: applyUnifiedStreamEvent,
               onStreamText: (text) => {
                 setMessages((prev) =>
@@ -441,6 +475,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               sources: parsed.sources,
               navigationHints: parsed.navigationHints,
               insightBuilderDraft: parsed.insightBuilderDraft,
+              insightBuilderPhase: parsed.insightBuilderPhase,
               visualizationArtifactId: parsed.visualizationArtifactId,
             };
             setMessages((prev) =>
@@ -514,6 +549,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           onError(error);
         }
       } finally {
+        sendInFlightRef.current = false;
         setIsLoading(false);
       }
     },
@@ -684,6 +720,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               sources: parsed.sources,
               navigationHints: parsed.navigationHints,
               insightBuilderDraft: parsed.insightBuilderDraft,
+              insightBuilderPhase: parsed.insightBuilderPhase,
               visualizationArtifactId: parsed.visualizationArtifactId,
             };
             setMessages((prev) =>
@@ -861,6 +898,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 sources: parsed.sources,
                 navigationHints: parsed.navigationHints,
                 insightBuilderDraft: parsed.insightBuilderDraft,
+                insightBuilderPhase: parsed.insightBuilderPhase,
                 visualizationArtifactId: parsed.visualizationArtifactId,
               };
             });

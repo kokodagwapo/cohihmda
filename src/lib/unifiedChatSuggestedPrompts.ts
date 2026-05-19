@@ -33,7 +33,9 @@ export const CHAT_TYPE_DEFAULT_SUGGESTIONS: Record<UnifiedChatType, string[]> = 
     "Top loan officers by revenue",
   ],
   research: [...RESEARCH_TOPIC_SUGGESTIONS],
-  insight_builder: [],
+  insight_builder: [
+    "Create an insight prompt that analyzes fallout for loans with FICO below 650, broken down by loan type",
+  ],
   workbench: [
     "Prepare a board-ready overview of this month's performance",
     "Summarize pipeline health and pull-through trends",

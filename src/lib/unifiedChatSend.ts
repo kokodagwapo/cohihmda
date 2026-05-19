@@ -17,13 +17,25 @@ import {
   type UnifiedChatV1Response,
 } from "@/lib/unifiedChatEnvelope";
 
+export interface InsightBuilderSendDraft {
+  title: string;
+  prompt_text: string;
+  schedule: "batch" | "on_demand";
+  prompt_tag?: string;
+  specifiers: Record<string, unknown>;
+}
+
 export interface SendUnifiedGlobalParams {
   client: UnifiedChatClient;
   message: string;
   chatType?: UnifiedChatType;
   conversationId?: string | null;
+  /** When set (e.g. insight-builder approve), duplicate submits reuse server idempotency. */
+  clientMessageId?: string;
   history?: { role: "user" | "assistant"; content: string }[];
   deepAnalysis?: boolean;
+  context?: Record<string, unknown>;
+  insightBuilder?: { action?: "approve" | "revise" };
   onStreamText?: (text: string) => void;
   onStreamEvent?: (ev: ChatStreamEvent) => void;
 }
@@ -60,14 +72,18 @@ export async function sendUnifiedGlobalStream(
       message: params.message,
       chat_type: chatType,
       conversationId: params.conversationId ?? undefined,
-      clientMessageId: crypto.randomUUID(),
+      clientMessageId: params.clientMessageId ?? crypto.randomUUID(),
       location: { surface: "data_chat_page" },
       scope: { type: "global_session" },
       history: params.history ?? [],
+      context: params.context,
       options: {
         stream: true,
         ...(chatType === "research"
           ? { research: { deepAnalysis: params.deepAnalysis ?? false } }
+          : {}),
+        ...(chatType === "insight_builder" && params.insightBuilder
+          ? { insightBuilder: params.insightBuilder }
           : {}),
       },
     },

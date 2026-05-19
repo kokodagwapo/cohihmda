@@ -78,6 +78,7 @@ export interface UnifiedChatRequestBody {
     // Deferred until unified chat merge is complete — restore with promptComposer + OpenAPI + schemas.
     // planningMode?: "auto" | "always" | "never";
     research?: { deepAnalysis?: boolean };
+    insightBuilder?: { action?: "approve" | "revise" };
   };
 }
 
@@ -359,6 +360,7 @@ export async function processUnifiedChatMessage(
       history: body.history ?? [],
       bundle,
       pendingDraft: body.context?.insightBuilderDraft ?? null,
+      options: body.options?.insightBuilder,
     });
     blocks = ib.blocks;
     metadata = {

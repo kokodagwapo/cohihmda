@@ -4,7 +4,7 @@
  * Enhanced with executive-level visualizations, color-coded messages, and voice agentic
  */
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useLocation, useNavigate, Link as RouterLink } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
@@ -525,6 +525,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     unifiedSession?.researchDeepAnalysis ?? researchDeepAnalysis;
   const setActiveResearchDeepAnalysis =
     unifiedSession?.setResearchDeepAnalysis ?? setResearchDeepAnalysis;
+
+  const insightBuilderApprovedThroughIdx = useMemo(() => {
+    if (activeChatType !== "insight_builder") return -1;
+    return messages.findIndex((m) => m.insightBuilderPhase === "approved");
+  }, [messages, activeChatType]);
 
   const navigateWorkbenchOnSubmit = useCallback(
     (forceNewConversation: boolean) => {
@@ -2337,6 +2342,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   preferredExportFormat={preferredExportFormat}
                   sendMessage={sendMessage}
                   isLoading={isLoading}
+                  chatTenantId={tenantId}
+                  insightBuilderReadOnly={
+                    !!message.insightBuilderDraft &&
+                    insightBuilderApprovedThroughIdx >= 0 &&
+                    idx <= insightBuilderApprovedThroughIdx
+                  }
                 />
               </motion.div>
             ))}
@@ -2806,8 +2817,13 @@ interface EnhancedChatMessageBubbleProps {
   onEmailWithScreenshot?: (viz: VisualizationConfig, messageId: string) => void;
   onEmailWithLink?: (viz: VisualizationConfig) => void;
   preferredExportFormat?: QuickExportFormat;
-  sendMessage?: (text: string) => void | Promise<void>;
+  sendMessage?: (
+    text: string,
+    options?: import("@/hooks/useCohiChat").SendMessageOptions,
+  ) => void | Promise<void>;
+  chatTenantId?: string | null;
   isLoading?: boolean;
+  insightBuilderReadOnly?: boolean;
 }
 
 const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
@@ -2830,6 +2846,8 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   preferredExportFormat = "ppt",
   sendMessage,
   isLoading = false,
+  chatTenantId,
+  insightBuilderReadOnly = false,
 }) => {
   const isUser = message.role === "user";
   const styling = !isUser ? getMessageStyling(message.content) : null;
@@ -2934,16 +2952,25 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
 
             {!isUser && message.insightBuilderDraft && (
               <InsightBuilderPreviewCard
-                draft={message.insightBuilderDraft}
-                disabled={isLoading}
-                onApprove={(draft) => {
-                  void sendMessage?.(
-                    `Approve insight prompt: ${draft.title}\n${draft.prompt_text}`,
-                  );
+                draft={{
+                  title: message.insightBuilderDraft.title,
+                  prompt_text: message.insightBuilderDraft.prompt_text,
+                  schedule: message.insightBuilderDraft.schedule,
+                  prompt_tag: message.insightBuilderDraft.prompt_tag ?? "",
+                  specifiers: message.insightBuilderDraft.specifiers ?? {},
                 }}
-                onDeny={() => {
+                tenantId={chatTenantId}
+                disabled={isLoading}
+                readOnly={insightBuilderReadOnly}
+                onApprove={(draft) => {
+                  void sendMessage?.("approve", {
+                    insightBuilder: { action: "approve", draft },
+                  });
+                }}
+                onRequestChanges={(draft) => {
                   void sendMessage?.(
                     "I'd like to change this draft. What should be different?",
+                    { insightBuilder: { action: "revise", draft } },
                   );
                 }}
               />

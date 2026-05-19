@@ -73,6 +73,17 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
         },
         insightContext: { type: "object" },
         sourceInsight: { type: "object" },
+        insightBuilderDraft: {
+          type: "object",
+          description: "Insight builder pending draft (approve/revise).",
+          properties: {
+            title: { type: "string" },
+            prompt_text: { type: "string" },
+            schedule: { type: "string", enum: ["batch", "on_demand"] },
+            prompt_tag: { type: "string" },
+            specifiers: { type: "object" },
+          },
+        },
       },
       additionalProperties: true,
     },
@@ -114,6 +125,14 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
               default: false,
               description: "Deep analysis mode; only meaningful when chat_type is research.",
             },
+          },
+          additionalProperties: false,
+        },
+        insightBuilder: {
+          type: "object",
+          description: "Insight builder actions (approve / revise).",
+          properties: {
+            action: { type: "string", enum: ["approve", "revise"] },
           },
           additionalProperties: false,
         },

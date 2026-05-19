@@ -69,6 +69,7 @@ export interface UnifiedChatMessageRequest {
     includeLiveCanvasData?: boolean;
     maxHistoryTurns?: number;
     research?: { deepAnalysis?: boolean };
+    insightBuilder?: { action?: "approve" | "revise" };
   };
 }
 

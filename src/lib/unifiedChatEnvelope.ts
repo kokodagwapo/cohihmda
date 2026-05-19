@@ -129,8 +129,11 @@ export interface InsightBuilderDraftPreview {
   title: string;
   prompt_text: string;
   schedule: "batch" | "on_demand";
+  prompt_tag?: string;
   specifiers: Record<string, unknown>;
 }
+
+export type InsightBuilderPhase = "gathering" | "preview" | "approved";
 
 export interface ParsedGlobalUnifiedFields {
   message: string;
@@ -142,6 +145,7 @@ export interface ParsedGlobalUnifiedFields {
   suggestedQuestions?: string[];
   navigationHints?: { label: string; path: string }[];
   insightBuilderDraft?: InsightBuilderDraftPreview;
+  insightBuilderPhase?: InsightBuilderPhase;
 }
 
 /** Extract insight builder preview draft from assistant blocks (COHI-406). */
@@ -155,11 +159,19 @@ export function parseInsightBuilderDraftFromBlocks(
         | { insightBuilderPreview?: boolean; draft?: InsightBuilderDraftPreview }
         | undefined;
       if (meta?.insightBuilderPreview && meta.draft?.title && meta.draft?.prompt_text) {
+        const d = meta.draft as InsightBuilderDraftPreview;
+        const tag =
+          typeof d.prompt_tag === "string"
+            ? d.prompt_tag
+            : typeof (d.specifiers as Record<string, unknown>)?._prompt_tag === "string"
+              ? String((d.specifiers as Record<string, unknown>)._prompt_tag)
+              : "";
         return {
-          title: meta.draft.title,
-          prompt_text: meta.draft.prompt_text,
-          schedule: meta.draft.schedule === "on_demand" ? "on_demand" : "batch",
-          specifiers: meta.draft.specifiers ?? {},
+          title: d.title,
+          prompt_text: d.prompt_text,
+          schedule: d.schedule === "on_demand" ? "on_demand" : "batch",
+          prompt_tag: tag,
+          specifiers: d.specifiers ?? {},
         };
       }
     }
@@ -217,6 +229,12 @@ export function parseGlobalUnifiedEnvelope(
         }
       : sources;
 
+  const phase = meta.insightBuilderPhase;
+  const insightBuilderPhase =
+    phase === "gathering" || phase === "preview" || phase === "approved"
+      ? phase
+      : undefined;
+
   return {
     message: message.trim() || "(no response)",
     visualization,
@@ -226,6 +244,7 @@ export function parseGlobalUnifiedEnvelope(
     suggestedQuestions: meta.suggestedQuestions as string[] | undefined,
     navigationHints,
     insightBuilderDraft: parseInsightBuilderDraftFromBlocks(blocks),
+    insightBuilderPhase,
   };
 }
 

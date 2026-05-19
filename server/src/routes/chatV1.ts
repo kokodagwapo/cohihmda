@@ -46,6 +46,7 @@ import {
 } from "../services/chat/policyEngine.js";
 import { emitValidatedStreamWithDeltas } from "../services/chat/unifiedChatStream.js";
 import { runUnifiedResearchStream } from "../services/chat/unifiedResearchStream.js";
+import { runUnifiedInsightBuilderStream } from "../services/chat/unifiedChatInsightBuilderStream.js";
 import { randomUUID } from "crypto";
 import { findUnifiedConversationByLegacyRef } from "../services/chat/unifiedConversationService.js";
 
@@ -664,6 +665,83 @@ router.post(
   },
 );
 
+async function handleInsightBuilderStream(
+  req: AuthRequest,
+  res: Response,
+  body: UnifiedChatRequestBody,
+  tenantId: string,
+  userId: string,
+): Promise<void> {
+  const gate = await assertUnifiedChatAllowed(req, {
+    surface: body.location?.surface as any,
+    scopeType: body.scope?.type as any,
+    chatType: "insight_builder",
+  });
+  if (gate.ok === false) {
+    res.status(403).json({ error: gate.code, message: gate.message });
+    return;
+  }
+  const policy = gate.decision;
+
+  const conversationId = body.conversationId ?? randomUUID();
+  const turnId = randomUUID();
+
+  let streamResult: Awaited<ReturnType<typeof runUnifiedInsightBuilderStream>>;
+  try {
+    streamResult = await runUnifiedInsightBuilderStream({
+      req,
+      res,
+      conversationId,
+      turnId,
+      message: body.message,
+      history: body.history,
+      policy,
+      pendingDraft: body.context?.insightBuilderDraft ?? null,
+      insightBuilderOptions: body.options?.insightBuilder,
+      surface: body.location?.surface,
+      scopeType: body.scope?.type,
+    });
+  } catch (err: any) {
+    if (!res.headersSent) {
+      const status = Number(err.statusCode) > 0 ? err.statusCode : 500;
+      res.status(status).json({
+        error: err.code ?? "internal_error",
+        message: err.message || "Failed to start insight builder stream",
+      });
+    } else {
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+    }
+    return;
+  }
+
+  res.end();
+
+  if (process.env.UNIFIED_CHAT_PERSIST !== "false") {
+    try {
+      await appendUnifiedChatTurns({
+        tenantId,
+        userId,
+        conversationId,
+        userMessage: body.message,
+        assistantBlocks: streamResult.blocks,
+        assistantTurnId: turnId,
+        scopeType: body.scope?.type,
+        scopeKey:
+          body.scope?.type === "workbench_hub" && body.scope?.id
+            ? body.scope.id
+            : body.scope?.id ?? null,
+        chatType: "insight_builder",
+      });
+    } catch (persistErr: any) {
+      console.warn("[chat/v1 insight_builder stream] Persist skipped:", persistErr?.message);
+    }
+  }
+}
+
 async function handleResearchStream(
   req: AuthRequest,
   res: Response,
@@ -790,6 +868,11 @@ async function handlePostMessage(
 
     if (options.stream && body.chat_type === "research") {
       await handleResearchStream(req, res, body, tenantId, userId);
+      return;
+    }
+
+    if (options.stream && body.chat_type === "insight_builder") {
+      await handleInsightBuilderStream(req, res, body, tenantId, userId);
       return;
     }
 
