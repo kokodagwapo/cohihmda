@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
+import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1065,8 +1066,15 @@ export function ProductionSummaryByWeekView({
   };
 
   const content = (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col">
-      {!embeddedInWorkbench && <TopTieringTopBar title="Production Summary by Week" />}
+    <TopTieringPageFrame
+      enableChat={!embeddedInWorkbench}
+      topBar={
+        !embeddedInWorkbench ? (
+          <TopTieringTopBar title="Production Summary by Week" />
+        ) : undefined
+      }
+      className={embeddedInWorkbench ? "flex min-h-[calc(100vh-4rem)] flex-col" : undefined}
+    >
       <main className={embeddedInWorkbench ? "flex-1 overflow-y-auto px-2 py-2" : "flex-1 overflow-y-auto px-2 py-2 sm:px-4 sm:py-3"}>
         <div ref={containerRef} className="mx-auto max-w-[1800px] space-y-4">
           {loadingNotice && (
@@ -1188,7 +1196,7 @@ export function ProductionSummaryByWeekView({
           )}
         </div>
       </main>
-    </div>
+    </TopTieringPageFrame>
   );
 
   if (embeddedInWorkbench) {

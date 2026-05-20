@@ -17,6 +17,41 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+/** Matches top-nav `iconStyleMap` (Navigation.tsx). */
+export type SidebarNavAccent = "emerald" | "amber" | "blue";
+
+export const SIDEBAR_NAV_ACCENT: Record<
+  SidebarNavAccent,
+  {
+    label: string;
+    icon: string;
+    iconTile: string;
+    activeIconTile: string;
+  }
+> = {
+  emerald: {
+    label: "text-emerald-600 dark:text-emerald-400",
+    icon: "text-emerald-500 dark:text-emerald-400",
+    iconTile: "bg-emerald-500/10 dark:bg-emerald-500/20",
+    activeIconTile:
+      "bg-emerald-50 dark:bg-emerald-950/40 ring-1 ring-emerald-400/40",
+  },
+  amber: {
+    label: "text-amber-600 dark:text-amber-400",
+    icon: "text-amber-500 dark:text-amber-400",
+    iconTile: "bg-amber-500/10 dark:bg-amber-500/20",
+    activeIconTile:
+      "bg-amber-50 dark:bg-amber-950/40 ring-1 ring-amber-400/40",
+  },
+  blue: {
+    label: "text-blue-600 dark:text-blue-400",
+    icon: "text-blue-500 dark:text-blue-400",
+    iconTile: "bg-blue-500/10 dark:bg-blue-500/20",
+    activeIconTile:
+      "bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-400/40",
+  },
+};
+
 export const SIDEBAR_SECTION_BUTTON_STYLE: React.CSSProperties = {
   width: "100%",
   padding: "12px 10px",
@@ -62,16 +97,25 @@ export function useSidebarFlyout() {
 
 export function SidebarSectionIcon({
   icon: Icon,
+  accent,
   className,
 }: {
   icon: LucideIcon;
+  accent?: SidebarNavAccent;
   className?: string;
 }) {
+  const accentStyles = accent ? SIDEBAR_NAV_ACCENT[accent] : null;
   return (
-    <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
+    <div
+      className={cn(
+        "flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center",
+        accentStyles?.iconTile ?? "bg-slate-100 dark:bg-slate-800/30",
+      )}
+    >
       <Icon
         className={cn(
-          "w-[18px] h-[18px] text-slate-600 dark:text-slate-400",
+          "w-[18px] h-[18px]",
+          accentStyles?.icon ?? "text-slate-600 dark:text-slate-400",
           className,
         )}
       />
@@ -90,7 +134,8 @@ export function SidebarExpandableSection({
   flyoutChildren,
   flyoutWidth = "w-56",
   onCollapsedClick,
-  collapsedTooltip,
+  accent,
+  active = false,
 }: {
   isDarkMode: boolean;
   isExpanded: boolean;
@@ -103,9 +148,11 @@ export function SidebarExpandableSection({
   flyoutWidth?: string;
   /** When set, collapsed sidebar icon click navigates; hover still opens the flyout. */
   onCollapsedClick?: () => void;
-  collapsedTooltip?: string;
+  accent?: SidebarNavAccent;
+  active?: boolean;
 }) {
   const flyout = useSidebarFlyout();
+  const accentStyles = accent ? SIDEBAR_NAV_ACCENT[accent] : null;
 
   const renderFlyoutChildren = () => {
     const close = () => flyout.setOpen(false);
@@ -127,10 +174,19 @@ export function SidebarExpandableSection({
           type="button"
           onClick={onToggleSection}
           style={SIDEBAR_SECTION_BUTTON_STYLE}
-          {...sidebarSectionRowHover(isDarkMode)}
+          className={cn(
+            "rounded-lg",
+            active && accentStyles?.activeIconTile,
+          )}
+          {...(active ? {} : sidebarSectionRowHover(isDarkMode))}
         >
-          <SidebarSectionIcon icon={Icon} />
-          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex-1 m-0">
+          <SidebarSectionIcon icon={Icon} accent={accent} />
+          <p
+            className={cn(
+              "text-sm font-semibold flex-1 m-0",
+              accentStyles?.label ?? "text-slate-900 dark:text-slate-100",
+            )}
+          >
             {label}
           </p>
           <ChevronDown
@@ -163,21 +219,44 @@ export function SidebarExpandableSection({
   const collapsedIcon = onCollapsedClick ? (
     <button
       type="button"
+      aria-label={label}
       onClick={(e) => {
         e.stopPropagation();
         flyout.setOpen(false);
         onCollapsedClick();
       }}
-      className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
+      className={cn(
+        "w-9 h-9 rounded-lg flex items-center justify-center",
+        active && accentStyles?.activeIconTile
+          ? accentStyles.activeIconTile
+          : accentStyles?.iconTile ?? "bg-slate-50 dark:bg-slate-800/30",
+      )}
     >
-      <Icon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+      <Icon
+        className={cn(
+          "w-4 h-4",
+          accentStyles?.icon ?? "text-slate-500 dark:text-slate-400",
+        )}
+      />
     </button>
   ) : (
     <div
-      className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
-      aria-hidden
+      className={cn(
+        "w-9 h-9 rounded-lg flex items-center justify-center",
+        active && accentStyles?.activeIconTile
+          ? accentStyles.activeIconTile
+          : accentStyles?.iconTile ?? "bg-slate-50 dark:bg-slate-800/30",
+      )}
+      aria-label={label}
+      role="img"
     >
-      <Icon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+      <Icon
+        className={cn(
+          "w-4 h-4",
+          accentStyles?.icon ?? "text-slate-500 dark:text-slate-400",
+        )}
+        aria-hidden
+      />
     </div>
   );
 
@@ -187,12 +266,7 @@ export function SidebarExpandableSection({
       onMouseEnter={flyout.onEnter}
       onMouseLeave={flyout.onLeave}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="inline-flex">{collapsedIcon}</div>
-        </TooltipTrigger>
-        <TooltipContent side="right">{collapsedTooltip ?? label}</TooltipContent>
-      </Tooltip>
+      <div className="inline-flex">{collapsedIcon}</div>
     </div>
   );
 
@@ -207,8 +281,13 @@ export function SidebarExpandableSection({
         onMouseLeave={flyout.onLeave}
       >
         <div className="flex items-center gap-2 px-2 pb-2">
-          <SidebarSectionIcon icon={Icon} />
-          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 m-0">
+          <SidebarSectionIcon icon={Icon} accent={accent} />
+          <p
+            className={cn(
+              "text-sm font-semibold m-0",
+              accentStyles?.label ?? "text-slate-900 dark:text-slate-100",
+            )}
+          >
             {label}
           </p>
         </div>
@@ -225,6 +304,7 @@ export function SidebarNavRow({
   label,
   active,
   onClick,
+  accent = "emerald",
 }: {
   isDarkMode: boolean;
   isExpanded: boolean;
@@ -232,7 +312,10 @@ export function SidebarNavRow({
   label: string;
   active?: boolean;
   onClick: () => void;
+  accent?: SidebarNavAccent;
 }) {
+  const accentStyles = SIDEBAR_NAV_ACCENT[accent];
+
   if (!isExpanded) {
     return (
       <div className="w-full flex justify-center py-2">
@@ -244,19 +327,12 @@ export function SidebarNavRow({
               className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center",
                 active
-                  ? "bg-emerald-50 dark:bg-emerald-950/40 ring-1 ring-emerald-400/40"
-                  : "bg-slate-50 dark:bg-slate-800/30",
+                  ? accentStyles.activeIconTile
+                  : accentStyles.iconTile,
               )}
               aria-current={active ? "page" : undefined}
             >
-              <Icon
-                className={cn(
-                  "w-4 h-4",
-                  active
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-slate-500 dark:text-slate-400",
-                )}
-              />
+              <Icon className={cn("w-4 h-4", accentStyles.icon)} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">{label}</TooltipContent>
@@ -271,23 +347,12 @@ export function SidebarNavRow({
         type="button"
         onClick={onClick}
         style={SIDEBAR_SECTION_BUTTON_STYLE}
-        {...sidebarSectionRowHover(isDarkMode)}
+        className={cn("rounded-lg", active && accentStyles.activeIconTile)}
+        {...(active ? {} : sidebarSectionRowHover(isDarkMode))}
         aria-current={active ? "page" : undefined}
       >
-        <SidebarSectionIcon
-          icon={Icon}
-          className={
-            active ? "text-emerald-600 dark:text-emerald-400" : undefined
-          }
-        />
-        <p
-          className={cn(
-            "text-sm font-semibold flex-1 m-0",
-            active
-              ? "text-emerald-700 dark:text-emerald-300"
-              : "text-slate-900 dark:text-slate-100",
-          )}
-        >
+        <SidebarSectionIcon icon={Icon} accent={accent} />
+        <p className={cn("text-sm font-semibold flex-1 m-0", accentStyles.label)}>
           {label}
         </p>
       </button>

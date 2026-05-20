@@ -53,6 +53,35 @@ const DRAFT_TAB_STORAGE_KEY = "cohi_workbench_draft_tabs";
 const PENDING_ACTIONS_STORAGE_KEY = "cohi_workbench_pending_actions";
 const ACTIVE_DRAFT_SCOPE_KEY = "cohi_workbench_active_draft";
 const NAV_BOUND_KEY = "cohi_workbench_nav_bound";
+/** One-shot: open unified shell in split (side) layout after workbench chat submit. */
+const CHAT_SPLIT_LAYOUT_KEY = "cohi_workbench_chat_split";
+
+export function isMyDashboardCanvasPath(pathname: string): boolean {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+  return (
+    normalized === "/my-dashboard" || normalized.startsWith("/my-dashboard/")
+  );
+}
+
+export function markWorkbenchChatSplitLayout(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(CHAT_SPLIT_LAYOUT_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function consumeWorkbenchChatSplitLayout(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const pending = window.sessionStorage.getItem(CHAT_SPLIT_LAYOUT_KEY) === "1";
+    if (pending) window.sessionStorage.removeItem(CHAT_SPLIT_LAYOUT_KEY);
+    return pending;
+  } catch {
+    return false;
+  }
+}
 
 /** Active draft scope for the current workbench chat thread (survives provider remounts). */
 export function getOrCreateActiveWorkbenchDraftScope(): string {
@@ -108,6 +137,7 @@ export function navigateForWorkbenchChatSubmit(
     resetActiveWorkbenchDraftSession();
   }
   const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+  markWorkbenchChatSplitLayout();
   const firstNav = !isWorkbenchCanvasNavBound();
   if (firstNav) {
     markWorkbenchCanvasNavBound();

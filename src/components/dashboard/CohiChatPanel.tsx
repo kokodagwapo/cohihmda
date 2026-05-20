@@ -98,7 +98,7 @@ import {
   createLayoutItem,
   type CanvasLayoutItem,
 } from "@/components/workbench/canvas/types";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
@@ -493,6 +493,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const [chatType, setChatType] = useState<
     import("@/lib/unifiedChatClient").UnifiedChatType
   >("chat");
+  const [expandedPromptCard, setExpandedPromptCard] =
+    useState<UnifiedChatType | null>(null);
   const [researchDeepAnalysis, setResearchDeepAnalysis] = useState(false);
   const unifiedSession = useOptionalCohiChatSession();
   const allowedChatTypes = useUnifiedChatPermissions(tenantId);
@@ -546,10 +548,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         activeChatType === "workbench" &&
         isUnifiedChatClientEnabled()
       ) {
+        if (!isMobile) {
+          setShellExpandMode("split");
+        }
         navigateForWorkbenchChatSubmit(navigate, { forceNewConversation });
       }
     },
-    [activeChatType, navigate],
+    [activeChatType, navigate, isMobile, setShellExpandMode],
   );
 
   useEffect(() => {
@@ -567,6 +572,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       if (!detail?.message?.trim()) return;
       setActiveChatType("workbench");
       if (isUnifiedChatClientEnabled()) {
+        if (!isMobile) {
+          setShellExpandMode("split");
+        }
         navigateForWorkbenchChatSubmit(navigate, { forceNewConversation: false });
       }
       void sendMessage(detail.message.trim());
@@ -574,7 +582,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     window.addEventListener(COHI_WORKBENCH_EDIT_WIDGET_EVENT, handler);
     return () =>
       window.removeEventListener(COHI_WORKBENCH_EDIT_WIDGET_EVENT, handler);
-  }, [sendMessage, setActiveChatType, navigate]);
+  }, [sendMessage, setActiveChatType, navigate, isMobile, setShellExpandMode]);
 
   useEffect(() => {
     if (layout === "shell") return;
@@ -1135,9 +1143,53 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const promptCardsLayout = resolveChatTypePromptCardsLayout(
     layout,
     shellExpandMode,
+    layout === "rail" && isFullscreen,
   );
   const isTallEmptyPromptCards =
     messages.length === 0 && promptCardsLayout === "row";
+  const showEmptyPromptCards =
+    messages.length === 0 && promptCardsLayout !== "hidden";
+  const showResearchWorkspace =
+    activeChatType === "research" &&
+    isUnifiedChatClientEnabled() &&
+    (messages.length > 0 || !!legacyRef);
+  /** Research transcript lives in {@link UnifiedChatResearchWorkspace}; skip empty flex-1 messages pane. */
+  const showStandardMessagesPane =
+    !isShellCompact &&
+    !(
+      activeChatType === "research" &&
+      isUnifiedChatClientEnabled() &&
+      showResearchWorkspace
+    );
+  /** Full-page shell with no messages: prompt cards + input centered (same as `/` landing). */
+  const isCenteredEmptyLanding =
+    layout === "shell" &&
+    shellExpandMode === "full" &&
+    showEmptyPromptCards;
+  const shellBodyFillsPane =
+    !isShellCompact && (isCenteredEmptyLanding || showStandardMessagesPane);
+
+  const handlePromptCardSelect = useCallback(
+    (chatType: UnifiedChatType) => {
+      setExpandedPromptCard(chatType);
+      setActiveChatType(chatType);
+    },
+    [setActiveChatType],
+  );
+
+  const handleChatTypeChange = useCallback(
+    (next: UnifiedChatType) => {
+      setExpandedPromptCard(next);
+      setActiveChatType(next);
+    },
+    [setActiveChatType],
+  );
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      setExpandedPromptCard(null);
+    }
+  }, [messages.length]);
 
   /**
    * Save a single visualization to workbench as a new canvas
@@ -2012,6 +2064,132 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     return <CohiChatDockChip onClick={onOpen} />;
   }
 
+  const chatInputFooter = (
+    <motion.div
+      layout
+      layoutId="cohi-chat-input"
+      transition={{
+        layout: {
+          duration: 0.38,
+          ease: CHAT_SHELL_VIEW_TRANSITION.ease,
+        },
+      }}
+      className={cn(
+        "p-4 shrink-0 w-full",
+        isCenteredEmptyLanding
+          ? "max-w-2xl mx-auto border-t-0 bg-transparent"
+          : isStackedInsetShell
+            ? "border-t border-slate-200/60 dark:border-slate-700/60"
+            : "border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/50 dark:bg-slate-900/50",
+      )}
+    >
+      {uploadedFile && (
+        <div className="flex items-center gap-2 mb-3 p-2.5 bg-blue-50/80 dark:bg-blue-900/25 rounded-xl text-sm border border-blue-200/50 dark:border-blue-800/50">
+          {getFileIcon(uploadedFile.name)}
+          <span className="flex-1 truncate text-blue-700 dark:text-blue-300 font-medium">
+            {uploadedFile.name}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-lg"
+            onClick={() => setUploadedFile(null)}
+          >
+            <X className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      )}
+      {isUnifiedChatClientEnabled() && (
+        <UnifiedChatRebindBanner
+          tenantId={tenantId}
+          conversationId={currentSessionId}
+          chatType={activeChatType}
+        />
+      )}
+      <div className="flex gap-2 items-end">
+        {isUnifiedChatClientEnabled() && (
+          <ChatTypeSelect
+            value={activeChatType}
+            onChange={handleChatTypeChange}
+            allowedTypes={allowedChatTypes}
+          />
+        )}
+        <Button
+          variant={isListening ? "destructive" : "outline"}
+          size="icon"
+          onClick={isListening ? stopVoiceRecording : startVoiceRecording}
+          className={cn("shrink-0", isListening && "animate-pulse")}
+          title={isListening ? "Stop recording" : "Voice input"}
+        >
+          {isListening ? (
+            <MicOff className="w-4 h-4" />
+          ) : (
+            <Mic className="w-4 h-4" />
+          )}
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept=".csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.pptx,.ppt"
+          onChange={handleFileSelect}
+        />
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isLoading || isUploading}
+          className="shrink-0"
+          title="Upload file (CSV, PDF, Excel, PowerPoint, Image)"
+        >
+          <Paperclip className="w-4 h-4" />
+        </Button>
+        <Textarea
+          ref={inputRef}
+          value={input}
+          rows={1}
+          onChange={(e) => {
+            setInput(e.target.value);
+            resizeChatInput();
+          }}
+          onKeyDown={handleInputKeyDown}
+          placeholder={
+            uploadedFile
+              ? "Ask about this file..."
+              : "What important info do I need to know today?"
+          }
+          disabled={isLoading || isUploading}
+          className={cn(
+            "flex-1 min-h-10 max-h-32 resize-none py-2.5 leading-snug",
+            "rounded-xl border-slate-200/80 dark:border-slate-600/60 bg-white dark:bg-slate-800/50",
+            "focus-visible:ring-2 focus-visible:ring-blue-500/30 overflow-y-hidden",
+          )}
+        />
+        <Button
+          onClick={handleSend}
+          disabled={
+            (!input.trim() && !uploadedFile) || isLoading || isUploading
+          }
+          size="icon"
+          className="rounded-xl bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/25"
+        >
+          {isLoading || isUploading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
+        </Button>
+      </div>
+      {isUnifiedChatClientEnabled() && activeChatType === "research" && (
+        <ResearchDeepAnalysisToggle
+          className="mt-2.5"
+          checked={activeResearchDeepAnalysis}
+          onCheckedChange={setActiveResearchDeepAnalysis}
+        />
+      )}
+    </motion.div>
+  );
+
   const panelBody = (
       <motion.div
         data-testid="cohi-chat-panel"
@@ -2216,7 +2394,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         />
         )}
 
-        {activeChatType === "research" && isUnifiedChatClientEnabled() && (
+        {showResearchWorkspace && (
           <AnimatePresence initial={false}>
             {!isShellCompact && (
               <motion.div
@@ -2242,15 +2420,46 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           </AnimatePresence>
         )}
 
+        <LayoutGroup id="cohi-chat-shell-body">
+        <div
+          className={cn(
+            "flex flex-col min-w-0 w-full",
+            isShellCompact && "shrink-0",
+            shellBodyFillsPane && "flex-1 min-h-0",
+            !shellBodyFillsPane && !isShellCompact && "shrink-0",
+          )}
+        >
+        {isCenteredEmptyLanding ? (
+          <div className="flex flex-1 flex-col justify-center gap-5 px-4 sm:px-5 min-h-0 overflow-hidden">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={CHAT_SHELL_VIEW_TRANSITION}
+              className="px-2 w-full min-w-0 shrink-0 py-3 flex justify-center"
+            >
+              <ChatTypeSuggestedPromptCards
+                allowedTypes={allowedChatTypes}
+                layout={promptCardsLayout}
+                activeChatType={activeChatType}
+                expandedChatType={expandedPromptCard}
+                onCardSelect={handlePromptCardSelect}
+                maxPromptsPerCard={3}
+                onPromptClick={handleSuggestionClick}
+              />
+            </motion.div>
+            {chatInputFooter}
+          </div>
+        ) : (
+          <>
         {/* Messages – native scrollable div (not Radix ScrollArea) because Radix
             wraps children in <div style="display:table;min-width:100%"> which lets
             intrinsic-width children like Recharts bleed past the panel's right edge. */}
-        <AnimatePresence initial={false}>
-        {!isShellCompact &&
-          !(activeChatType === "research" && isUnifiedChatClientEnabled()) && (
+        <AnimatePresence initial={false} mode="popLayout">
+        {showStandardMessagesPane && (
         <motion.div
           key="shell-messages"
           ref={messagesScrollRef}
+          layout
           initial={{ opacity: 0 }}
           animate={
             isTallEmptyPromptCards
@@ -2273,7 +2482,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         >
           <div className="space-y-5 min-w-0 w-full">
             <AnimatePresence>
-              {messages.length === 0 && (
+              {showEmptyPromptCards && (
                 <motion.div
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -2290,6 +2499,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                     allowedTypes={allowedChatTypes}
                     layout={promptCardsLayout}
                     activeChatType={activeChatType}
+                    expandedChatType={expandedPromptCard}
+                    onCardSelect={handlePromptCardSelect}
                     maxPromptsPerCard={promptCardsLayout === "row" ? 3 : 6}
                     onPromptClick={handleSuggestionClick}
                     className={cn(
@@ -2300,7 +2511,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               )}
             </AnimatePresence>
 
-            {messages.map((message, idx) => (
+            {!(
+              activeChatType === "research" && isUnifiedChatClientEnabled()
+            ) &&
+              messages.map((message, idx) => (
               <motion.div
                 key={message.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -2378,157 +2592,46 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         )}
         </AnimatePresence>
 
-        {/* Suggestions */}
-        <AnimatePresence initial={false}>
-        {!isShellCompact && messages.length > 0 && suggestedQuestions.length > 0 && !isLoading && (
-          <motion.div
-            key="shell-suggestions"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={CHAT_SHELL_VIEW_TRANSITION}
-            className="overflow-hidden shrink-0"
-          >
-          <div className="px-4 py-2.5 border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/40">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-              <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0 font-medium">
-                Suggestions
-              </span>
-              {suggestedQuestions.slice(0, 3).map((question, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleSuggestionClick(question)}
-                  className="shrink-0 text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-600/60 hover:border-blue-300 dark:hover:border-blue-500/50 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-all text-slate-600 dark:text-slate-300 font-medium"
-                >
-                  {question}
-                </button>
-              ))}
+        <div className="flex flex-col shrink-0 w-full">
+          {/* Follow-up chips — hidden in research (workspace + prompt cards cover this) */}
+          <AnimatePresence initial={false}>
+          {messages.length > 0 &&
+            suggestedQuestions.length > 0 &&
+            !isLoading &&
+            !showResearchWorkspace && (
+            <motion.div
+              key="shell-suggestions"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={CHAT_SHELL_VIEW_TRANSITION}
+              className="overflow-hidden shrink-0"
+            >
+            <div className="px-4 py-1 border-t border-slate-200/60 dark:border-slate-700/60 bg-slate-50/60 dark:bg-slate-800/30">
+              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin">
+                {suggestedQuestions.slice(0, 3).map((question, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => handleSuggestionClick(question)}
+                    title={question}
+                    className="shrink-0 max-w-[min(240px,42vw)] truncate text-[11px] px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-600/50 hover:border-blue-300 dark:hover:border-blue-500/50 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 text-slate-600 dark:text-slate-300"
+                  >
+                    {question}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          </motion.div>
-        )}
-        </AnimatePresence>
+            </motion.div>
+          )}
+          </AnimatePresence>
 
-        {/* Input – soft UI, clear hierarchy */}
-        <div
-          className={cn(
-            "p-4 shrink-0",
-            isStackedInsetShell
-              ? "border-t border-slate-200/60 dark:border-slate-700/60"
-              : "border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/50 dark:bg-slate-900/50",
-          )}
-        >
-          {uploadedFile && (
-            <div className="flex items-center gap-2 mb-3 p-2.5 bg-blue-50/80 dark:bg-blue-900/25 rounded-xl text-sm border border-blue-200/50 dark:border-blue-800/50">
-              {getFileIcon(uploadedFile.name)}
-              <span className="flex-1 truncate text-blue-700 dark:text-blue-300 font-medium">
-                {uploadedFile.name}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-lg"
-                onClick={() => setUploadedFile(null)}
-              >
-                <X className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          )}
-          {isUnifiedChatClientEnabled() && (
-            <>
-              <UnifiedChatRebindBanner
-                tenantId={tenantId}
-                conversationId={currentSessionId}
-                chatType={activeChatType}
-              />
-            </>
-          )}
-          <div className="flex gap-2 items-end">
-            {isUnifiedChatClientEnabled() && (
-              <ChatTypeSelect
-                value={activeChatType}
-                onChange={setActiveChatType}
-                allowedTypes={allowedChatTypes}
-              />
-            )}
-            {/* Voice Button */}
-            <Button
-              variant={isListening ? "destructive" : "outline"}
-              size="icon"
-              onClick={isListening ? stopVoiceRecording : startVoiceRecording}
-              className={cn("shrink-0", isListening && "animate-pulse")}
-              title={isListening ? "Stop recording" : "Voice input"}
-            >
-              {isListening ? (
-                <MicOff className="w-4 h-4" />
-              ) : (
-                <Mic className="w-4 h-4" />
-              )}
-            </Button>
-
-            {/* File Upload Button */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.pptx,.ppt"
-              onChange={handleFileSelect}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || isUploading}
-              className="shrink-0"
-              title="Upload file (CSV, PDF, Excel, PowerPoint, Image)"
-            >
-              <Paperclip className="w-4 h-4" />
-            </Button>
-
-            <Textarea
-              ref={inputRef}
-              value={input}
-              rows={1}
-              onChange={(e) => {
-                setInput(e.target.value);
-                resizeChatInput();
-              }}
-              onKeyDown={handleInputKeyDown}
-              placeholder={
-                uploadedFile
-                  ? "Ask about this file..."
-                  : "What important info do I need to know today?"
-              }
-              disabled={isLoading || isUploading}
-              className={cn(
-                "flex-1 min-h-10 max-h-32 resize-none py-2.5 leading-snug",
-                "rounded-xl border-slate-200/80 dark:border-slate-600/60 bg-white dark:bg-slate-800/50",
-                "focus-visible:ring-2 focus-visible:ring-blue-500/30 overflow-y-hidden",
-              )}
-            />
-            <Button
-              onClick={handleSend}
-              disabled={
-                (!input.trim() && !uploadedFile) || isLoading || isUploading
-              }
-              size="icon"
-              className="rounded-xl bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/25"
-            >
-              {isLoading || isUploading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-            </Button>
-          </div>
-          {isUnifiedChatClientEnabled() && activeChatType === "research" && (
-            <ResearchDeepAnalysisToggle
-              className="mt-2.5"
-              checked={activeResearchDeepAnalysis}
-              onCheckedChange={setActiveResearchDeepAnalysis}
-            />
-          )}
+          {chatInputFooter}
         </div>
+          </>
+        )}
+        </div>
+        </LayoutGroup>
       </motion.div>
   );
 

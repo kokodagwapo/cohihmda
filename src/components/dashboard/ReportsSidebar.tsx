@@ -1649,17 +1649,13 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setPinnedDashboardFlyoutOpen(true); }}
                   onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setPinnedDashboardFlyoutOpen(false), 150); }}
                 >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
-                      >
-                        <TrendingUp className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">My Dashboards</TooltipContent>
-                  </Tooltip>
+                  <button
+                    type="button"
+                    className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
+                    aria-label="My Dashboards"
+                  >
+                    <TrendingUp className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                  </button>
                 </div>
               </PopoverTrigger>
               <PopoverContent

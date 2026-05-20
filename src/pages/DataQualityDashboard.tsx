@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, Database, Gauge, Loader2 } from "lucide-react";
+import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
+import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
+import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { DataQualityHeader } from "@/components/data-quality/DataQualityHeader";
 import { WarningsView } from "@/components/data-quality/WarningsView";
@@ -192,10 +195,9 @@ export default function DataQualityDashboard() {
 
   return (
     <TopTieringLayout>
-      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
-        <TopTieringTopBar title="Data Quality" />
-        <main className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6">
-          <div className="max-w-[1600px] mx-auto space-y-6">
+      <TopTieringPageFrame topBar={<TopTieringTopBar title="Data Quality" />}>
+        <main className={DASHBOARD_MAIN_CLASSNAME}>
+          <DashboardPageContent className="max-w-[1600px]">
             {loading ? (
               <div className="flex items-center justify-center h-64">
                 <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
@@ -262,9 +264,9 @@ export default function DataQualityDashboard() {
                 </Tabs>
               </>
             )}
-          </div>
+          </DashboardPageContent>
         </main>
-      </div>
+      </TopTieringPageFrame>
     </TopTieringLayout>
   );
 }

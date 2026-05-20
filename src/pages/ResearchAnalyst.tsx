@@ -16,6 +16,7 @@ import type { ReportData } from "@/data/reportSimulations";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useResearchSession } from "@/hooks/useResearchSession";
+import { useResearchInsightTracking } from "@/hooks/useResearchInsightTracking";
 import { api } from "@/lib/api";
 import { AgentTimeline } from "@/components/research/AgentTimeline";
 import { ResearchReport, QuickAnswerView } from "@/components/research/ResearchReport";
@@ -396,122 +397,8 @@ export default function ResearchAnalyst() {
   const [shareDialogSaving, setShareDialogSaving] = useState(false);
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
 
-  // ---- Tracked insights (watchlist) for research report ----
-  // Map<normalizedHeadline, trackedInsightUUID> for both UI state and delete IDs.
-  type TrackedRow = { id: string; headline: string; understory?: string; source_type?: string; status?: string };
-  const [trackedMap, setTrackedMap] = useState<Map<string, string>>(new Map());
-
-  const normalizeHL = (h: string) => (h || "").trim().toLowerCase();
-
-  const fetchAndBuildTrackedMap = useCallback(async (bustCache = false) => {
-    if (bustCache) api.invalidateCacheFor("/insights/tracked");
-    const data = ((await api.getTrackedInsights(effectiveTenantId)) || []) as TrackedRow[];
-    const map = new Map<string, string>();
-    for (const r of data) {
-      if (r.source_type === "research" && r.status === "active") {
-        map.set(normalizeHL(r.headline), r.id);
-      }
-    }
-    return map;
-  }, [effectiveTenantId]);
-
-  // Seed from server on mount + tenant change
-  useEffect(() => {
-    let cancelled = false;
-    fetchAndBuildTrackedMap().then((map) => {
-      if (!cancelled) setTrackedMap(map);
-    }).catch((err) => console.error("Failed to load tracked insights:", err));
-    return () => { cancelled = true; };
-  }, [fetchAndBuildTrackedMap]);
-
-  const isResearchInsightTracked = useCallback(
-    (_headline: string, _detail: string) => trackedMap.has(normalizeHL(_headline)),
-    [trackedMap]
-  );
-
-  const handleToggleTrackResearch = useCallback(
-    async (
-      headline: string,
-      detail: string,
-      extras?: { sql?: string; keyFields?: string[] }
-    ) => {
-      const key = normalizeHL(headline);
-      const currentlyTracked = trackedMap.has(key);
-
-      // Optimistic update
-      setTrackedMap((prev) => {
-        const next = new Map(prev);
-        if (currentlyTracked) next.delete(key); else next.set(key, "pending");
-        return next;
-      });
-
-      try {
-        if (currentlyTracked) {
-          // Get the tracked UUID — prefer the map, fall back to a fresh server lookup
-          let trackedId = trackedMap.get(key);
-          if (!trackedId || trackedId === "pending") {
-            const freshMap = await fetchAndBuildTrackedMap(true);
-            trackedId = freshMap.get(key);
-          }
-          if (trackedId && trackedId !== "pending") {
-            await api.deleteTrackedInsight(trackedId, effectiveTenantId);
-          }
-        } else {
-          let researchArtifactId: string | undefined;
-          const sql = extras?.sql?.trim();
-          if (sql && sessionId) {
-            const created = (await api.createResearchArtifact(
-              {
-                session_id: sessionId,
-                sql,
-                keyFields: extras?.keyFields?.length ? extras.keyFields : [],
-                title: headline.slice(0, 500),
-                explanation: detail.slice(0, 8000),
-                headline_fingerprint: key,
-              },
-              effectiveTenantId
-            )) as { id?: string };
-            if (created?.id) researchArtifactId = created.id;
-          } else if (sql && !sessionId) {
-            toast({
-              title: "Cannot track with data refresh",
-              description: "Save or open a research session before tracking SQL-backed insights.",
-              variant: "destructive",
-            });
-            setTrackedMap((prev) => {
-              const next = new Map(prev);
-              next.delete(key);
-              return next;
-            });
-            return;
-          }
-          await api.trackInsight(
-            {
-              headline,
-              understory: detail,
-              source_type: "research",
-              ...(researchArtifactId
-                ? { research_artifact_id: researchArtifactId }
-                : {}),
-            },
-            effectiveTenantId
-          );
-        }
-        // Re-sync from server with cache bust
-        const freshMap = await fetchAndBuildTrackedMap(true);
-        setTrackedMap(freshMap);
-      } catch (err) {
-        console.error("Error toggling tracked research insight:", err);
-        // Revert on failure
-        setTrackedMap((prev) => {
-          const reverted = new Map(prev);
-          if (currentlyTracked) reverted.set(key, "reverted"); else reverted.delete(key);
-          return reverted;
-        });
-      }
-    },
-    [effectiveTenantId, trackedMap, fetchAndBuildTrackedMap, sessionId, toast]
-  );
+  const { isTracked: isResearchInsightTracked, onToggleTrack: handleToggleTrackResearch } =
+    useResearchInsightTracking(effectiveTenantId, sessionId);
 
   const [searchParams, setSearchParams] = useSearchParams();
 

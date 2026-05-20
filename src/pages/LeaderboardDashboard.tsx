@@ -1,5 +1,8 @@
+import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
+import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
 import { useMemo } from "react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
+import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
 import { useDashboardFilters } from "@/hooks/useDashboardFilters";
@@ -27,16 +30,17 @@ export default function LeaderboardDashboard() {
 
   return (
     <TopTieringLayout>
-      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
-        <TopTieringTopBar title="Leaderboard" />
-        <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 max-w-[1800px] mx-auto w-full">
-          <LeaderBoardSection
+      <TopTieringPageFrame topBar={<TopTieringTopBar title="Leaderboard" />}>
+        <main className={DASHBOARD_MAIN_CLASSNAME}>
+          <DashboardPageContent>
+            <LeaderBoardSection
             dateFilter={dateFilter}
             selectedTenantId={tenantId}
             selectedChannel={selectedChannel}
           />
+          </DashboardPageContent>
         </main>
-      </div>
+      </TopTieringPageFrame>
     </TopTieringLayout>
   );
 }

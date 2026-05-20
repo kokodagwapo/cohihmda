@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useState, type CSSProperties } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   DndContext,
   DragOverlay,
@@ -33,9 +33,16 @@ import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
 import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
 import {
+  getFolderNameById,
   groupConversationsByFolder,
   groupFoldersByParent,
 } from "@/lib/unifiedChatFolderUtils";
+import type { UnifiedChatType } from "@/lib/unifiedChatClient";
+import {
+  formatChatTypeLabel,
+  getChatTypePillClassName,
+} from "@/lib/unifiedChatTypeStyles";
+import { HistoryMetaPill } from "@/components/cohi/UnifiedChatHistoryMeta";
 import {
   ConversationMoveMenu,
   FolderMoveMenu,
@@ -108,6 +115,32 @@ function ConversationDragPreview({ title }: { title: string }) {
   );
 }
 
+function ConversationMetaSubtitle({
+  conversation,
+  folders,
+}: {
+  conversation: ConversationRow;
+  folders: FolderRow[];
+}) {
+  const chatType = conversation.chat_type as UnifiedChatType;
+  const folderName = conversation.folder_id
+    ? (getFolderNameById(conversation.folder_id, folders) ?? "Folder")
+    : null;
+
+  return (
+    <span className="flex flex-wrap items-center gap-1 pl-2 mt-px">
+      <HistoryMetaPill className={getChatTypePillClassName(chatType)}>
+        {formatChatTypeLabel(chatType)}
+      </HistoryMetaPill>
+      {folderName && (
+        <HistoryMetaPill className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          {folderName}
+        </HistoryMetaPill>
+      )}
+    </span>
+  );
+}
+
 function ConversationRow({
   conversation,
   dragSource,
@@ -116,6 +149,7 @@ function ConversationRow({
   moveConversationToFolder,
   onItemActivate,
   style,
+  showMetaSubtitle = false,
 }: {
   conversation: ConversationRow;
   dragSource: ConversationDragSource;
@@ -127,6 +161,7 @@ function ConversationRow({
   ) => Promise<void>;
   onItemActivate?: () => void;
   style?: CSSProperties;
+  showMetaSubtitle?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: conversationDragId(dragSource, conversation.id),
@@ -148,7 +183,10 @@ function ConversationRow({
       <button
         type="button"
         className={cn(
-          "flex-1 min-w-0 text-left text-sm truncate rounded-md px-2 py-2 min-h-[36px] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60",
+          "flex-1 min-w-0 text-left rounded-md text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60",
+          showMetaSubtitle
+            ? "px-2 pt-1.5 pb-1"
+            : "px-2 py-2 min-h-[36px] text-sm truncate",
           "cursor-grab active:cursor-grabbing",
         )}
         onClick={() => {
@@ -158,7 +196,13 @@ function ConversationRow({
         {...listeners}
         {...attributes}
       >
-        {conversation.title}
+        <span className="block text-sm truncate">{conversation.title}</span>
+        {showMetaSubtitle ? (
+          <ConversationMetaSubtitle
+            conversation={conversation}
+            folders={folders}
+          />
+        ) : null}
       </button>
       <ConversationMoveMenu
         conversationId={conversation.id}
@@ -520,7 +564,7 @@ function HistoryListBody({
   }
 
   return (
-    <div className="space-y-0.5 px-1 pb-1">
+    <div className="space-y-0 px-1 pb-1">
       {conversations.map((conversation) => (
         <ConversationRow
           key={conversation.id}
@@ -530,6 +574,7 @@ function HistoryListBody({
           resumeConversation={resumeConversation}
           moveConversationToFolder={moveConversationToFolder}
           onItemActivate={onItemActivate}
+          showMetaSubtitle
         />
       ))}
     </div>
@@ -543,6 +588,8 @@ export function UnifiedChatSidebarSections({
   className,
 }: UnifiedChatSidebarSectionsProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isHistoryPage = location.pathname.startsWith("/chat/history");
   const {
     enabled,
     conversations,
@@ -750,6 +797,7 @@ export function UnifiedChatSidebarSections({
         onToggleSection={() => setFoldersExpanded((v) => !v)}
         icon={Folder}
         label="Folders"
+        accent="amber"
         flyoutWidth="w-56"
         flyoutChildren={
           <FolderListBody {...folderListProps} />
@@ -766,6 +814,8 @@ export function UnifiedChatSidebarSections({
         onCollapsedClick={() => navigate("/chat/history")}
         icon={Clock}
         label="History"
+        accent="blue"
+        active={isHistoryPage}
         flyoutWidth="w-64"
         flyoutChildren={
           <HistoryListBody {...historyListProps} />

@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import type { ChatShellExpandMode } from "@/contexts/ChatShellContext";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
 import {
@@ -6,7 +6,10 @@ import {
   CHAT_TYPE_DESCRIPTIONS,
   getChatTypeLabel,
 } from "@/lib/unifiedChatSuggestedPrompts";
-import { getChatTypePillClassName } from "@/lib/unifiedChatTypeStyles";
+import {
+  getChatTypeActiveBorderClassName,
+  getChatTypePillClassName,
+} from "@/lib/unifiedChatTypeStyles";
 import { cn } from "@/lib/utils";
 
 export type ChatTypePromptCardsLayout = "hidden" | "row" | "grid";
@@ -36,11 +39,18 @@ const UNIFIED_CHAT_TYPE_ORDER: UnifiedChatType[] = [
 export function resolveChatTypePromptCardsLayout(
   panelLayout: "rail" | "shell",
   shellExpandMode: ChatShellExpandMode,
+  isPanelFullscreen = false,
 ): ChatTypePromptCardsLayout {
   if (panelLayout === "shell" && shellExpandMode === "compact") {
     return "hidden";
   }
-  if (panelLayout === "shell" && shellExpandMode === "tall") {
+  if (
+    panelLayout === "shell" &&
+    (shellExpandMode === "tall" || shellExpandMode === "full")
+  ) {
+    return "row";
+  }
+  if (panelLayout === "rail" && isPanelFullscreen) {
     return "row";
   }
   return "grid";
@@ -50,6 +60,9 @@ export interface ChatTypeSuggestedPromptCardsProps {
   allowedTypes: UnifiedChatType[];
   layout: ChatTypePromptCardsLayout;
   activeChatType?: UnifiedChatType;
+  /** Which card shows example prompts; null = all collapsed. */
+  expandedChatType?: UnifiedChatType | null;
+  onCardSelect?: (chatType: UnifiedChatType) => void;
   /** Per-type overrides (e.g. live suggestions for the active chat type). */
   suggestionsByType?: Partial<Record<UnifiedChatType, string[]>>;
   maxPromptsPerCard?: number;
@@ -61,6 +74,8 @@ export function ChatTypeSuggestedPromptCards({
   allowedTypes,
   layout,
   activeChatType,
+  expandedChatType = null,
+  onCardSelect,
   suggestionsByType,
   maxPromptsPerCard = 3,
   onPromptClick,
@@ -78,6 +93,7 @@ export function ChatTypeSuggestedPromptCards({
         : CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]
     )?.slice(0, maxPromptsPerCard);
     const isActive = chatType === activeChatType;
+    const isExpanded = expandedChatType === chatType;
 
     return (
       <motion.article
@@ -86,15 +102,25 @@ export function ChatTypeSuggestedPromptCards({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 + cardIndex * 0.04 }}
         className={cn(
-          "flex flex-col rounded-xl border bg-white/90 dark:bg-slate-900/80 shadow-sm",
-          layout === "row" && "w-[280px] min-w-[280px] shrink-0 snap-center",
-          layout === "grid" && "min-h-[140px] min-w-0",
+          "flex flex-col rounded-xl border bg-white/90 dark:bg-slate-900/80 shadow-sm overflow-hidden",
+          layout === "row" && "w-[280px] min-w-[280px] shrink-0 snap-center self-center",
+          layout === "grid" && "min-w-0 self-center",
           isActive
-            ? "border-violet-300/80 dark:border-violet-600/50 ring-1 ring-violet-200/60 dark:ring-violet-800/40"
+            ? getChatTypeActiveBorderClassName(chatType)
             : "border-slate-200/80 dark:border-slate-700/70",
         )}
       >
-        <header className="px-3 pt-3 pb-2 border-b border-slate-100 dark:border-slate-800/80">
+        <button
+          type="button"
+          onClick={() => onCardSelect?.(chatType)}
+          className={cn(
+            "w-full text-left px-3 pt-3 transition-colors",
+            isExpanded ? "pb-2" : "pb-3",
+            onCardSelect &&
+              "hover:bg-slate-50/80 dark:hover:bg-slate-800/40 cursor-pointer",
+            isExpanded && "border-b border-slate-100 dark:border-slate-800/80",
+          )}
+        >
           <div className="flex items-center gap-2 mb-1">
             <span
               className={cn(
@@ -108,26 +134,39 @@ export function ChatTypeSuggestedPromptCards({
           <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
             {CHAT_TYPE_DESCRIPTIONS[chatType]}
           </p>
-        </header>
+        </button>
 
-        <div className="flex flex-col flex-1 px-2 py-2 gap-0.5">
-          {prompts && prompts.length > 0 ? (
-            prompts.map((prompt, promptIndex) => (
-              <button
-                key={`${chatType}-${promptIndex}`}
-                type="button"
-                onClick={() => onPromptClick(prompt, chatType)}
-                className="w-full text-left rounded-lg px-2 py-2 text-[12px] leading-snug text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-              >
-                {prompt}
-              </button>
-            ))
-          ) : (
-            <p className="px-2 py-3 text-[11px] text-slate-400 dark:text-slate-500 italic">
-              Suggestions coming soon
-            </p>
+        <AnimatePresence initial={false}>
+          {isExpanded && (
+            <motion.div
+              key="prompts"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="flex flex-col px-2 pb-2 pt-0.5 gap-0.5">
+                {prompts && prompts.length > 0 ? (
+                  prompts.map((prompt, promptIndex) => (
+                    <button
+                      key={`${chatType}-${promptIndex}`}
+                      type="button"
+                      onClick={() => onPromptClick(prompt, chatType)}
+                      className="w-full text-left rounded-lg px-2 py-2 text-[12px] leading-snug text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+                    >
+                      {prompt}
+                    </button>
+                  ))
+                ) : (
+                  <p className="px-2 py-3 text-[11px] text-slate-400 dark:text-slate-500 italic">
+                    Suggestions coming soon
+                  </p>
+                )}
+              </div>
+            </motion.div>
           )}
-        </div>
+        </AnimatePresence>
       </motion.article>
     );
   });
@@ -148,7 +187,7 @@ export function ChatTypeSuggestedPromptCards({
         )}
       >
         <div
-          className="flex w-full min-w-max justify-center items-stretch snap-x snap-mandatory"
+          className="flex w-full min-w-max justify-center items-center snap-x snap-mandatory"
           style={{ gap: rowPromptCardsGapCss(types.length) }}
         >
           {cards}
@@ -160,7 +199,10 @@ export function ChatTypeSuggestedPromptCards({
   return (
     <motion.div
       {...shellMotion}
-      className={cn("min-w-0 grid w-full grid-cols-2 gap-3", className)}
+      className={cn(
+        "min-w-0 grid w-full grid-cols-2 gap-3 items-center",
+        className,
+      )}
     >
       {cards}
     </motion.div>

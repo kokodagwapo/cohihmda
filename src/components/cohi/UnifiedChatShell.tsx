@@ -3,13 +3,19 @@
  */
 
 import { useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { CohiChatPanel } from "@/components/dashboard/CohiChatPanel";
 import { UnifiedChatShellBootstrap } from "@/components/cohi/UnifiedChatShellBootstrap";
 import { useChatShell } from "@/contexts/ChatShellContext";
 import { cn } from "@/lib/utils";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
-import { PAGE_CONTENT_GUTTER } from "@/components/cohi/pageContentStyles";
+import {
+  DASHBOARD_CHAT_SHELL_GUTTER,
+  DASHBOARD_PAGE_CONTENT_COLUMN,
+  PAGE_CONTENT_GUTTER,
+} from "@/components/cohi/pageContentStyles";
+import { isTopTieringDashboardRoute } from "@/lib/dashboardChatShellRoutes";
 import {
   CHAT_SHELL_VIEW_TRANSITION,
   useChatShellAnimatedHeight,
@@ -21,7 +27,9 @@ export interface UnifiedChatShellProps {
 }
 
 export function UnifiedChatShell({ tenantId, className }: UnifiedChatShellProps) {
+  const { pathname } = useLocation();
   const { mode, isStackedInsetLayout, setMode } = useChatShell();
+  const isTopTieringDashboard = isTopTieringDashboardRoute(pathname);
   const contentMeasureRef = useRef<HTMLDivElement>(null);
   const { targetHeightPx, usesAnimatedHeight, transition } =
     useChatShellAnimatedHeight(mode, contentMeasureRef);
@@ -63,10 +71,17 @@ export function UnifiedChatShell({ tenantId, className }: UnifiedChatShellProps)
           "flex flex-col min-h-0 min-w-0 w-full",
           mode === "compact" ? "flex-none" : "flex-1 min-h-0 h-full",
           isStackedInsetLayout &&
-            cn(PAGE_CONTENT_GUTTER, "pt-4 sm:pt-6 md:pt-8 pb-3"),
+            (isTopTieringDashboard
+              ? DASHBOARD_CHAT_SHELL_GUTTER
+              : PAGE_CONTENT_GUTTER),
         )}
       >
-        <div className="flex flex-col flex-1 min-h-0 h-full min-w-0 overflow-hidden">
+        <div
+          className={cn(
+            "flex flex-col flex-1 min-h-0 h-full min-w-0 overflow-hidden w-full",
+            isStackedInsetLayout && isTopTieringDashboard && DASHBOARD_PAGE_CONTENT_COLUMN,
+          )}
+        >
           <CohiChatPanel
             layout="shell"
             isOpen

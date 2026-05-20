@@ -17,6 +17,12 @@ import { useLocation } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { isChatHomePath } from "@/lib/chatHomeRoute";
 import { RESEARCH_SHELL_EXPAND_EVENT } from "@/lib/unifiedChatEnvelope";
+import {
+  consumeWorkbenchChatSplitLayout,
+  isMyDashboardCanvasPath,
+  WORKBENCH_CHAT_HANDOFF_STATE_KEY,
+  type WorkbenchChatHandoffLocationState,
+} from "@/lib/workbench/workbenchChatHandoff";
 import { dispatchWorkbenchFlushDraftLayout } from "@/lib/workbench/workbenchDraftLayoutCache";
 
 export type ChatShellExpandMode = "compact" | "tall" | "full" | "split";
@@ -62,7 +68,9 @@ export function ChatShellProvider({ children }: { children: ReactNode }) {
   const preserveExpandOnNextNavigation = useCallback(() => {}, []);
 
   useEffect(() => {
-    const navState = location.state as { resumeChat?: boolean } | null;
+    const navState = location.state as
+      | ({ resumeChat?: boolean } & WorkbenchChatHandoffLocationState)
+      | null;
     const pathnameChanged = prevPathnameRef.current !== location.pathname;
     prevPathnameRef.current = location.pathname;
 
@@ -76,10 +84,19 @@ export function ChatShellProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const workbenchHandoff = navState?.[WORKBENCH_CHAT_HANDOFF_STATE_KEY];
+    if (
+      isMyDashboardCanvasPath(location.pathname) &&
+      (workbenchHandoff || consumeWorkbenchChatSplitLayout())
+    ) {
+      setModeState(isMobile ? "full" : "split");
+      return;
+    }
+
     if (pathnameChanged) {
       setModeState((prev) => (prev === "full" ? "compact" : prev));
     }
-  }, [location.pathname, location.key]);
+  }, [location.pathname, location.key, isMobile]);
 
   useEffect(() => {
     if (isMobile && mode === "split") {

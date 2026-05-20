@@ -7,7 +7,7 @@ export const CHAT_TYPE_DESCRIPTIONS: Record<UnifiedChatType, string> = {
   research:
     "Run deep investigations with timeline, findings, and structured reports.",
   insight_builder:
-    "Describe insights in natural language to draft custom prompt definitions.",
+    "Describe custom daily insights you want to see, and AI will help you create the custom prompts",
   workbench:
     "Build and refine dashboards with AI—add widgets, layouts, and KPI views.",
 };
@@ -24,6 +24,20 @@ export const RESEARCH_TOPIC_SUGGESTIONS = [
   "Revenue drivers: margin analysis, BPS by LO/channel, and revenue concentration",
 ] as const;
 
+/**
+ * Insight builder empty-state starters — natural language a user would say to author
+ * a My Insights custom prompt (title, prompt text, specifiers, batch vs on-demand).
+ */
+export const INSIGHT_BUILDER_TOPIC_SUGGESTIONS = [
+  "Create a weekly batch insight for Branch 204: how is it performing this week compared to last month? Focus on pull-through and cycle time.",
+  "Create an insight about FHA denial patterns—top reasons, trends, and which loan officers have the highest denial rates on denied FHA loans.",
+  "Set up a recurring insight that compares my branch's production to similar-sized branches across the company.",
+  "Create an on-demand insight to check whether we're losing locks to competitors on conventional purchase loans—look at fallout and pricing patterns.",
+  "Create a batch insight for VA refinance loans: are fallout or extension rates rising vs last quarter, and which branches or LOs drive it?",
+  "Create an on-demand insight to triage suspended loans—longest aging, top suspend reasons, and LOs with the largest backlog.",
+  "Create an insight prompt that analyzes fallout for loans with FICO below 650, broken down by loan type",
+] as const;
+
 /** Default starter prompts when the server has not returned suggestions yet. */
 export const CHAT_TYPE_DEFAULT_SUGGESTIONS: Record<UnifiedChatType, string[]> = {
   chat: [
@@ -33,9 +47,7 @@ export const CHAT_TYPE_DEFAULT_SUGGESTIONS: Record<UnifiedChatType, string[]> = 
     "Top loan officers by revenue",
   ],
   research: [...RESEARCH_TOPIC_SUGGESTIONS],
-  insight_builder: [
-    "Create an insight prompt that analyzes fallout for loans with FICO below 650, broken down by loan type",
-  ],
+  insight_builder: [...INSIGHT_BUILDER_TOPIC_SUGGESTIONS],
   workbench: [
     "Prepare a board-ready overview of this month's performance",
     "Summarize pipeline health and pull-through trends",

@@ -1,8 +1,6 @@
--- Research Lab durable SQL artifacts for tracked insights and Workbench handoff (COHI-362).
--- Tenant-scoped: each row belongs to one user and one research session.
---
--- NOTE: If schema_migrations already has version 111 with name `user_feedback`, this file
--- will NOT run (version collision). Those tenants need migration 132_ensure_research_artifacts.
+-- Repair migration: tenants that applied version 111 as `user_feedback` (pre-COHI-362)
+-- never ran 111_research_artifacts.sql because the runner keys on version number only.
+-- Idempotent — safe on fresh tenants that already have research_artifacts from 111.
 
 CREATE TABLE IF NOT EXISTS research_artifacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

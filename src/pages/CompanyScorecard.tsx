@@ -14,7 +14,10 @@ import { DatePeriodPicker, useDatePeriodState, DateRange, computePresetDateRange
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
+import { DASHBOARD_MAIN_CLASSNAME } from '@/components/cohi/pageContentStyles';
+import { DashboardPageContent } from '@/components/layout/DashboardPageContent';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
+import { TopTieringPageFrame } from '@/components/layout/TopTieringPageFrame';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { ExportMenu } from '@/components/common/ExportMenu';
 import { ActorStatusFilter, formatActorLastLogin, type ActorStatusFilterValue } from '@/components/common/ActorStatusFilter';
@@ -937,12 +940,11 @@ const CompanyScorecard = () => {
 
   return (
     <TopTieringLayout>
-      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
-        <TopTieringTopBar title="Company Scorecard" />
-        <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3">
-          <div className="max-w-[1800px] mx-auto">
+      <TopTieringPageFrame topBar={<TopTieringTopBar title="Company Scorecard" />}>
+        <main className={DASHBOARD_MAIN_CLASSNAME}>
+          <DashboardPageContent>
         {/* Header Section */}
-        <div className="mb-4">
+        <div>
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">Company Scorecard</h1>
@@ -986,10 +988,10 @@ const CompanyScorecard = () => {
               </Select>
             </div>
           </div>
+        </div>
 
           {/* Dashboard Insights strip */}
-          <div className="mb-4">
-            <DashboardInsightsStrip
+          <DashboardInsightsStrip
               insights={dashboardInsights}
               generatedAt={dashboardInsightsGeneratedAt}
               loading={dashboardInsightsLoading}
@@ -1012,7 +1014,6 @@ const CompanyScorecard = () => {
               dateFilter="ytd"
               selectedTenantId={selectedTenantId}
             />
-          </div>
 
           {/* KPI Cards – shared widget components */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-4">
@@ -1059,7 +1060,6 @@ const CompanyScorecard = () => {
               config={{ color: 'rose' }}
             />
           </div>
-        </div>
 
         {/* Tabular Data Section */}
         {summaryData && (
@@ -1271,7 +1271,7 @@ const CompanyScorecard = () => {
             </CardContent>
           </Card>
         </div>
-        </div>{/* end max-w wrapper */}
+          </DashboardPageContent>
         </main>
 
         {/* KPI drilldown fullscreen dialog – must be outside TabsContent so it's always mounted */}
@@ -1334,7 +1334,7 @@ const CompanyScorecard = () => {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
+      </TopTieringPageFrame>
     </TopTieringLayout>
   );
 };
