@@ -797,7 +797,7 @@ export function UnifiedChatSidebarSections({
         onToggleSection={() => setFoldersExpanded((v) => !v)}
         icon={Folder}
         label="Folders"
-        accent="amber"
+        accent="purple"
         flyoutWidth="w-56"
         flyoutChildren={
           <FolderListBody {...folderListProps} />

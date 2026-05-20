@@ -28,6 +28,7 @@ import { useTenantLosLastSyncedAt } from '@/hooks/useTenantLosLastSyncedAt';
 import { formatDataLastSyncedLine } from '@/utils/losSyncDisplay';
 import { useWorkbenchNav, type SidebarCanvas } from '@/hooks/useWorkbenchNav';
 import { UnifiedChatSidebarSections } from '@/components/cohi/UnifiedChatSidebarSections';
+import { SIDEBAR_NAV_ACCENT } from '@/components/cohi/sidebarNavPrimitives';
 import { UnifiedSidebarInsightsNav } from '@/components/cohi/UnifiedSidebarInsightsNav';
 import { isUnifiedChatClientEnabled } from '@/lib/unifiedChatEnvelope';
 import {
@@ -63,6 +64,8 @@ export interface DashboardVisibility {
 }
 
 export type SectionId = keyof DashboardVisibility;
+
+const MY_DASHBOARDS_ACCENT = SIDEBAR_NAV_ACCENT.yellow;
 
 interface ReportsSidebarProps {
   onReportClick: (report: ReportData) => void;
@@ -992,10 +995,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     onClick={() => setDashboardsExpanded(!dashboardsExpanded)}
                     className="w-full flex items-center gap-3 px-4 pt-3 pb-2 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation text-left"
                   >
-                    <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                      <LayoutGrid className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
+                    <div className={cn("flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}>
+                      <LayoutGrid className={cn("w-[18px] h-[18px]", MY_DASHBOARDS_ACCENT.icon)} />
                     </div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex-1">My Dashboards</p>
+                    <p className={cn("text-sm font-semibold flex-1", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                     <ChevronDown className={cn("w-[18px] h-[18px] text-slate-500 dark:text-slate-400 shrink-0 transition-transform duration-200", !dashboardsExpanded && "-rotate-90")} />
                   </button>
                   <AnimatePresence initial={false}>
@@ -1573,10 +1576,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
-                <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                  <TrendingUp className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
+                <div className={cn("flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}>
+                  <TrendingUp className={cn("w-[18px] h-[18px]", MY_DASHBOARDS_ACCENT.icon)} />
                 </div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex-1 m-0">My Dashboards</p>
+                <p className={cn("text-sm font-semibold flex-1 m-0", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                 <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: dashboardsExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
               </button>
               <AnimatePresence initial={false}>
@@ -1651,10 +1654,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 >
                   <button
                     type="button"
-                    className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
+                    className={cn("w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}
                     aria-label="My Dashboards"
                   >
-                    <TrendingUp className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                    <TrendingUp className={cn("w-4 h-4", MY_DASHBOARDS_ACCENT.icon)} />
                   </button>
                 </div>
               </PopoverTrigger>
@@ -1666,10 +1669,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setPinnedDashboardFlyoutOpen(false), 150); }}
               >
                 <div className="flex items-center gap-2 px-2 pb-2">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                    <TrendingUp className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                  <div className={cn("flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}>
+                    <TrendingUp className={cn("w-4 h-4", MY_DASHBOARDS_ACCENT.icon)} />
                   </div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">My Dashboards</p>
+                  <p className={cn("text-sm font-semibold", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                 </div>
                 <div className="space-y-0.5">
                   {pinnedItems.length === 0 && favoriteCanvases.length === 0 ? (

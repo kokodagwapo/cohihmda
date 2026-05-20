@@ -1,88 +1,74 @@
 import { test, expect } from "./fixtures";
-import type { Page } from "@playwright/test";
-
-async function mockUnifiedChatApis(page: Page) {
-  await page.route(/\/api\/tenants(?:\?.*)?$/, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        tenants: [{ id: "tenant-unified-e2e", name: "QA Tenant" }],
-      }),
-    });
-  });
-
-  await page.route(/\/api\/chat\/v1\/messages(?:\?.*)?$/, async (route) => {
-    const body = route.request().postDataJSON() as { message?: string } | null;
-    expect(body?.message ?? "").toBeTruthy();
-
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        conversationId: "550e8400-e29b-41d4-a716-446655440001",
-        turn: {
-          id: "6ba7b810-9dad-11d1-80b4-00c04fd430c9",
-          blocks: [
-            {
-              type: "text",
-              markdown:
-                "Unified chat stub: blocks envelope is active for this session.",
-            },
-          ],
-        },
-        metadata: {
-          suggestedQuestions: ["Follow-up one?", "Follow-up two?"],
-          route: "global",
-        },
-      }),
-    });
-  });
-}
+import {
+  forceUnifiedChat,
+  mockUnifiedChatApis,
+  mockV1Messages,
+  UNIFIED_CHAT_STUB_TEXT,
+  unifiedChatMessageInput,
+} from "./helpers/unifiedChat";
 
 test.describe("Unified Cohi Chat (v1 API)", () => {
-  test("@critical @COHI-386 global data-chat uses unified v1 when forced", async ({
+  test("@critical @COHI-386 @COHI-397 AC2 data-chat POST messages renders reply blocks", async ({
     userPage,
   }) => {
-    await userPage.addInitScript(() => {
-      try {
-        sessionStorage.setItem("cohi_force_unified_chat", "1");
-      } catch {
-        /* ignore */
-      }
+    await forceUnifiedChat(userPage);
+    let sawMessagesPost = false;
+    await mockV1Messages(userPage);
+    await userPage.route(/\/api\/chat\/v1\/messages(?!:stream)(?:\?.*)?$/, async (route) => {
+      if (route.request().method() === "POST") sawMessagesPost = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          conversationId: "550e8400-e29b-41d4-a716-446655440001",
+          turn: {
+            id: "6ba7b810-9dad-11d1-80b4-00c04fd430c9",
+            blocks: [{ type: "text", markdown: UNIFIED_CHAT_STUB_TEXT }],
+          },
+          metadata: { promptHash: "e2e-stub-prompt-hash" },
+        }),
+      });
     });
 
-    await mockUnifiedChatApis(userPage);
-    await userPage.goto("/data-chat", { waitUntil: "domcontentloaded" });
-
-    await expect(
-      userPage.getByPlaceholder("What important info do I need to know today?"),
-    ).toBeVisible({ timeout: 15_000 });
-
-    const input = userPage.getByPlaceholder(
-      "What important info do I need to know today?",
-    );
-    await input.fill("Smoke test unified chat path");
+    await userPage.goto("/workbench/favorites", { waitUntil: "domcontentloaded" });
+    await userPage.getByRole("button", { name: "Open Ask Cohi" }).click();
+    const input = userPage.getByPlaceholder("Ask a follow-up…");
+    await input.fill("AC2 structural POST /messages smoke");
     await input.press("Enter");
 
-    await expect(
-      userPage.getByText(/Unified chat stub: blocks envelope is active/i),
-    ).toBeVisible({
+    await expect.poll(() => sawMessagesPost).toBeTruthy();
+    await expect(userPage.getByText(new RegExp(UNIFIED_CHAT_STUB_TEXT, "i"))).toBeVisible({
       timeout: 15_000,
     });
   });
 
-  test("@COHI-404 unified shell on /insights without floating dock chip", async ({
+  test("@critical @COHI-396 AC1 data-chat POST messages stream when unified", async ({
     userPage,
   }) => {
-    await userPage.addInitScript(() => {
-      try {
-        sessionStorage.setItem("cohi_force_unified_chat", "1");
-      } catch {
-        /* ignore */
-      }
-    });
+    await forceUnifiedChat(userPage);
+    await mockUnifiedChatApis(userPage);
+    const streamRequest = userPage.waitForRequest(
+      (req) =>
+        req.method() === "POST" &&
+        /\/api\/chat\/v1\/messages:stream(?:\?.*)?$/.test(req.url()),
+    );
 
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    const input = unifiedChatMessageInput(userPage);
+    await expect(input).toBeVisible({ timeout: 15_000 });
+    await input.fill("Stream path smoke");
+    await input.press("Enter");
+
+    await streamRequest;
+    await expect(userPage.getByText(new RegExp(UNIFIED_CHAT_STUB_TEXT, "i"))).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+
+  test("@critical @COHI-404 @COHI-386 AC1 insights horizontal shell without right rail", async ({
+    userPage,
+  }) => {
+    await forceUnifiedChat(userPage);
     await mockUnifiedChatApis(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
 

@@ -18,7 +18,12 @@ import {
 import { cn } from "@/lib/utils";
 
 /** Matches top-nav `iconStyleMap` (Navigation.tsx). */
-export type SidebarNavAccent = "emerald" | "amber" | "blue";
+export type SidebarNavAccent =
+  | "emerald"
+  | "amber"
+  | "blue"
+  | "purple"
+  | "yellow";
 
 export const SIDEBAR_NAV_ACCENT: Record<
   SidebarNavAccent,
@@ -49,6 +54,20 @@ export const SIDEBAR_NAV_ACCENT: Record<
     iconTile: "bg-blue-500/10 dark:bg-blue-500/20",
     activeIconTile:
       "bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-400/40",
+  },
+  purple: {
+    label: "text-purple-600 dark:text-purple-400",
+    icon: "text-purple-500 dark:text-purple-400",
+    iconTile: "bg-purple-500/10 dark:bg-purple-500/20",
+    activeIconTile:
+      "bg-purple-50 dark:bg-purple-950/40 ring-1 ring-purple-400/40",
+  },
+  yellow: {
+    label: "text-yellow-600 dark:text-yellow-400",
+    icon: "text-yellow-500 dark:text-yellow-400",
+    iconTile: "bg-yellow-500/10 dark:bg-yellow-500/20",
+    activeIconTile:
+      "bg-yellow-50 dark:bg-yellow-950/40 ring-1 ring-yellow-400/40",
   },
 };
 

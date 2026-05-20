@@ -1,5 +1,12 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
+import {
+  forceUnifiedChat,
+  mockUnifiedChatTenantApi,
+  mockV1MessageStream,
+  mockV1Permissions,
+  UNIFIED_CHAT_INPUT_PLACEHOLDER,
+} from "./helpers/unifiedChat";
 
 async function mockCohiChatKnowledgeApis(page: Page) {
   await page.route(/\/api\/tenants(?:\?.*)?$/, async (route) => {
@@ -93,14 +100,36 @@ test.describe("Cohi Chat knowledge context", () => {
   test("@critical @COHI-78 answers platform metric questions with current knowledge context", async ({
     userPage,
   }) => {
+    await forceUnifiedChat(userPage);
+    await mockUnifiedChatTenantApi(userPage);
+    await mockV1Permissions(userPage);
     await mockCohiChatKnowledgeApis(userPage);
+
+    const knowledgeMarkdown =
+      "Current platform metric context: pull-through uses a rolling 90-day funded-loan denominator, fallout is categorized from Withdrawn and Denied statuses, and pipeline aging is measured from active loan milestone dates. These definitions come from the current dashboard metric knowledge base.";
+
+    await mockV1MessageStream(userPage, {
+      replyText: knowledgeMarkdown,
+      streamMetadata: {
+        suggestedQuestions: [
+          "How is pull-through trending by channel?",
+          "Where is fallout concentrated in the pipeline?",
+          "Which active loans are aging past expected milestones?",
+        ],
+        sources: {
+          dataQuery: false,
+          knowledgeBase: ["Platform Metrics - Current Dashboard Definitions"],
+        },
+      },
+    });
+
     await userPage.goto("/data-chat", { waitUntil: "domcontentloaded" });
 
     await expect(
-      userPage.getByPlaceholder("What important info do I need to know today?"),
+      userPage.getByPlaceholder(UNIFIED_CHAT_INPUT_PLACEHOLDER),
     ).toBeVisible({ timeout: 15_000 });
 
-    const input = userPage.getByPlaceholder("What important info do I need to know today?");
+    const input = userPage.getByPlaceholder(UNIFIED_CHAT_INPUT_PLACEHOLDER);
     await input.fill("What is the current pull-through and fallout definition for pipeline reporting?");
     await input.press("Enter");
 

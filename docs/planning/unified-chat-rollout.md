@@ -17,6 +17,8 @@
 2. **Beta tenants:** Set `VITE_UNIFIED_CHAT=true` for selected tenants or environments; monitor error rates on `/api/chat/v1/messages` and related v1 routes (`/conversations`, `/permissions`, `messages:stream`).
 3. **General availability:** Enable Vite flag tenant-wide or globally after parity checks pass.
 
+**Authenticated entry:** Full-access users land on `/` (fullscreen unified chat). `/insights` remains the insights dashboard. Unauthenticated users are sent to login; public marketing is at `/landing`.
+
 ## Rollback
 
 - Turn off `VITE_UNIFIED_CHAT` (or omit it). Clients revert to `/api/cohi-chat/*`, `/api/cohi-chat/workbench`, and `/api/workbench/ai/query` on hub pages.
@@ -61,9 +63,75 @@ Rerun is safe (`DELETE` is idempotent). A later epic can promote this to a worke
 
 `server/src/services/chat/sqlAndMetricsRouter.ts` exports `SQL_ROUTER_KNOWN_BYPASS_PATHS` listing legacy SQL execution sites that do not yet pass through `runSqlThroughRouter`. Shrink the list over time as each call site is wired through the gate; any new SQL access for `chat_type=research` must be added through the router (Wave 3 lock).
 
-## Golden replay
+## Golden replay (COHI-397 AC3)
 
-See `scripts/replay/unified-chat-golden-prompts.json` for staging replay prompts.
+Prompts: `scripts/replay/unified-chat-golden-prompts.json`. Policy fixture: `server/scripts/replay/unified-chat-golden-fixture.json`.
+
+| Command | When |
+| ------- | ---- |
+| `npm run replay:unified-chat:dry` | PR / local — validates fixture JSON only |
+| `npm run replay:unified-chat` | Staging pre-cutover — live structural replay |
+
+**Environment (live replay):**
+
+- `COHI_API_BASE_URL` — staging API origin (e.g. `https://api.staging.example.com`)
+- `COHI_REPLAY_AUTH_TOKEN` — bearer token for a test user
+- `COHI_REPLAY_TENANT_ID` — tenant id (optional; default `tenant-unified-e2e`)
+- `COHI_REPLAY_PASS_THRESHOLD` — minimum pass rate (default **0.95**)
+
+**Structural invariants per prompt:** HTTP 200, UUID `conversationId`, non-empty `turn.blocks` with allowed `type` enum, `metadata.promptHash` present.
+
+Store the last green JSON report (pass/fail/passRate) in the COHI-397 Jira comment or QA Confluence page before GA.
+
+## Wave 6 — production cutover (COHI-398)
+
+Wave 6 closes epic **COHI-386** after Wave 5 UX (**COHI-403–406**) AC verification and **COHI-397** E2E + replay gates.
+
+### Production flag bundle
+
+| Phase | Server | Client | History |
+| ----- | ------ | ------ | ------- |
+| Internal | `UNIFIED_CHAT_ENABLED=true`, `UNIFIED_CHAT_PERSIST=true` | `VITE_UNIFIED_CHAT=true` | `UNIFIED_CHAT_HISTORY_DUAL_READ=true` + per-tenant backfill |
+| Beta | Same; optional tenant allowlist | Same | Monitor duplicate legacy/unified rows |
+| GA | Global | Global | Dual-read until legacy Research write path retired |
+
+### Cutover checklist (log in COHI-398)
+
+1. Tenant migrations **128–131** applied on all tenant DBs.
+2. `backfill-unified-chat-legacy.ts` per tenant; verify counts.
+3. `npm run test:e2e:critical` green on dev deploy (unified-chat specs).
+4. `npm run replay:unified-chat` on staging — pass rate ≥ **95%** (PM may raise to 100% for deterministic contract tests).
+5. Manual spot-check **N=5** legacy Research URLs (`e2e/fixtures/legacy-research-sessions.json` ids on staging).
+6. Architecture readiness §282–288: schema/policy tests, security review, P95/cost sign-off.
+7. Internal → beta → GA per rollout sequence above.
+8. Monitor §11.4 metrics for 48h after each phase.
+
+### Rollback drill (execute once on staging; paste outcome in COHI-398)
+
+| Step | Action | Verify |
+| ---- | ------ | ------ |
+| 1 | `VITE_UNIFIED_CHAT=false` → redeploy frontend | Legacy right-rail / Research Lab entry returns |
+| 2 | `UNIFIED_CHAT_ENABLED=false` → restart API | `POST /api/chat/v1/*` returns 404 |
+| 3 | Smoke `/data-chat` | Legacy `/api/cohi-chat/ask` used |
+| 4 | Record build ids, timestamps, drill owner | Jira comment + Confluence |
+
+### Observability (COHI-398 AC3)
+
+- Dashboard: error rate + P95 latency for `POST /api/chat/v1/messages` and `POST /api/chat/v1/messages:stream`
+- Alert on 4xx/5xx spikes and `clientMessageId` 409 volume after deploys
+- Log correlation: `conversationId`, `chat_type`, `policyDecisionId`, `promptHash`
+
+### Legacy route policy (epic AC3)
+
+| Route | GA policy |
+| ----- | --------- |
+| `/api/cohi-chat/*`, `/api/cohi-chat/workbench`, `/api/workbench/ai/query` | Shim one release window; remove when traffic = 0 |
+| `/research-lab`, `/research/session` | Keep redirects until analytics show negligible hits |
+| In-research SESSIONS rail | Removed with unified shell (E2E **COHI-406**) |
+
+### COHI-389 AC3 — platform tenant (deferred)
+
+`assertPlatformTenantScope` remains unwired until cross-tenant schema is defined. **Not a Wave 6 blocker** — document PM sign-off on epic closeout (`docs/planning/wave6-epic-closeout.md`).
 
 ## Legacy Research backfill runbook (COHI-395 §11.5)
 
