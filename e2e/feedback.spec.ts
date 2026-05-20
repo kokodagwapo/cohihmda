@@ -192,8 +192,13 @@ async function chooseSelectOption(
   trigger: string,
   optionName: string,
 ) {
-  await page.locator(trigger).click();
-  await page.getByRole("option", { name: optionName }).click();
+  await dismissBlockingOverlays(page);
+  const control = page.locator(trigger);
+  await expect(control).toBeVisible({ timeout: 15_000 });
+  await control.click({ force: true });
+  const option = page.getByRole("option", { name: optionName, exact: true });
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.click({ force: true });
 }
 
 test.describe("Feedback flow (COHI-322)", () => {
@@ -268,16 +273,28 @@ test.describe("Feedback flow (COHI-322)", () => {
   test("@critical @COHI-322 successful submit persists and handles notification warning", async ({
     userPage,
   }) => {
+    await suppressWelcomeTour(userPage);
     await mockFeedbackApis(userPage, { notificationSent: false });
 
     await userPage.goto("/feedback", { waitUntil: "domcontentloaded" });
-    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
 
-    // Use stable selectors
     await chooseSelectOption(userPage, "#feedback-area", "Insights");
     await chooseSelectOption(userPage, "#feedback-type", "Bug/Issue");
     await userPage.locator("#feedback-description").fill("Latency spikes on the insights grid.");
-    await userPage.getByRole("button", { name: "Submit Feedback" }).click();
+
+    const submitButton = userPage.getByRole("button", { name: "Submit Feedback" });
+    await expect(submitButton).toBeEnabled({ timeout: 10_000 });
+    await Promise.all([
+      userPage.waitForResponse(
+        (res) =>
+          res.url().includes("/api/feedback") &&
+          res.request().method() === "POST" &&
+          res.ok(),
+        { timeout: 20_000 },
+      ),
+      submitButton.click(),
+    ]);
 
     const notifications = userPage.getByLabel(/Notifications/i);
     await expect(notifications.getByText("Feedback saved")).toBeVisible();

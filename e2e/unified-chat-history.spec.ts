@@ -3,8 +3,9 @@ import path from "node:path";
 import { test, expect } from "./fixtures";
 import {
   computeFolderTreeDepth,
+  dismissBlockingOverlays,
   forceUnifiedChat,
-  mockUnifiedChatApis,
+  mockUnifiedChatTenantApi,
   mockV1ConversationsList,
   mockV1FoldersTree,
   mockV1Permissions,
@@ -29,16 +30,17 @@ const DEEP_FOLDER_TREE = [
 test.describe("Unified chat history (COHI-403)", () => {
   test.beforeEach(async ({ userPage }) => {
     await forceUnifiedChat(userPage);
-    await mockUnifiedChatApis(userPage);
-    await mockV1Permissions(userPage);
   });
 
   test("@critical @COHI-403 AC1 GET folders tree depth at most 5", async ({
     userPage,
   }) => {
+    await mockUnifiedChatTenantApi(userPage);
+    await mockV1Permissions(userPage);
     await mockV1FoldersTree(userPage, DEEP_FOLDER_TREE);
     await mockV1ConversationsList(userPage, []);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await dismissBlockingOverlays(userPage);
     await expect(userPage.getByRole("button", { name: "Folders" })).toBeVisible({
       timeout: 15_000,
     });
@@ -49,6 +51,8 @@ test.describe("Unified chat history (COHI-403)", () => {
     userPage,
   }) => {
     let folderPostCount = 0;
+    await mockUnifiedChatTenantApi(userPage);
+    await mockV1Permissions(userPage);
     await mockV1FoldersTree(userPage, []);
     await mockV1ConversationsList(userPage, [
       {
@@ -63,6 +67,7 @@ test.describe("Unified chat history (COHI-403)", () => {
     });
 
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await dismissBlockingOverlays(userPage);
     await expect(userPage.getByRole("button", { name: "Folders" })).toBeVisible({
       timeout: 15_000,
     });
@@ -82,16 +87,21 @@ test.describe("Unified chat history (COHI-403)", () => {
       title: i === 0 ? "Alpha loan volume thread" : `Thread ${i}`,
       chat_type: i % 2 === 0 ? "chat" : "research",
     }));
+    await mockUnifiedChatTenantApi(userPage);
+    await mockV1Permissions(userPage);
     await mockV1FoldersTree(userPage, []);
     await mockV1ConversationsList(userPage, rows);
 
     await userPage.goto("/chat/history", { waitUntil: "domcontentloaded" });
+    await dismissBlockingOverlays(userPage);
     await expect(userPage.getByRole("heading", { name: "Full chat history" })).toBeVisible({
       timeout: 15_000,
     });
 
     await userPage.getByLabel("Search conversations by title").fill("Alpha loan");
-    await expect(userPage.getByText("Alpha loan volume thread")).toBeVisible({
+    await expect(
+      userPage.getByRole("button", { name: /Alpha loan volume thread/i }).first(),
+    ).toBeVisible({
       timeout: 10_000,
     });
 
