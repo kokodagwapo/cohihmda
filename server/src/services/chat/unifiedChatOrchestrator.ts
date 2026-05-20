@@ -77,7 +77,7 @@ export interface UnifiedChatRequestBody {
     qaAgentRunTag?: string;
     // Deferred until unified chat merge is complete — restore with promptComposer + OpenAPI + schemas.
     // planningMode?: "auto" | "always" | "never";
-    research?: { deepAnalysis?: boolean };
+    research?: { deepAnalysis?: boolean; uploadIds?: string[] };
     insightBuilder?: { action?: "approve" | "revise" };
   };
 }
