@@ -11,13 +11,13 @@ test.describe("Chat landing at /", () => {
     await mockUnifiedChatApis(userPage);
   });
 
-  test("@smoke guest visiting / redirects to login", async ({ page }) => {
+  test("@smoke @COHI-386 guest visiting / redirects to login", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/login(\?|$)/);
     expect(page.url()).toMatch(/returnTo=%2F|returnTo=%252F|returnTo=\//);
   });
 
-  test("@smoke authenticated user sees chat home at /", async ({ userPage }) => {
+  test("@smoke @COHI-386 authenticated user sees chat home at /", async ({ userPage }) => {
     await userPage.goto("/", { waitUntil: "domcontentloaded" });
     expect(new URL(userPage.url()).pathname).toBe("/");
     await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
@@ -25,7 +25,7 @@ test.describe("Chat landing at /", () => {
     });
   });
 
-  test("layout view controls hidden on chat home", async ({ userPage }) => {
+  test("@critical @COHI-386 layout view controls hidden on chat home", async ({ userPage }) => {
     await userPage.goto("/", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
       timeout: 15_000,
@@ -41,7 +41,7 @@ test.describe("Chat landing at /", () => {
     ).toHaveCount(0);
   });
 
-  test("layout view controls visible on /insights", async ({ userPage }) => {
+  test("@critical @COHI-386 layout view controls visible on /insights", async ({ userPage }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
       timeout: 15_000,
@@ -51,7 +51,9 @@ test.describe("Chat landing at /", () => {
     ).toBeVisible();
   });
 
-  test("canvas-only user cannot access chat home", async ({ canvasOnlyPage }) => {
+  test("@critical @COHI-386 canvas-only user cannot access chat home", async ({
+    canvasOnlyPage,
+  }) => {
     await canvasOnlyPage.goto("/", { waitUntil: "domcontentloaded" });
     const path = new URL(canvasOnlyPage.url()).pathname;
     expect(path).not.toBe("/");

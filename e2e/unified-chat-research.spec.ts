@@ -15,7 +15,7 @@ test.describe("Unified research in chat (COHI-402 / COHI-397)", () => {
     await mockUnifiedChatApis(userPage);
   });
 
-  test("@critical @COHI-402 @COHI-397 AC4 research stream returns schema blocks", async ({
+  test("@critical @COHI-386 @COHI-402 @COHI-397 AC4 research stream returns schema blocks", async ({
     userPage,
   }) => {
     await mockV1MessageStream(userPage, {
@@ -38,7 +38,7 @@ test.describe("Unified research in chat (COHI-402 / COHI-397)", () => {
     });
   });
 
-  test("@critical @COHI-402 @COHI-397 AC4 research-in-chat workspace visible", async ({
+  test("@critical @COHI-386 @COHI-402 @COHI-397 AC4 research-in-chat workspace visible", async ({
     userPage,
   }) => {
     await mockV1MessageStream(userPage, {
