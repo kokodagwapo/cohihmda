@@ -8,6 +8,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { dispatchUnifiedChatHistorySync } from "@/lib/unifiedChatFolderUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { serializeResearchWidgetCatalog } from "@/utils/researchWidgetCatalog";
 import type { PeriodPreset } from "@/components/ui/DatePeriodPicker";
@@ -183,6 +184,9 @@ export function useResearchSession(tenantId?: string | null) {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [sessionVisibility, setSessionVisibility] = useState<string>("private");
   const [sessionSharedWithUserIds, setSessionSharedWithUserIds] = useState<string[]>([]);
+  const [sessionIsOwner, setSessionIsOwner] = useState(true);
+  const [sessionOwnerEmail, setSessionOwnerEmail] = useState<string>("");
+  const [sessionOwnerName, setSessionOwnerName] = useState<string>("");
 
   const abortRef = useRef<AbortController | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -435,6 +439,13 @@ export function useResearchSession(tenantId?: string | null) {
     setSessionSharedWithUserIds(
       Array.isArray(data.sharedWithUserIds) ? data.sharedWithUserIds : [],
     );
+    setSessionIsOwner(data.isOwner !== false);
+    setSessionOwnerEmail(
+      typeof data.ownerEmail === "string" ? data.ownerEmail : "",
+    );
+    setSessionOwnerName(
+      typeof data.ownerName === "string" ? data.ownerName : "",
+    );
 
     return isActivePhase;
   }, []);
@@ -559,6 +570,8 @@ export function useResearchSession(tenantId?: string | null) {
         });
         setSessionVisibility(["shared", "global"].includes(visibility) ? visibility : "private");
         setSessionSharedWithUserIds(sharedWithUserIds);
+        api.invalidateCacheFor("/api/chat/v1/conversations");
+        dispatchUnifiedChatHistorySync();
         return true;
       } catch (err: any) {
         console.error("[Research] Failed to update sharing:", err);
@@ -586,6 +599,9 @@ export function useResearchSession(tenantId?: string | null) {
     setIsPaused(false);
     setSessionVisibility("private");
     setSessionSharedWithUserIds([]);
+    setSessionIsOwner(true);
+    setSessionOwnerEmail("");
+    setSessionOwnerName("");
   }, []);
 
   return {
@@ -601,6 +617,9 @@ export function useResearchSession(tenantId?: string | null) {
     sessions,
     sessionVisibility,
     sessionSharedWithUserIds,
+    sessionIsOwner,
+    sessionOwnerEmail,
+    sessionOwnerName,
     updateSessionSharing,
     startSession,
     runSession,

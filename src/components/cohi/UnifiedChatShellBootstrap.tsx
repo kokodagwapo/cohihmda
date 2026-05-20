@@ -41,6 +41,15 @@ export function UnifiedChatShellBootstrap({
         onResume(row.id, (row.chat_type as UnifiedChatType) ?? chatType);
       } catch {
         const client = createUnifiedChatClient(tenantId);
+        if (chatType === "research") {
+          try {
+            const opened = await client.openSharedResearch(resume);
+            onResume(opened.id, opened.chat_type ?? "research");
+            return;
+          } catch {
+            /* fall through to list lookup */
+          }
+        }
         const list = await client.listConversations({
           limit: 50,
           chat_type: chatType === "research" ? "research" : undefined,

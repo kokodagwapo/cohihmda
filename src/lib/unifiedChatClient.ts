@@ -68,7 +68,7 @@ export interface UnifiedChatMessageRequest {
     includeRag?: boolean;
     includeLiveCanvasData?: boolean;
     maxHistoryTurns?: number;
-    research?: { deepAnalysis?: boolean };
+    research?: { deepAnalysis?: boolean; uploadIds?: string[] };
     insightBuilder?: { action?: "approve" | "revise" };
   };
 }
@@ -84,6 +84,9 @@ export interface UnifiedConversationSummary {
   created_at?: string;
   updated_at: string;
   phase?: string | null;
+  is_shared_view?: boolean;
+  shared_by_email?: string | null;
+  shared_by_name?: string | null;
 }
 
 export interface UnifiedChatFolder {
@@ -167,6 +170,7 @@ export class UnifiedChatClient {
     include_subfolders?: boolean;
     limit?: number;
     offset?: number;
+    shared_with_me?: boolean;
   }): Promise<UnifiedConversationSummary[]> {
     const tid = await this.tid();
     const params = new URLSearchParams();
@@ -180,6 +184,7 @@ export class UnifiedChatClient {
     }
     if (query?.limit !== undefined) params.set("limit", String(query.limit));
     if (query?.offset !== undefined) params.set("offset", String(query.offset));
+    if (query?.shared_with_me) params.set("shared_with_me", "true");
     const qs = params.toString();
     const path = withTenant(
       `${CHAT_V1_CONVERSATIONS_PATH}${qs ? `?${qs}` : ""}`,
@@ -187,6 +192,9 @@ export class UnifiedChatClient {
     );
     const res = await api.request<{ conversations: UnifiedConversationSummary[] }>(
       path,
+      query?.shared_with_me
+        ? { headers: { "Cache-Control": "no-cache" } }
+        : {},
     );
     return res.conversations ?? [];
   }
@@ -201,6 +209,22 @@ export class UnifiedChatClient {
   }> {
     const path = withTenant(`/api/chat/v1/conversations/${id}`, await this.tid());
     return api.request(path);
+  }
+
+  async openSharedResearch(researchSessionId: string): Promise<{
+    id: string;
+    chat_type: UnifiedChatType;
+    legacy_ref: string | null;
+    title: string;
+  }> {
+    const path = withTenant(
+      "/api/chat/v1/conversations/open-shared-research",
+      await this.tid(),
+    );
+    return api.request(path, {
+      method: "POST",
+      body: JSON.stringify({ research_session_id: researchSessionId }),
+    });
   }
 
   async createConversation(body: {

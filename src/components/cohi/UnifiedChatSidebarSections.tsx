@@ -2,7 +2,7 @@
  * Sidebar History / Folders / Full History (COHI-405) — v1 client only.
  */
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -21,6 +21,8 @@ import {
   Clock,
   Folder,
   History,
+  Table2,
+  Users,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -28,14 +30,18 @@ import {
   Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatUserDisplayName } from "@/lib/userDisplayName";
 import { useUnifiedChatHistory } from "@/hooks/useUnifiedChatHistory";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
 import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
+import { createUnifiedChatClient } from "@/lib/unifiedChatClient";
 import {
   getFolderNameById,
   groupConversationsByFolder,
   groupFoldersByParent,
+  isSharedWithMeFolderId,
+  SHARED_WITH_ME_FOLDER_ID,
 } from "@/lib/unifiedChatFolderUtils";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
 import {
@@ -137,6 +143,14 @@ function ConversationMetaSubtitle({
           {folderName}
         </HistoryMetaPill>
       )}
+      {conversation.is_shared_view &&
+        (conversation.shared_by_name || conversation.shared_by_email) && (
+        <HistoryMetaPill className="bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          Shared by{" "}
+          {conversation.shared_by_name ||
+            formatUserDisplayName(null, conversation.shared_by_email)}
+        </HistoryMetaPill>
+      )}
     </span>
   );
 }
@@ -154,7 +168,11 @@ function ConversationRow({
   conversation: ConversationRow;
   dragSource: ConversationDragSource;
   folders: FolderRow[];
-  resumeConversation: (id: string, chatType: string) => void;
+  resumeConversation: (
+    id: string,
+    chatType: string,
+    conversation?: ConversationRow,
+  ) => void | Promise<void>;
   moveConversationToFolder: (
     conversationId: string,
     folderId: string | null,
@@ -190,7 +208,11 @@ function ConversationRow({
           "cursor-grab active:cursor-grabbing",
         )}
         onClick={() => {
-          resumeConversation(conversation.id, conversation.chat_type);
+          void resumeConversation(
+            conversation.id,
+            conversation.chat_type,
+            conversation,
+          );
           onItemActivate?.();
         }}
         {...listeners}
@@ -211,6 +233,89 @@ function ConversationRow({
         onMove={moveConversationToFolder}
         triggerClassName="h-7 w-7 opacity-0 group-hover:opacity-100 shrink-0"
       />
+    </div>
+  );
+}
+
+function SharedWithMeFolderNode({
+  sharedConversations,
+  expandedFolderIds,
+  toggleFolderExpanded,
+  folders,
+  resumeConversation,
+  moveConversationToFolder,
+  onItemActivate,
+}: {
+  sharedConversations: ConversationRow[];
+  expandedFolderIds: Set<string>;
+  toggleFolderExpanded: (folderId: string) => void;
+  folders: FolderRow[];
+  resumeConversation: (
+    id: string,
+    chatType: string,
+    conversation?: ConversationRow,
+  ) => void | Promise<void>;
+  moveConversationToFolder: (
+    conversationId: string,
+    folderId: string | null,
+  ) => Promise<void>;
+  onItemActivate?: () => void;
+}) {
+  const isExpanded = expandedFolderIds.has(SHARED_WITH_ME_FOLDER_ID);
+  const hasContent = sharedConversations.length > 0;
+
+  return (
+    <div>
+      <div className="flex items-center gap-0.5 group rounded-md transition-colors">
+        <button
+          type="button"
+          className={cn(
+            "flex-1 min-w-0 text-left text-sm truncate rounded-md px-2 py-2 min-h-[36px] flex items-center gap-1",
+            isExpanded
+              ? "bg-amber-50/80 dark:bg-amber-950/30 text-amber-900 dark:text-amber-100"
+              : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60",
+          )}
+          onClick={() => toggleFolderExpanded(SHARED_WITH_ME_FOLDER_ID)}
+        >
+          <ChevronRight
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-amber-500 transition-transform",
+              isExpanded && "rotate-90",
+              !hasContent && "opacity-40",
+            )}
+          />
+          <Users className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span className="truncate font-medium">Shared With Me</span>
+          {hasContent && (
+            <span className="text-[10px] text-amber-700/80 dark:text-amber-300/80 tabular-nums shrink-0">
+              ({sharedConversations.length})
+            </span>
+          )}
+        </button>
+      </div>
+      {isExpanded && (
+        <div>
+          {hasContent ? (
+            sharedConversations.map((conversation) => (
+              <ConversationRow
+                key={`shared:${conversation.id}`}
+                conversation={conversation}
+                dragSource="folder"
+                folders={folders}
+                resumeConversation={resumeConversation}
+                moveConversationToFolder={moveConversationToFolder}
+                onItemActivate={onItemActivate}
+                style={{ paddingLeft: "20px" }}
+                showMetaSubtitle
+              />
+            ))
+          ) : (
+            <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400" style={{ paddingLeft: "20px" }}>
+              No shared research yet.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -240,7 +345,11 @@ function FolderTreeNode({
   onOpenFolderDialog: (mode: FolderDialogMode) => void;
   moveFolder: (folderId: string, parentId: string | null) => Promise<void>;
   folders: FolderRow[];
-  resumeConversation: (id: string, chatType: string) => void;
+  resumeConversation: (
+    id: string,
+    chatType: string,
+    conversation?: ConversationRow,
+  ) => void | Promise<void>;
   moveConversationToFolder: (
     conversationId: string,
     folderId: string | null,
@@ -473,6 +582,7 @@ function FolderNameDialog({
 function FolderListBody({
   folders,
   conversations,
+  sharedConversations,
   expandedFolderIds,
   toggleFolderExpanded,
   deleteFolder,
@@ -484,12 +594,17 @@ function FolderListBody({
 }: {
   folders: FolderRow[];
   conversations: ConversationRow[];
+  sharedConversations: ConversationRow[];
   expandedFolderIds: Set<string>;
   toggleFolderExpanded: (folderId: string) => void;
   deleteFolder: (id: string) => Promise<void>;
   onOpenFolderDialog: (mode: FolderDialogMode) => void;
   moveFolder: (folderId: string, parentId: string | null) => Promise<void>;
-  resumeConversation: (id: string, chatType: string) => void;
+  resumeConversation: (
+    id: string,
+    chatType: string,
+    conversation?: ConversationRow,
+  ) => void | Promise<void>;
   moveConversationToFolder: (
     conversationId: string,
     folderId: string | null,
@@ -502,6 +617,15 @@ function FolderListBody({
 
   return (
     <div className="space-y-0.5 px-1 pb-1">
+      <SharedWithMeFolderNode
+        sharedConversations={sharedConversations}
+        expandedFolderIds={expandedFolderIds}
+        toggleFolderExpanded={toggleFolderExpanded}
+        folders={folders}
+        resumeConversation={resumeConversation}
+        moveConversationToFolder={moveConversationToFolder}
+        onItemActivate={onItemActivate}
+      />
       {rootFolders.map((folder) => (
         <FolderTreeNode
           key={folder.id}
@@ -520,7 +644,7 @@ function FolderListBody({
           onItemActivate={onItemActivate}
         />
       ))}
-      {folders.length === 0 && (
+      {folders.length === 0 && sharedConversations.length === 0 && (
         <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">
           No folders yet.
         </p>
@@ -548,7 +672,11 @@ function HistoryListBody({
 }: {
   conversations: ConversationRow[];
   folders: FolderRow[];
-  resumeConversation: (id: string, chatType: string) => void;
+  resumeConversation: (
+    id: string,
+    chatType: string,
+    conversation?: ConversationRow,
+  ) => void | Promise<void>;
   moveConversationToFolder: (
     conversationId: string,
     folderId: string | null,
@@ -593,6 +721,7 @@ export function UnifiedChatSidebarSections({
   const {
     enabled,
     conversations,
+    sharedConversations,
     folders,
     createFolder,
     renameFolder,
@@ -602,8 +731,14 @@ export function UnifiedChatSidebarSections({
   } = useUnifiedChatHistory(tenantId, { recentLimit: SIDEBAR_FETCH_LIMIT });
   const { toast } = useToast();
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set([SHARED_WITH_ME_FOLDER_ID]),
   );
+
+  useEffect(() => {
+    if (sharedConversations.length > 0) {
+      setExpandedFolderIds((prev) => new Set(prev).add(SHARED_WITH_ME_FOLDER_ID));
+    }
+  }, [sharedConversations.length]);
   const [foldersExpanded, setFoldersExpanded] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(true);
   const [folderDialogMode, setFolderDialogMode] =
@@ -668,15 +803,54 @@ export function UnifiedChatSidebarSections({
 
   if (!enabled || !isUnifiedChatClientEnabled()) return null;
 
+  const sharedLegacyRefs = useMemo(
+    () =>
+      new Set(
+        sharedConversations
+          .map((c) => c.legacy_ref)
+          .filter((ref): ref is string => Boolean(ref)),
+      ),
+    [sharedConversations],
+  );
+  const sharedConversationIds = useMemo(
+    () => new Set(sharedConversations.map((c) => c.id)),
+    [sharedConversations],
+  );
   const recentConversations = [...conversations]
+    .filter(
+      (c) =>
+        !c.is_shared_view &&
+        !sharedConversationIds.has(c.id) &&
+        !(c.legacy_ref && sharedLegacyRefs.has(c.legacy_ref)),
+    )
     .sort(
       (a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     )
     .slice(0, SIDEBAR_HISTORY_LIMIT);
 
-  const resumeConversation = (id: string, chatType: string) => {
-    navigate(buildUnifiedChatResumePath(id, chatType), {
+  const resumeConversation = async (
+    id: string,
+    chatType: string,
+    conversation?: ConversationRow,
+  ) => {
+    let resumeId = id;
+    if (
+      conversation?.is_shared_view &&
+      conversation.legacy_ref &&
+      conversation.legacy_ref !== id
+    ) {
+      try {
+        const client = createUnifiedChatClient(tenantId);
+        const opened = await client.openSharedResearch(conversation.legacy_ref);
+        resumeId = opened.id;
+      } catch {
+        resumeId = conversation.legacy_ref;
+      }
+    } else if (conversation?.is_shared_view && conversation.legacy_ref) {
+      resumeId = conversation.legacy_ref;
+    }
+    navigate(buildUnifiedChatResumePath(resumeId, chatType), {
       state: cohiChatResumeNavigationState(),
     });
   };
@@ -685,6 +859,9 @@ export function UnifiedChatSidebarSections({
     conversationId: string,
     folderId: string | null,
   ) => {
+    if (isSharedWithMeFolderId(folderId)) {
+      return;
+    }
     await moveConversationToFolder(conversationId, folderId);
     if (folderId) {
       setExpandedFolderIds((prev) => new Set(prev).add(folderId));
@@ -712,6 +889,9 @@ export function UnifiedChatSidebarSections({
 
     const { conversationId, currentFolderId } = activeData;
     const { folderId } = overData;
+    if (isSharedWithMeFolderId(folderId)) {
+      return;
+    }
     const folderName = folders.find((f) => f.id === folderId)?.name;
 
     if (currentFolderId === folderId) {
@@ -759,6 +939,7 @@ export function UnifiedChatSidebarSections({
   const folderListProps = {
     folders,
     conversations,
+    sharedConversations,
     expandedFolderIds,
     toggleFolderExpanded,
     deleteFolder: handleDeleteFolder,
@@ -825,7 +1006,7 @@ export function UnifiedChatSidebarSections({
       </SidebarExpandableSection>
 
       {isExpanded && (
-        <div className="px-1 pt-1 pb-2">
+        <div className="px-1 pt-1 pb-2 space-y-2">
           <Button
             variant="outline"
             className="w-full justify-center gap-2 h-9 text-sm font-medium"
@@ -834,6 +1015,16 @@ export function UnifiedChatSidebarSections({
             <Link to="/chat/history">
               <History className="h-4 w-4" />
               Full History
+            </Link>
+          </Button>
+          <Button
+            variant="outline"
+            className="w-full justify-center gap-2 h-9 text-sm font-medium"
+            asChild
+          >
+            <Link to="/research/data-explorer">
+              <Table2 className="h-4 w-4" />
+              Data Explorer
             </Link>
           </Button>
         </div>

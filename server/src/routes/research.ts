@@ -36,8 +36,10 @@ import {
   isSessionRunning,
   updateSessionSharing,
   canAccessSession,
+  researchUserIdsEqual,
   type SSEEvent,
 } from "../services/research/orchestrator.js";
+import { formatUserDisplayName } from "../utils/userDisplayName.js";
 import type { ResearchWidgetContext } from "../types/researchWidgetContext.js";
 import { startSSEHeartbeat } from "../utils/sseUtils.js";
 import uploadRoutes from "./research/uploads.js";
@@ -154,6 +156,11 @@ router.get(
     const session = getSession(id) || await loadSession(id, tenantPool);
 
     if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    const userId = req.userId || "";
+    if (!canAccessSession(session, userId)) {
       res.status(404).json({ error: "Session not found" });
       return;
     }
@@ -463,6 +470,20 @@ router.get(
       return;
     }
 
+    let ownerFullName: string | null = null;
+    try {
+      const ownerRow = await tenantPool.query(
+        `SELECT full_name FROM public.users WHERE id = $1::uuid LIMIT 1`,
+        [session.userId],
+      );
+      ownerFullName =
+        typeof ownerRow.rows[0]?.full_name === "string"
+          ? ownerRow.rows[0].full_name
+          : null;
+    } catch {
+      ownerFullName = null;
+    }
+    const ownerEmail = session.userEmail || "";
     res.json({
       id: session.id,
       tenantId: session.tenantId,
@@ -477,6 +498,9 @@ router.get(
       createdAt: session.createdAt,
       visibility: session.visibility ?? "private",
       sharedWithUserIds: session.sharedWithUserIds ?? [],
+      isOwner: researchUserIdsEqual(session.userId, userId),
+      ownerEmail,
+      ownerName: formatUserDisplayName(ownerFullName, ownerEmail),
     });
   }
 );

@@ -265,6 +265,18 @@ export async function listUnifiedConversations(args: {
   params.push(limit);
   const offsetPh = `$${i++}::int`;
   params.push(offset);
+  // Viewer-owned rows materialized for shared research (legacy_ref → someone else's
+  // session) belong in Shared With Me only, not the user's own history list.
+  where.push(`NOT (
+    legacy_source = 'research_lab'
+    AND legacy_ref IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM public.research_sessions rs
+      WHERE rs.id::text = legacy_ref
+        AND rs.user_id::text <> $1::text
+    )
+  )`);
   const q = `
     SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, created_at, updated_at
     FROM public.unified_chat_conversations

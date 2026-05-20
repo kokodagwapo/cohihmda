@@ -2,6 +2,7 @@ import { test, expect } from "./fixtures";
 import {
   dismissBlockingOverlays,
   forceUnifiedChat,
+  gotoWithUnifiedChatShell,
   mockUnifiedChatApis,
   mockUnifiedChatTenantApi,
   mockV1MessageStream,
@@ -20,7 +21,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
 
   test("@critical @COHI-386 @COHI-406 AC1 mode selector four options", async ({ userPage }) => {
     await mockUnifiedChatApis(userPage);
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await gotoWithUnifiedChatShell(userPage, "/insights");
     const selector = userPage.getByRole("combobox", { name: "Chat type" });
     await expect(selector).toBeVisible({ timeout: 15_000 });
     await selector.click();
@@ -36,7 +37,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
 
   test("@critical @COHI-386 @COHI-406 AC2 deep analysis only in Research", async ({ userPage }) => {
     await mockUnifiedChatApis(userPage);
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await gotoWithUnifiedChatShell(userPage, "/insights");
     const selector = userPage.getByRole("combobox", { name: "Chat type" });
     await expect(selector).toBeVisible({ timeout: 15_000 });
 
@@ -60,8 +61,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
       }
     });
 
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
-    await dismissBlockingOverlays(userPage);
+    await gotoWithUnifiedChatShell(userPage, "/insights");
     await userPage.getByRole("button", { name: "Taller" }).click({ force: true });
     await selectUnifiedChatType(userPage, "Insight builder");
 
@@ -99,10 +99,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
       }
     });
 
-    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
-      timeout: 15_000,
-    });
+    await gotoWithUnifiedChatShell(userPage, "/my-dashboard/new");
 
     await selectUnifiedChatType(userPage, "Workbench");
 
