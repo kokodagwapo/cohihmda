@@ -662,6 +662,25 @@ router.post(
           ? (body.viz_config as Record<string, unknown>)
           : null;
 
+      let hasResearchArtifactsTable = false;
+      try {
+        const t = await tenantPool.query(`
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = 'research_artifacts'
+        `);
+        hasResearchArtifactsTable = t.rows.length > 0;
+      } catch {
+        hasResearchArtifactsTable = false;
+      }
+      if (!hasResearchArtifactsTable) {
+        res.status(503).json({
+          error:
+            "Research artifacts table is missing on this tenant. Run pending tenant migrations (likely 132_ensure_research_artifacts if version 111 was previously user_feedback).",
+          code: "research_artifacts_unavailable",
+        });
+        return;
+      }
+
       const insertResult = await tenantPool.query(
         `INSERT INTO research_artifacts
            (user_id, session_id, headline_fingerprint, sql, key_fields, title, viz_config, explanation)

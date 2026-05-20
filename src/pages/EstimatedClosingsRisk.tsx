@@ -1,4 +1,7 @@
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
+import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
+import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
+import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { EstimatedClosingsRiskView } from "@/components/views/EstimatedClosingsRiskView";
 import { useChannelStore } from "@/stores/channelStore";
@@ -10,9 +13,8 @@ const EstimatedClosingsRisk = () => {
 
   return (
     <TopTieringLayout>
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col">
-        <TopTieringTopBar title="Estimated Closings and Risk Analysis" />
-        <main className="flex-1 overflow-y-auto px-4 py-2 sm:px-6 sm:py-3">
+      <TopTieringPageFrame topBar={<TopTieringTopBar title="Estimated Closings and Risk Analysis" />}>
+        <main className={DASHBOARD_MAIN_CLASSNAME}>
           <div className="mx-auto max-w-[1800px]">
             <EstimatedClosingsRiskView
               selectedTenantId={selectedTenantId}
@@ -20,7 +22,7 @@ const EstimatedClosingsRisk = () => {
             />
           </div>
         </main>
-      </div>
+      </TopTieringPageFrame>
     </TopTieringLayout>
   );
 };

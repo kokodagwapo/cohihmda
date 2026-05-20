@@ -3,10 +3,22 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
-// Suppress ECONNREFUSED noise during startup (backend not ready yet)
+// When the API is down, return JSON so browser `fetch().then(r => r.json())` does not fail on an empty body.
 const silenceProxyErrors = (proxy: any) => {
   proxy.on('error', (err: any, _req: any, res: any) => {
-    if (err.code === 'ECONNREFUSED') return;
+    if (err.code === 'ECONNREFUSED') {
+      if (res && typeof res.writeHead === 'function' && !res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: 'bad_gateway',
+            message:
+              'API server not reachable. Is the backend running on http://localhost:3001? (Vite proxies /api there.)',
+          }),
+        );
+      }
+      return;
+    }
     console.error('[vite] proxy error:', err.message);
   });
 };

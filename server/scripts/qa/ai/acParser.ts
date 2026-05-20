@@ -2,7 +2,14 @@ import { AcStatementSchema, type ACStatement } from "./types.js";
 
 const ACCEPTANCE_CRITERIA_HEADING_REGEX = /(?:^|\n)(?:#{1,6}\s*)?Acceptance Criteria\s*(?:\n|$)/i;
 const STATEMENT_REGEX = /^\s*(\d+)[.)]\s*\[([A-Z]+)\]\s+(.+?)\s*$/i;
-const VALID_CATEGORIES = new Set(["ROUTE", "UI", "API", "ASSERTION", "STATE"]);
+const VALID_CATEGORIES = new Set([
+  "ROUTE",
+  "UI",
+  "API",
+  "ASSERTION",
+  "STATE",
+  "MUTATION",
+]);
 
 export interface ParseAcSuccess {
   statements: ACStatement[];

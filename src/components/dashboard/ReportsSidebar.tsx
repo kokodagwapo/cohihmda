@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+﻿import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers, Mail, Users, MessageSquare, LayoutPanelLeft, Database } from 'lucide-react';
@@ -26,7 +26,11 @@ import { usePinnedDashboardsStore, type PinnedItem } from '@/stores/pinnedDashbo
 import { useTenantStore } from '@/stores/tenantStore';
 import { useTenantLosLastSyncedAt } from '@/hooks/useTenantLosLastSyncedAt';
 import { formatDataLastSyncedLine } from '@/utils/losSyncDisplay';
-import { useWorkbenchNav } from '@/hooks/useWorkbenchNav';
+import { useWorkbenchNav, type SidebarCanvas } from '@/hooks/useWorkbenchNav';
+import { UnifiedChatSidebarSections } from '@/components/cohi/UnifiedChatSidebarSections';
+import { SIDEBAR_NAV_ACCENT } from '@/components/cohi/sidebarNavPrimitives';
+import { UnifiedSidebarInsightsNav } from '@/components/cohi/UnifiedSidebarInsightsNav';
+import { isUnifiedChatClientEnabled } from '@/lib/unifiedChatEnvelope';
 import {
   DndContext,
   closestCenter,
@@ -60,6 +64,8 @@ export interface DashboardVisibility {
 }
 
 export type SectionId = keyof DashboardVisibility;
+
+const MY_DASHBOARDS_ACCENT = SIDEBAR_NAV_ACCENT.yellow;
 
 interface ReportsSidebarProps {
   onReportClick: (report: ReportData) => void;
@@ -227,7 +233,7 @@ const DASHBOARD_CHILDREN = [
 // Submenus under Toptiering main menu (Core Analytics, Sales, Operations, Financial Modeling)
 const TOPTIERING_CHILDREN = [
   { type: 'subheader' as const, label: 'Core Analytics', subsectionKey: 'topTiering' as SubsectionKey },
-  // Loan Funnel page hidden – references removed
+  // Loan Funnel page hidden â€“ references removed
   // { type: 'route' as const, id: 'loanFunnel', label: 'Loan Funnel', icon: Filter, path: '/loan-funnel', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, path: '/performance/toptiering-comparison', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, path: '/credit-risk-management', subsectionKey: 'topTiering' as SubsectionKey },
@@ -328,9 +334,12 @@ const colorMap: Record<string, { bg: string; text: string }> = {
   'text-slate-500': { bg: 'rgba(100, 116, 139, 0.1)', text: '#64748b' },
 };
 
-interface SortablePinnedItemProps {
+function getCanvasSidebarId(canvasId: string) {
+  return `canvas-${canvasId}`;
+}
+
+interface SortableSidebarDashboardRowProps {
   id: string;
-  item: PinnedItem;
   isDarkMode: boolean;
   isCurrent: boolean;
   label: string;
@@ -338,12 +347,11 @@ interface SortablePinnedItemProps {
   style: { bg: string; icon: string };
   onNavigate: () => void;
   onRemove: () => void;
-  onSectionClick?: (sectionId: string) => void;
+  removeTitle?: string;
 }
 
-function SortablePinnedItem({
+function SortableSidebarDashboardRow({
   id,
-  item,
   isDarkMode,
   isCurrent,
   label,
@@ -351,8 +359,8 @@ function SortablePinnedItem({
   style,
   onNavigate,
   onRemove,
-  onSectionClick,
-}: SortablePinnedItemProps) {
+  removeTitle = 'Unpin from sidebar',
+}: SortableSidebarDashboardRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const styleTransform = {
     transform: CSS.Transform.toString(transform),
@@ -380,7 +388,7 @@ function SortablePinnedItem({
       </div>
       <button
         type="button"
-        onClick={() => (item.type === 'section' ? onSectionClick?.(item.id) : onNavigate())}
+        onClick={onNavigate}
         style={{
           flex: 1,
           padding: '12px 12px 12px 8px',
@@ -425,7 +433,7 @@ function SortablePinnedItem({
           onRemove();
         }}
         className="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60 mr-2"
-        title="Unpin from sidebar"
+        title={removeTitle}
         aria-label="Unpin"
       >
         <PinOff className="w-3.5 h-3.5 text-amber-500" />
@@ -433,6 +441,166 @@ function SortablePinnedItem({
     </div>
   );
 }
+
+interface SortablePinnedItemProps {
+  id: string;
+  item: PinnedItem;
+  isDarkMode: boolean;
+  isCurrent: boolean;
+  label: string;
+  Icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>;
+  style: { bg: string; icon: string };
+  onNavigate: () => void;
+  onRemove: () => void;
+  onSectionClick?: (sectionId: string) => void;
+}
+
+function SortablePinnedItem(props: SortablePinnedItemProps) {
+  const { id, item, isDarkMode, isCurrent, label, Icon, style, onNavigate, onRemove, onSectionClick } =
+    props;
+  return (
+    <SortableSidebarDashboardRow
+      id={id}
+      isDarkMode={isDarkMode}
+      isCurrent={isCurrent}
+      label={label}
+      Icon={Icon}
+      style={style}
+      onNavigate={() =>
+        item.type === 'section' ? onSectionClick?.(item.id) : onNavigate()
+      }
+      onRemove={onRemove}
+    />
+  );
+}
+
+const workbenchCanvasNavStyle = {
+  bg: 'bg-violet-500/10 dark:bg-violet-500/20',
+  icon: 'text-violet-500 dark:text-violet-400',
+};
+
+function WorkbenchCanvasSidebarRow({
+  canvas,
+  isDarkMode,
+  isCurrent,
+  onNavigate,
+  onUnpin,
+  variant = 'desktop',
+}: {
+  canvas: SidebarCanvas;
+  isDarkMode: boolean;
+  isCurrent: boolean;
+  onNavigate: () => void;
+  onUnpin: () => void;
+  variant?: 'desktop' | 'mobile' | 'popover';
+}) {
+  if (variant === 'desktop') {
+    return (
+      <SortableSidebarDashboardRow
+        id={getCanvasSidebarId(canvas.id)}
+        isDarkMode={isDarkMode}
+        isCurrent={isCurrent}
+        label={canvas.title}
+        Icon={LayoutPanelLeft}
+        style={workbenchCanvasNavStyle}
+        onNavigate={onNavigate}
+        onRemove={onUnpin}
+        removeTitle="Remove from My Dashboards"
+      />
+    );
+  }
+
+  if (variant === 'mobile') {
+    return (
+      <div className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
+        <button
+          type="button"
+          onClick={onNavigate}
+          className={cn(
+            'flex-shrink-0 min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center',
+            workbenchCanvasNavStyle.bg,
+            isCurrent && 'ring-1 ring-emerald-400/50',
+          )}
+        >
+          <LayoutPanelLeft
+            className={cn(
+              'w-4 h-4',
+              isCurrent ? 'text-emerald-600 dark:text-emerald-400' : workbenchCanvasNavStyle.icon,
+            )}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={onNavigate}
+          className={cn(
+            'flex-1 text-left text-sm min-h-[44px] flex items-center truncate',
+            isCurrent
+              ? 'text-slate-900 dark:text-slate-100 font-medium'
+              : 'text-slate-700 dark:text-slate-300',
+          )}
+        >
+          {canvas.title}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnpin();
+          }}
+          className="shrink-0 p-1.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-600/60"
+          title="Remove from My Dashboards"
+          aria-label="Unpin"
+        >
+          <PinOff className="w-3.5 h-3.5 text-amber-500" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 group rounded-md">
+      <button
+        type="button"
+        onClick={onNavigate}
+        className={cn(
+          'flex-1 flex items-center gap-2 px-2 py-2 rounded-md text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800/60 min-w-0',
+          isCurrent && 'bg-slate-100 dark:bg-slate-800/40',
+        )}
+      >
+        <div
+          className={cn(
+            'flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center',
+            workbenchCanvasNavStyle.bg,
+            isCurrent && 'ring-1 ring-emerald-400/50',
+          )}
+        >
+          <LayoutPanelLeft
+            className={cn(
+              'w-4 h-4',
+              isCurrent ? 'text-emerald-500 dark:text-emerald-400' : workbenchCanvasNavStyle.icon,
+            )}
+          />
+        </div>
+        <span className="truncate">{canvas.title}</span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onUnpin();
+        }}
+        className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60"
+        title="Remove from My Dashboards"
+        aria-label="Unpin"
+      >
+        <PinOff className="w-3.5 h-3.5 text-amber-500" />
+      </button>
+    </div>
+  );
+}
+
+const EMPTY_MY_DASHBOARDS_HINT =
+  'Pin dashboards from the top nav, or favorite workbench canvases to see them here.';
 
 export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({ 
   onReportClick, 
@@ -463,8 +631,8 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const flyoutLeaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMobileOpen = externalMobileOpen !== undefined ? externalMobileOpen : internalMobileOpen;
   const [insightsExpanded, setInsightsExpanded] = useState(true);
-  const [dashboardsExpanded, setDashboardsExpanded] = useState(true);
-  const [workbenchExpanded, setWorkbenchExpanded] = useState(true);
+  const unifiedChatIa = isUnifiedChatClientEnabled();
+  const [dashboardsExpanded, setDashboardsExpanded] = useState(() => !unifiedChatIa);
   const [researchExpanded, setResearchExpanded] = useState(true);
   const [toptieringExpanded, setToptieringExpanded] = useState(false);
   const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(true);
@@ -472,20 +640,29 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const [operationsSubExpanded, setOperationsSubExpanded] = useState(true);
   const [financialModelingSubExpanded, setFinancialModelingSubExpanded] = useState(true);
   const { pinned: pinnedItems, removePinned, reorderPinned, getPinnedItemId } = usePinnedDashboardsStore();
-  const { favoriteCanvases } = useWorkbenchNav();
+  const { favoriteCanvases, toggleCanvasFavorite } = useWorkbenchNav();
   const pinnedIds = useMemo(() => pinnedItems.map((p) => getPinnedItemId(p)), [pinnedItems, getPinnedItemId]);
+  const favoriteCanvasSidebarIds = useMemo(
+    () => favoriteCanvases.map((c) => getCanvasSidebarId(c.id)),
+    [favoriteCanvases],
+  );
+  const myDashboardsSortableIds = useMemo(
+    () => [...pinnedIds, ...favoriteCanvasSidebarIds],
+    [pinnedIds, favoriteCanvasSidebarIds],
+  );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
-  const handlePinnedDragEnd = (event: DragEndEvent) => {
+  const handleMyDashboardsDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = pinnedIds.indexOf(String(active.id));
-    const newIndex = pinnedIds.indexOf(String(over.id));
+    const oldIndex = myDashboardsSortableIds.indexOf(String(active.id));
+    const newIndex = myDashboardsSortableIds.indexOf(String(over.id));
     if (oldIndex === -1 || newIndex === -1) return;
-    const reordered = arrayMove(pinnedIds, oldIndex, newIndex);
-    reorderPinned(reordered);
+    const reordered = arrayMove(myDashboardsSortableIds, oldIndex, newIndex);
+    const pinnedOnly = reordered.filter((id) => pinnedIds.includes(id));
+    if (pinnedOnly.length === pinnedIds.length) reorderPinned(pinnedOnly);
   };
   const realtimeStats = useRealtimeStats();
 
@@ -743,7 +920,19 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               </div>
               
               <div className="p-4 pt-2 space-y-1">
-                {/* Insights */}
+                {/* Insights â€” Â§6.1 single control when unified */}
+                {unifiedChatIa ? (
+                  <button
+                    type="button"
+                    onClick={() => { navigate('/insights'); onMobileMenuToggle?.(); }}
+                    className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation"
+                  >
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-emerald-500/10 dark:bg-emerald-500/20">
+                      <Sun className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 flex-1 text-left">Insights</p>
+                  </button>
+                ) : (
                 <div>
                   <button
                     onClick={() => setInsightsExpanded(!insightsExpanded)}
@@ -797,6 +986,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     )}
                   </AnimatePresence>
                 </div>
+                )}
 
                 {/* Dashboard - category always shown; submenu shows pinned items from top nav */}
                 <div>
@@ -805,10 +995,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     onClick={() => setDashboardsExpanded(!dashboardsExpanded)}
                     className="w-full flex items-center gap-3 px-4 pt-3 pb-2 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation text-left"
                   >
-                    <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                      <LayoutGrid className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
+                    <div className={cn("flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}>
+                      <LayoutGrid className={cn("w-[18px] h-[18px]", MY_DASHBOARDS_ACCENT.icon)} />
                     </div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex-1">My Dashboards</p>
+                    <p className={cn("text-sm font-semibold flex-1", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                     <ChevronDown className={cn("w-[18px] h-[18px] text-slate-500 dark:text-slate-400 shrink-0 transition-transform duration-200", !dashboardsExpanded && "-rotate-90")} />
                   </button>
                   <AnimatePresence initial={false}>
@@ -821,11 +1011,13 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                         className="overflow-hidden"
                       >
                   <div className="pl-4 pr-2 pb-2 space-y-1">
-                    {pinnedItems.length === 0 ? (
+                    {pinnedItems.length === 0 && favoriteCanvases.length === 0 ? (
                       <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">
-                        Pin a dashboard for quick access.
+                        {EMPTY_MY_DASHBOARDS_HINT}
                       </p>
-                    ) : pinnedItems.map((item) => {
+                    ) : (
+                      <>
+                    {pinnedItems.map((item) => {
                       const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
                       const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
                       if (item.type === 'section') {
@@ -853,11 +1045,35 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                         </div>
                       );
                     })}
+                    {favoriteCanvases.map((canvas) => (
+                      <WorkbenchCanvasSidebarRow
+                        key={`canvas-${canvas.id}`}
+                        canvas={canvas}
+                        isDarkMode={isDarkMode}
+                        isCurrent={location.pathname === `/my-dashboard/${canvas.id}`}
+                        variant="mobile"
+                        onNavigate={() => {
+                          navigate(`/my-dashboard/${canvas.id}`);
+                          onMobileMenuToggle?.();
+                        }}
+                        onUnpin={() => void toggleCanvasFavorite(canvas.id, false)}
+                      />
+                    ))}
+                      </>
+                    )}
                   </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
                 </div>
+
+                {unifiedChatIa && (
+                  <UnifiedChatSidebarSections
+                    tenantId={selectedTenantId ?? undefined}
+                    isDarkMode={isDarkMode}
+                    isExpanded
+                  />
+                )}
 
                 {/* Toptiering - hidden from sidebar; routes available under Dashboards and via pinning */}
                 {!HIDE_TOPTIERING_IN_SIDEBAR && (
@@ -934,69 +1150,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 </div>
                 )}
 
-                {/* My Workbench */}
-                <div>
-                  <div className="flex items-center gap-1 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 pr-1">
-                    <button
-                      type="button"
-                      onClick={() => { navigate('/workbench'); onMobileMenuToggle?.(); }}
-                      className={cn("flex-1 flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg text-left touch-manipulation", isPathActive('/workbench') && "bg-slate-100 dark:bg-slate-800/60")}
-                    >
-                      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", isPathActive('/workbench') ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
-                        <LayoutPanelLeft className={cn("w-4 h-4", isPathActive('/workbench') ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
-                      </div>
-                      <span className={cn("text-sm", isPathActive('/workbench') ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>My Workbench</span>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={workbenchExpanded ? "Collapse favorites" : "Expand favorites"}
-                      onClick={() => setWorkbenchExpanded(!workbenchExpanded)}
-                      className="shrink-0 p-2 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-700/60 touch-manipulation"
-                    >
-                      <ChevronDown className={cn("w-[18px] h-[18px] text-slate-500 dark:text-slate-400 transition-transform duration-200", !workbenchExpanded && "-rotate-90")} />
-                    </button>
-                  </div>
-                  <AnimatePresence initial={false}>
-                    {workbenchExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: "easeInOut" }}
-                        className="overflow-hidden"
-                      >
-                        <div className="pl-4 pr-2 pb-2 space-y-1">
-                          {favoriteCanvases.length === 0 ? (
-                            <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">
-                              No favorited canvases yet.
-                            </p>
-                          ) : favoriteCanvases.slice(0, 5).map((canvas) => {
-                            const isCurrent = location.pathname === `/my-dashboard/${canvas.id}`;
-                            return (
-                              <button
-                                key={canvas.id}
-                                onClick={() => { navigate(`/my-dashboard/${canvas.id}`); onMobileMenuToggle?.(); }}
-                                className={cn(
-                                  "w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation",
-                                  isCurrent && "bg-slate-100 dark:bg-slate-800/60",
-                                )}
-                              >
-                                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isCurrent ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
-                                  <Pin className={cn("w-4 h-4", isCurrent ? "text-amber-500" : "text-slate-500 dark:text-slate-400")} />
-                                </div>
-                                <span className={cn("text-sm truncate", isCurrent ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>
-                                  {canvas.title}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {/* Research Lab */}
+                {!unifiedChatIa && (
                 <div>
                   <button
                     type="button"
@@ -1031,8 +1185,9 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     )}
                   </AnimatePresence>
                 </div>
+                )}
 
-                {/* Communications Center */}
+                {!unifiedChatIa && (
                 <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", isPathActive('/workbench/distributions') && "bg-slate-100 dark:bg-slate-800/60")}>
                   <button onClick={() => { navigate('/workbench/distributions'); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
                     <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isPathActive('/workbench/distributions') ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
@@ -1041,6 +1196,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   </button>
                   <button onClick={() => { navigate('/workbench/distributions'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">Communications Center</button>
                 </div>
+                )}
               </div>
               </>
               )}
@@ -1055,7 +1211,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Desktop: same behavior/styles as /admin-v2 — fixed, scrollable content, header with expand/collapse */}
+      {/* Desktop: same behavior/styles as /admin-v2 â€” fixed, scrollable content, header with expand/collapse */}
       <Sidebar
         variant="inset"
         collapsible="icon"
@@ -1132,7 +1288,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
         <SidebarContent className={cn("pb-3 overflow-y-auto flex-1 min-h-0")}>
         <div className={cn("py-2", isExpanded ? "pl-1 pr-2" : "px-1")}>
           {/* Search moved to top nav - sidebar no longer shows search bar */}
-          {/* Insights */}
+          {/* Insights â€” Â§6.1 single control when unified */}
+          {unifiedChatIa ? (
+            <UnifiedSidebarInsightsNav isDarkMode={isDarkMode} collapsed={!isExpanded} />
+          ) : (
           <div>
             {isExpanded ? (
               <>
@@ -1270,6 +1429,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             </Popover>
             )}
           </div>
+          )}
 
           {/* Dashboard submenus hidden from sidebar; only pinned items shown above */}
 
@@ -1416,10 +1576,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
-                <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                  <TrendingUp className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
+                <div className={cn("flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}>
+                  <TrendingUp className={cn("w-[18px] h-[18px]", MY_DASHBOARDS_ACCENT.icon)} />
                 </div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex-1 m-0">My Dashboards</p>
+                <p className={cn("text-sm font-semibold flex-1 m-0", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                 <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: dashboardsExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
               </button>
               <AnimatePresence initial={false}>
@@ -1432,15 +1592,18 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     style={{ overflow: 'hidden' }}
                   >
                     <div className="space-y-0.5">
-                      {pinnedItems.length === 0 ? (
-                        <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">Pin a dashboard for quick access.</p>
+                      {pinnedItems.length === 0 && favoriteCanvases.length === 0 ? (
+                        <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">{EMPTY_MY_DASHBOARDS_HINT}</p>
                       ) : (
                         <DndContext
                           sensors={sensors}
                           collisionDetection={closestCenter}
-                          onDragEnd={handlePinnedDragEnd}
+                          onDragEnd={handleMyDashboardsDragEnd}
                         >
-                          <SortableContext items={pinnedIds} strategy={verticalListSortingStrategy}>
+                          <SortableContext
+                            items={myDashboardsSortableIds}
+                            strategy={verticalListSortingStrategy}
+                          >
                             {pinnedItems.map((item) => {
                               const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
                               const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
@@ -1463,6 +1626,16 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                                 />
                               );
                             })}
+                            {favoriteCanvases.map((canvas) => (
+                              <WorkbenchCanvasSidebarRow
+                                key={`canvas-${canvas.id}`}
+                                canvas={canvas}
+                                isDarkMode={isDarkMode}
+                                isCurrent={location.pathname === `/my-dashboard/${canvas.id}`}
+                                onNavigate={() => navigate(`/my-dashboard/${canvas.id}`)}
+                                onUnpin={() => void toggleCanvasFavorite(canvas.id, false)}
+                              />
+                            ))}
                           </SortableContext>
                         </DndContext>
                       )}
@@ -1479,17 +1652,13 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setPinnedDashboardFlyoutOpen(true); }}
                   onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setPinnedDashboardFlyoutOpen(false), 150); }}
                 >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
-                      >
-                        <TrendingUp className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">My Dashboards</TooltipContent>
-                  </Tooltip>
+                  <button
+                    type="button"
+                    className={cn("w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}
+                    aria-label="My Dashboards"
+                  >
+                    <TrendingUp className={cn("w-4 h-4", MY_DASHBOARDS_ACCENT.icon)} />
+                  </button>
                 </div>
               </PopoverTrigger>
               <PopoverContent
@@ -1500,15 +1669,17 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setPinnedDashboardFlyoutOpen(false), 150); }}
               >
                 <div className="flex items-center gap-2 px-2 pb-2">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                    <TrendingUp className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                  <div className={cn("flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}>
+                    <TrendingUp className={cn("w-4 h-4", MY_DASHBOARDS_ACCENT.icon)} />
                   </div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">My Dashboards</p>
+                  <p className={cn("text-sm font-semibold", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                 </div>
                 <div className="space-y-0.5">
-                  {pinnedItems.length === 0 ? (
-                    <p className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">Pin a dashboard for quick access.</p>
-                  ) : pinnedItems.map((item) => {
+                  {pinnedItems.length === 0 && favoriteCanvases.length === 0 ? (
+                    <p className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">{EMPTY_MY_DASHBOARDS_HINT}</p>
+                  ) : (
+                    <>
+                  {pinnedItems.map((item) => {
                     const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
                     const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
                     if (item.type === 'section') {
@@ -1538,94 +1709,37 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                       </div>
                     );
                   })}
+                  {favoriteCanvases.map((canvas) => (
+                    <WorkbenchCanvasSidebarRow
+                      key={`canvas-${canvas.id}`}
+                      canvas={canvas}
+                      isDarkMode={isDarkMode}
+                      isCurrent={location.pathname === `/my-dashboard/${canvas.id}`}
+                      variant="popover"
+                      onNavigate={() => {
+                        navigate(`/my-dashboard/${canvas.id}`);
+                        setPinnedDashboardFlyoutOpen(false);
+                      }}
+                      onUnpin={() => void toggleCanvasFavorite(canvas.id, false)}
+                    />
+                  ))}
+                    </>
+                  )}
                 </div>
               </PopoverContent>
             </Popover>
           )}
 
-          {/* My Workbench */}
-          {isExpanded ? (
-            <div>
-              <div style={{ width: '100%', padding: '12px 6px 12px 10px', display: 'flex', alignItems: 'center', gap: 4, transition: 'all 0.2s ease' }}>
-                <button
-                  type="button"
-                  onClick={() => navigate('/workbench')}
-                  style={{ flex: 1, padding: '0 4px 0 0', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', borderRadius: 8, minWidth: 0 }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                >
-                  <span style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                    <LayoutPanelLeft size={18} style={{ color: isPathActive('/workbench') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
-                  </span>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29' }}>My Workbench</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={workbenchExpanded ? 'Collapse favorites' : 'Expand favorites'}
-                  onClick={() => setWorkbenchExpanded(!workbenchExpanded)}
-                  style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s ease' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.12)' : 'rgba(0, 0, 0, 0.06)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                >
-                  <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: workbenchExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
-                </button>
-              </div>
-              <AnimatePresence initial={false}>
-                {workbenchExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2, ease: 'easeInOut' }}
-                    style={{ overflow: 'hidden' }}
-                  >
-                    <div className="pl-9 pr-2 pb-2 space-y-0.5">
-                      {favoriteCanvases.length === 0 ? (
-                        <p className="px-2 py-1.5 text-xs text-slate-500 dark:text-slate-400">
-                          No favorited canvases yet.
-                        </p>
-                      ) : favoriteCanvases.slice(0, 5).map((canvas) => {
-                        const isCurrent = location.pathname === `/my-dashboard/${canvas.id}`;
-                        return (
-                          <button
-                            key={canvas.id}
-                            type="button"
-                            onClick={() => navigate(`/my-dashboard/${canvas.id}`)}
-                            className={cn(
-                              "w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
-                              isCurrent
-                                ? "bg-slate-100 dark:bg-slate-800/60 text-slate-900 dark:text-slate-100"
-                                : "text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80",
-                            )}
-                          >
-                            <Pin className={cn("w-3.5 h-3.5 shrink-0", isCurrent ? "text-amber-500" : "text-slate-400 dark:text-slate-500")} />
-                            <span className="truncate">{canvas.title}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  style={{ width: '100%', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  onClick={() => navigate('/workbench')}
-                >
-                  <button onClick={(e) => { e.stopPropagation(); navigate('/workbench'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
-                    <LayoutPanelLeft size={18} style={{ color: isPathActive('/workbench') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
-                  </button>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="right">My Workbench</TooltipContent>
-            </Tooltip>
+          {unifiedChatIa && (
+            <UnifiedChatSidebarSections
+              tenantId={selectedTenantId ?? undefined}
+              isDarkMode={isDarkMode}
+              isExpanded={isExpanded}
+            />
           )}
 
+          {!unifiedChatIa && (
+          <>
           {/* Research Lab */}
           {isExpanded ? (
             <div>
@@ -1681,7 +1795,11 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               <TooltipContent side="right">Research Lab</TooltipContent>
             </Tooltip>
           )}
+          </>
+          )}
 
+          {!unifiedChatIa && (
+          <>
           {/* Communications Center */}
           {isExpanded ? (
             <div
@@ -1711,6 +1829,8 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               </TooltipTrigger>
               <TooltipContent side="right">Communications Center</TooltipContent>
             </Tooltip>
+          )}
+          </>
           )}
         </div>
         </SidebarContent>

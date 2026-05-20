@@ -24,6 +24,7 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { promises as fs } from "node:fs";
+import { forceUnifiedChat, mockV1MessageStream } from "./helpers/unifiedChat";
 
 // ---------- Mock fixtures ---------------------------------------------------
 
@@ -182,8 +183,8 @@ async function mockChatAndWorkbench(page: Page) {
     });
   });
 
-  // Unified v1 path (when VITE_UNIFIED_CHAT=true) — same chart payload as blocks.
-  await page.route(/\/api\/chat\/v1\/messages(\?|$)/, async (route) => {
+  // Unified v1 non-stream fallback (legacy clients).
+  await page.route(/\/api\/chat\/v1\/messages(?!:stream)(\?|$)/, async (route) => {
     try {
       captured.askBodies.push(JSON.parse(route.request().postData() || "{}"));
     } catch {
@@ -212,6 +213,16 @@ async function mockChatAndWorkbench(page: Page) {
         },
       }),
     });
+  });
+
+  await mockV1MessageStream(page, {
+    replyText: MOCK_ASK_RESPONSE.message,
+    visualization: MOCK_VISUALIZATION,
+    streamMetadata: {
+      sqlQuery: MOCK_ASK_RESPONSE.sqlQuery,
+      sources: MOCK_ASK_RESPONSE.sources,
+      suggestedQuestions: MOCK_ASK_RESPONSE.suggestedQuestions,
+    },
   });
 
   // Workbench canvas creation (Edit in PPT Editor + Save all to Workbench).
@@ -382,6 +393,7 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
 
   test.beforeEach(async ({ userPage }) => {
     await suppressOnboarding(userPage);
+    await forceUnifiedChat(userPage);
   });
 
   // --------------------------------------------------------------------------

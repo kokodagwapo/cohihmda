@@ -62,6 +62,9 @@ import FalloutForecast from "./pages/FalloutForecast";
 import FalloutLoanDetail from "./pages/FalloutLoanDetail";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
+import { ChatShellProvider } from "@/contexts/ChatShellContext";
+import { CohiChatSessionProvider } from "@/contexts/CohiChatSessionContext";
+import ChatFullHistory from "./pages/ChatFullHistory";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 import { TutorialProvider } from "@/contexts/TutorialContext";
 import { WelcomeTourTrigger } from "@/components/tutorial/WelcomeTourTrigger";
@@ -81,6 +84,8 @@ import HelpCenter from "./pages/HelpCenter";
 import FeedbackPage from "./pages/Feedback";
 import FeedbackDetailPage from "./pages/FeedbackDetail";
 import DataChat from "./pages/DataChat";
+import CohiChatHome from "./pages/CohiChatHome";
+import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
 
 import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
@@ -128,24 +133,45 @@ function Handle404Redirect() {
   return null;
 }
 
-function RootRoute() {
-  const { isAuthenticated, user, isLoading } = useAuth();
-  if (isLoading) return null;
-  if (isAuthenticated) {
-    if (user?.persona === "tenant_canvas_only_user") {
-      return <Navigate to="/workbench" replace />;
-    }
-    return <Navigate to="/insights" replace />;
-  }
-  return <Index />;
-}
-
 function FullAccessOnly({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   if (user?.persona === "tenant_canvas_only_user") {
     return null;
   }
   return <>{children}</>;
+}
+
+/** Legacy `/research/session?session=` → unified chat home resume (COHI-403). */
+function LegacyResearchIndexRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const session = params.get("session");
+  if (session) {
+    return (
+      <Navigate
+        to={buildUnifiedChatResumePath(session, "research")}
+        state={{ resumeChat: true }}
+        replace
+      />
+    );
+  }
+  return <ResearchHub />;
+}
+
+function LegacyResearchSessionRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const session = params.get("session");
+  if (session) {
+    return (
+      <Navigate
+        to={buildUnifiedChatResumePath(session, "research")}
+        state={{ resumeChat: true }}
+        replace
+      />
+    );
+  }
+  return <Navigate to="/?mode=research" replace />;
 }
 
 const App = () => (
@@ -163,14 +189,15 @@ const App = () => (
             <Toaster />
             <Sonner />
             <Router basename={import.meta.env.BASE_URL}>
+              <ChatShellProvider>
+              <CohiChatSessionProvider>
               <FullAccessOnly>
                 <AnalyticsPageViewTracker />
               </FullAccessOnly>
               <Handle404Redirect />
               <ScrollToTop />
               <Routes>
-              {/* Public routes */}
-              <Route path="/" element={<RootRoute />} />
+              {/* Public routes — marketing at /landing; authenticated chat home at / (protected) */}
               <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -180,8 +207,11 @@ const App = () => (
 
               {/* Protected routes - require authentication; canvas_only users see only CanvasOnlyLayout on /my-dashboard* */}
               <Route element={<ProtectedRoute><AccessModeGate /></ProtectedRoute>}>
+              <Route path="/" element={<CohiChatHome />} />
+              <Route path="/cohi-chat" element={<Navigate to="/" replace />} />
               <Route path="/settings" element={<UserSettings />} />
                 <Route path="/insights" element={<Dashboard />} />
+                <Route path="/chat/history" element={<ChatFullHistory />} />
                 <Route path="/legacy" element={<DashboardLegacy />} />
               <Route path="/loans" element={<Loans />} />
               <Route path="/my-dashboard" element={<Navigate to="/workbench" replace />} />
@@ -193,9 +223,13 @@ const App = () => (
               <Route path="/workbench/favorites" element={<Favorites />} />
               <Route path="/workbench/distributions" element={<Distributions />} />
               
-              {/* Research Lab */}
-              <Route path="/research" element={<ResearchHub />} />
-              <Route path="/research/session" element={<ResearchAnalyst />} />
+              {/* Research Lab — legacy entry points redirect to unified shell (COHI-403) */}
+              <Route path="/research-lab" element={<Navigate to="/insights?mode=research" replace />} />
+              <Route path="/research" element={<LegacyResearchIndexRedirect />} />
+              <Route
+                path="/research/session"
+                element={<LegacyResearchSessionRedirect />}
+              />
               <Route path="/research/data-explorer" element={<DataExplorer />} />
               <Route path="/data-chat" element={
                 <ProtectedRoute>
@@ -271,6 +305,8 @@ const App = () => (
                 <WelcomeTourTrigger />
                 <ActiveTourRunner />
               </FullAccessOnly>
+              </CohiChatSessionProvider>
+              </ChatShellProvider>
           </Router>
         </TooltipProvider>
         </EditProvider>

@@ -100,6 +100,8 @@ interface FindingDrillDownProps {
   finding: Finding;
   onClose: () => void;
   sessionId?: string | null;
+  /** When set, uses parent modal (e.g. unified chat shell) instead of an embedded modal. */
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
 }
 
 type SortDirection = "asc" | "desc" | null;
@@ -1723,8 +1725,16 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
 
 const KPI_INITIAL_VISIBLE = 6;
 
-export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDownProps) {
+export function FindingDrillDown({
+  finding,
+  onClose,
+  sessionId,
+  onSaveToWorkbench: onSaveToWorkbenchProp,
+}: FindingDrillDownProps) {
   const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
+  const handleSaveToWorkbench =
+    onSaveToWorkbenchProp ?? ((payload: SaveToWorkbenchPayload) => setSaveToWorkbenchPayload(payload));
+  const useEmbeddedWorkbenchModal = onSaveToWorkbenchProp == null;
   const [kpiExpanded, setKpiExpanded] = useState(false);
   const [extraChartsOpen, setExtraChartsOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
@@ -1809,7 +1819,7 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
                     size="icon"
                     className="h-8 w-8"
                     onClick={() =>
-                      setSaveToWorkbenchPayload({
+                      handleSaveToWorkbench({
                         title: finding.title.slice(0, 120),
                         registryWidget: {
                           definitionId: primaryRegistryEvidence.definitionId,
@@ -1837,7 +1847,7 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
                     size="icon"
                     className="h-8 w-8"
                     onClick={() =>
-                      setSaveToWorkbenchPayload({
+                      handleSaveToWorkbench({
                         sql: primarySqlEvidence.sql,
                         title: finding.title.slice(0, 120),
                         vizConfig: {
@@ -1892,7 +1902,13 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
 
       {/* Hero chart — full-width, prominent */}
       {heroEvidence && (
-        <AutoChart evidence={heroEvidence} hero />
+        <AutoChart
+          evidence={heroEvidence}
+          hero
+          onSaveToWorkbench={handleSaveToWorkbench}
+          saveTitle={finding.title}
+          sessionId={sessionId}
+        />
       )}
 
       {/* KPI strip */}
@@ -1932,7 +1948,12 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
               {extraCharts.map((ev, i) => (
                 <Card key={i} className="overflow-hidden">
                   <CardContent className="pt-3 pb-3">
-                    <AutoChart evidence={ev} />
+                    <AutoChart
+                      evidence={ev}
+                      onSaveToWorkbench={handleSaveToWorkbench}
+                      saveTitle={finding.title}
+                      sessionId={sessionId}
+                    />
                   </CardContent>
                 </Card>
               ))}
@@ -1990,7 +2011,7 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
                       index={i}
                       findingTitle={finding.title}
                       sessionId={sessionId}
-                      onSaveToWorkbench={setSaveToWorkbenchPayload}
+                      onSaveToWorkbench={handleSaveToWorkbench}
                       lineageSlot={lineageSlot}
                     />
                   );
@@ -2001,11 +2022,13 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
         </Collapsible>
       )}
 
-      <SaveToWorkbenchModal
-        open={saveToWorkbenchPayload !== null}
-        onClose={() => setSaveToWorkbenchPayload(null)}
-        payload={saveToWorkbenchPayload}
-      />
+      {useEmbeddedWorkbenchModal && (
+        <SaveToWorkbenchModal
+          open={saveToWorkbenchPayload !== null}
+          onClose={() => setSaveToWorkbenchPayload(null)}
+          payload={saveToWorkbenchPayload}
+        />
+      )}
     </div>
   );
 }

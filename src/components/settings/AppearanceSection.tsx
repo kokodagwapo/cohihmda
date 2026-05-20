@@ -18,11 +18,12 @@ interface AppearancePreferences {
 
 const DEFAULT_PREFS: AppearancePreferences = {
   theme: 'system',
-  defaultPage: '/insights',
+  defaultPage: '/',
   sidebarCollapsed: false,
 };
 
 const landingPages = [
+  { value: '/', label: 'Cohi Chat' },
   { value: '/insights', label: 'Insights' },
   { value: '/my-dashboard', label: 'My Workbench' },
   { value: '/loans', label: 'Loans' },

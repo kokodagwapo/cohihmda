@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { isPostLoginUrl } from "../helpers/postLoginUrl";
 
 export class AuthPage {
   constructor(private readonly page: Page) {}
@@ -16,7 +17,7 @@ export class AuthPage {
   }
 
   async expectAuthenticated() {
-    await expect(this.page).toHaveURL(/\/(insights|my-dashboard)/);
+    await expect(this.page).toHaveURL(isPostLoginUrl);
 
     // Freshly-provisioned E2E users (`e2e.auto.tenant-user.*` created by
     // global-setup) land with `onboarding_complete === false`, so about 1s

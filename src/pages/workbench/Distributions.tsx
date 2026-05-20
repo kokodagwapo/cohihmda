@@ -311,6 +311,7 @@ export default function Distributions() {
 
   return (
     <DashboardLayout
+      enableChat={false}
       isAuthenticated={!!user}
       mobileMenuOpen={mobileMenuOpen}
       onMobileMenuToggle={() => setMobileMenuOpen((prev) => !prev)}

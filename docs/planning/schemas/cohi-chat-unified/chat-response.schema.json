@@ -70,6 +70,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "chatType": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "research",
+            "insight_builder",
+            "workbench"
+          ],
+          "description": "Echo of request chat_type for this turn."
         }
       },
       "additionalProperties": true

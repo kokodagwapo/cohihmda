@@ -150,7 +150,9 @@ async function mockResearchWorkbenchSaveSession(page: Page) {
   );
 }
 
-test.describe("@critical Research Lab", () => {
+// Legacy standalone Research Lab page — superseded by consolidated chat (see
+// e2e/consolidated-chat-research-type.spec.ts). Kept for reference only.
+test.describe.skip("@critical Research Lab (legacy page — migrated)", () => {
   test("@smoke research page loads with input and mode toggle", async ({ userPage }) => {
     await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("heading", { level: 2, name: "Research Lab" })).toBeVisible();

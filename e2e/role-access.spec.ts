@@ -34,9 +34,11 @@ test.describe("@critical Consolidated role access matrix", () => {
       canvasOnlyPage.getByRole("navigation", { name: /main navigation/i }),
     ).toHaveCount(0);
 
-    // /admin is mounted outside AccessModeGate and uses adminOnly — non-admins see Access Denied in-place.
+    // /admin is inside AccessModeGate — canvas-only users redirect to workbench before adminOnly runs.
     await canvasOnlyPage.goto("/admin", { waitUntil: "domcontentloaded" });
-    await expect(canvasOnlyPage).toHaveURL(/\/admin/);
-    await expect(canvasOnlyPage.getByRole("heading", { name: /Access Denied/i })).toBeVisible();
+    await expect(canvasOnlyPage).toHaveURL(/\/(workbench|my-dashboard)/);
+    await expect(
+      canvasOnlyPage.getByRole("heading", { name: /Access Denied/i }),
+    ).toHaveCount(0);
   });
 });

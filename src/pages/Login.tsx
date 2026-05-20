@@ -51,7 +51,7 @@ export const Login = () => {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
-      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/';
       navigate(returnTo);
     }
   }, [isAuthenticated, user, navigate]);
@@ -237,7 +237,7 @@ export const Login = () => {
 
       toast({ title: 'Welcome!', description: 'Successfully signed in' });
 
-      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/';
       navigate(returnTo);
     } catch (error: any) {
       // Handle MFA challenge
@@ -377,7 +377,7 @@ export const Login = () => {
     try {
       await completeMfaLogin(email.trim(), mfaSession, code, ssoInfo.tenantSlug, mfaChallengeName);
       toast({ title: 'Welcome!', description: 'Successfully signed in' });
-      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/';
       navigate(returnTo);
     } finally {
       setLoading(false);
@@ -464,7 +464,7 @@ export const Login = () => {
       // Re-authenticate to complete sign in after mandatory setup.
       await login(email.trim(), newPassword || password, ssoInfo.tenantSlug);
       toast({ title: 'Welcome!', description: 'MFA enabled and sign-in completed.' });
-      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/';
       navigate(returnTo);
     } catch (error: any) {
       if (error?.mfaRequired) {

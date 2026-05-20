@@ -1266,9 +1266,9 @@ export function TopTieringComparisonView({
 
   return (
     <div
-      className={`relative transition-all duration-300 ${
-        isFullscreen ? "max-w-full" : "max-w-[1800px]"
-      } p-1 sm:p-2`}
+      className={`relative flex flex-col gap-3 transition-all duration-300 ${
+        isFullscreen ? "max-w-full w-full" : "w-full"
+      }`}
     >
       <DashboardInsightsStrip
         insights={dashboardInsights}
