@@ -15,7 +15,7 @@ test.describe("Unified chat surfaces (COHI-396 / COHI-397)", () => {
     await mockUnifiedChatApis(userPage);
   });
 
-  test("@critical @COHI-396 AC1 workbench canvas uses messages stream", async ({
+  test("@critical @COHI-386 @COHI-396 AC1 workbench canvas uses messages stream", async ({
     userPage,
   }) => {
     const streamRequest = userPage.waitForRequest(
@@ -37,7 +37,7 @@ test.describe("Unified chat surfaces (COHI-396 / COHI-397)", () => {
     });
   });
 
-  test("@critical @COHI-396 AC1 hub ask uses messages POST", async ({ userPage }) => {
+  test("@critical @COHI-386 @COHI-396 AC1 hub ask uses messages POST", async ({ userPage }) => {
     let sawMessagesPost = false;
     await mockV1Messages(userPage);
     await userPage.route(/\/api\/chat\/v1\/messages(?!:stream)(?:\?.*)?$/, async (route) => {
@@ -72,7 +72,7 @@ test.describe("Unified chat surfaces (COHI-396 / COHI-397)", () => {
     });
   });
 
-  test("@critical @COHI-397 AC4 hub resume loads conversation", async ({ userPage }) => {
+  test("@critical @COHI-386 @COHI-397 AC4 hub resume loads conversation", async ({ userPage }) => {
     await mockV1MessageStream(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
@@ -90,7 +90,7 @@ test.describe("Unified chat surfaces (COHI-396 / COHI-397)", () => {
     await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible();
   });
 
-  test("@critical @COHI-397 @COHI-393 AC4 workbench action smoke", async ({ userPage }) => {
+  test("@critical @COHI-386 @COHI-397 @COHI-393 AC4 workbench action smoke", async ({ userPage }) => {
     await mockV1MessageStream(userPage, { actionsBlock: true });
     await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({

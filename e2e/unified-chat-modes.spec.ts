@@ -18,7 +18,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
     await mockV1Permissions(userPage);
   });
 
-  test("@critical @COHI-406 AC1 mode selector four options", async ({ userPage }) => {
+  test("@critical @COHI-386 @COHI-406 AC1 mode selector four options", async ({ userPage }) => {
     await mockUnifiedChatApis(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     const selector = userPage.getByRole("combobox", { name: "Chat type" });
@@ -34,7 +34,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
     ]);
   });
 
-  test("@critical @COHI-406 AC2 deep analysis only in Research", async ({ userPage }) => {
+  test("@critical @COHI-386 @COHI-406 AC2 deep analysis only in Research", async ({ userPage }) => {
     await mockUnifiedChatApis(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     const selector = userPage.getByRole("combobox", { name: "Chat type" });
@@ -46,7 +46,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
     await expect(userPage.getByRole("checkbox", { name: /deep analysis/i })).toBeVisible();
   });
 
-  test("@critical @COHI-406 AC3 insight Approve persists Request changes does not", async ({
+  test("@critical @COHI-386 @COHI-406 AC3 insight Approve persists Request changes does not", async ({
     userPage,
   }) => {
     let streamBodies: Array<{ message?: string }> = [];
@@ -84,7 +84,7 @@ test.describe("Unified chat modes (COHI-406)", () => {
     expect(streamBodies.at(-1)?.message ?? "").toMatch(/change this draft/i);
   });
 
-  test("@critical @COHI-406 @COHI-393 AC4 workbench sends chat_type workbench", async ({
+  test("@critical @COHI-386 @COHI-406 @COHI-393 AC4 workbench sends chat_type workbench", async ({
     userPage,
   }) => {
     await mockUnifiedChatApis(userPage);

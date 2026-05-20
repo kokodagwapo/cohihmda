@@ -32,7 +32,7 @@ test.describe("Unified chat history (COHI-403)", () => {
     await forceUnifiedChat(userPage);
   });
 
-  test("@critical @COHI-403 AC1 GET folders tree depth at most 5", async ({
+  test("@critical @COHI-386 @COHI-403 AC1 GET folders tree depth at most 5", async ({
     userPage,
   }) => {
     await mockUnifiedChatTenantApi(userPage);
@@ -47,7 +47,7 @@ test.describe("Unified chat history (COHI-403)", () => {
     expect(computeFolderTreeDepth(DEEP_FOLDER_TREE)).toBeLessThanOrEqual(5);
   });
 
-  test("@critical @COHI-403 AC2 @MUTATION POST folder and assign conversation", async ({
+  test("@critical @COHI-386 @COHI-403 AC2 @MUTATION POST folder and assign conversation", async ({
     userPage,
   }) => {
     let folderPostCount = 0;
@@ -79,7 +79,7 @@ test.describe("Unified chat history (COHI-403)", () => {
     await expect.poll(() => folderPostCount).toBeGreaterThanOrEqual(1);
   });
 
-  test("@critical @COHI-403 AC3 full history search filter pagination", async ({
+  test("@critical @COHI-386 @COHI-403 AC3 full history search filter pagination", async ({
     userPage,
   }) => {
     const rows = Array.from({ length: 51 }, (_, i) => ({
@@ -117,7 +117,7 @@ test.describe("Unified chat history (COHI-403)", () => {
     }
   });
 
-  test("@critical @COHI-403 AC4 research-lab redirects with resume query", async ({
+  test("@critical @COHI-386 @COHI-403 AC4 research-lab redirects with resume query", async ({
     userPage,
   }) => {
     const sessionId = legacySessions.sessionIds[0] ?? "e2e-legacy-session-1";

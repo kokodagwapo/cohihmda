@@ -42,7 +42,7 @@ test.describe("Unified Cohi Chat (v1 API)", () => {
     });
   });
 
-  test("@critical @COHI-396 AC1 data-chat POST messages stream when unified", async ({
+  test("@critical @COHI-386 @COHI-396 AC1 data-chat POST messages stream when unified", async ({
     userPage,
   }) => {
     await forceUnifiedChat(userPage);

@@ -15,7 +15,7 @@ test.describe("Unified chat IA (COHI-405)", () => {
     await mockUnifiedChatApis(userPage);
   });
 
-  test("@critical @COHI-405 AC1 sidebar sections order Insights through Full History", async ({
+  test("@critical @COHI-386 @COHI-405 AC1 sidebar sections order Insights through Full History", async ({
     userPage,
   }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
@@ -36,7 +36,7 @@ test.describe("Unified chat IA (COHI-405)", () => {
     }
   });
 
-  test("@critical @COHI-405 AC2 single Insights entry no duplicate shortcuts", async ({
+  test("@critical @COHI-386 @COHI-405 AC2 single Insights entry no duplicate shortcuts", async ({
     userPage,
   }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
@@ -48,7 +48,7 @@ test.describe("Unified chat IA (COHI-405)", () => {
     await expect(userPage.getByText("Research Lab", { exact: true })).toHaveCount(0);
   });
 
-  test("@critical @COHI-405 AC3 top nav Communications Center no Research Lab", async ({
+  test("@critical @COHI-386 @COHI-405 AC3 top nav Communications Center no Research Lab", async ({
     userPage,
   }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
@@ -64,7 +64,7 @@ test.describe("Unified chat IA (COHI-405)", () => {
     ).toHaveCount(0);
   });
 
-  test("@regression @COHI-405 AC4 insights page content unchanged", async ({ userPage }) => {
+  test("@regression @COHI-386 @COHI-405 AC4 insights page content unchanged", async ({ userPage }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
       timeout: 15_000,
