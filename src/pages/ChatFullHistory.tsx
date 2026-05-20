@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRight, Folder, Loader2, X } from "lucide-react";
+import { ChevronRight, Folder, Loader2, Users, X } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
 import { useAuth } from "@/contexts/AuthContext";
@@ -33,8 +33,12 @@ import {
   conversationMatchesFolderFilter,
   getDirectChildFolders,
   getFolderNameById,
+  SHARED_WITH_ME_FOLDER_ID,
   UNIFIED_CHAT_FOLDERS_SYNC_EVENT,
+  UNIFIED_CHAT_HISTORY_SYNC_EVENT,
 } from "@/lib/unifiedChatFolderUtils";
+import { formatUserDisplayName } from "@/lib/userDisplayName";
+import { createUnifiedChatClient } from "@/lib/unifiedChatClient";
 import type { UnifiedChatFolder } from "@/lib/unifiedChatClient";
 import {
   ConversationMoveMenu,
@@ -102,6 +106,7 @@ export default function ChatFullHistory() {
     useDashboardVisibility();
   const {
     searchConversations,
+    sharedConversations,
     folders,
     enabled,
     moveConversationToFolder,
@@ -127,11 +132,26 @@ export default function ChatFullHistory() {
     setOffset(0);
   }, [debouncedQ, chatType, selectedFolderId]);
 
+  const isSharedWithMeFolder =
+    selectedFolderId === SHARED_WITH_ME_FOLDER_ID;
+
   const load = useCallback(async () => {
     if (!enabled) return;
     const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
+      if (isSharedWithMeFolder) {
+        const qLower = debouncedQ.trim().toLowerCase();
+        const filtered = sharedConversations.filter((row) => {
+          if (chatType !== "all" && row.chat_type !== chatType) return false;
+          if (qLower && !row.title.toLowerCase().includes(qLower)) return false;
+          return true;
+        });
+        if (seq === loadSeqRef.current) {
+          setRows(filtered.slice(offset, offset + PAGE_SIZE));
+        }
+        return;
+      }
       const data = await searchConversations({
         q: debouncedQ.trim() || undefined,
         chat_type: chatType === "all" ? undefined : chatType,
@@ -141,7 +161,20 @@ export default function ChatFullHistory() {
         offset,
       });
       if (seq === loadSeqRef.current) {
-        setRows(data);
+        const sharedLegacyRefs = new Set(
+          sharedConversations
+            .map((c) => c.legacy_ref)
+            .filter((ref): ref is string => Boolean(ref)),
+        );
+        const sharedIds = new Set(sharedConversations.map((c) => c.id));
+        setRows(
+          data.filter(
+            (row) =>
+              !row.is_shared_view &&
+              !sharedIds.has(row.id) &&
+              !(row.legacy_ref && sharedLegacyRefs.has(row.legacy_ref)),
+          ),
+        );
       }
     } finally {
       if (seq === loadSeqRef.current) {
@@ -151,6 +184,8 @@ export default function ChatFullHistory() {
   }, [
     enabled,
     searchConversations,
+    sharedConversations,
+    isSharedWithMeFolder,
     debouncedQ,
     chatType,
     selectedFolderId,
@@ -163,18 +198,22 @@ export default function ChatFullHistory() {
 
   useEffect(() => {
     if (!enabled) return;
-    const onFoldersSync = () => {
+    const onSync = () => {
       void load();
     };
-    window.addEventListener(UNIFIED_CHAT_FOLDERS_SYNC_EVENT, onFoldersSync);
-    return () =>
-      window.removeEventListener(UNIFIED_CHAT_FOLDERS_SYNC_EVENT, onFoldersSync);
+    window.addEventListener(UNIFIED_CHAT_FOLDERS_SYNC_EVENT, onSync);
+    window.addEventListener(UNIFIED_CHAT_HISTORY_SYNC_EVENT, onSync);
+    return () => {
+      window.removeEventListener(UNIFIED_CHAT_FOLDERS_SYNC_EVENT, onSync);
+      window.removeEventListener(UNIFIED_CHAT_HISTORY_SYNC_EVENT, onSync);
+    };
   }, [enabled, load]);
 
   const handleMoveConversation = async (
     conversationId: string,
     folderId: string | null,
   ) => {
+    if (folderId === SHARED_WITH_ME_FOLDER_ID) return;
     const previousRows = rows;
     setRows((prev) => {
       const updated = prev.map((row) =>
@@ -249,10 +288,33 @@ export default function ChatFullHistory() {
     }
   };
 
-  const childFolders = getDirectChildFolders(selectedFolderId, folders);
-  const breadcrumb = selectedFolderId
-    ? buildFolderBreadcrumb(selectedFolderId, folders)
-    : [];
+  const childFolders = isSharedWithMeFolder
+    ? []
+    : getDirectChildFolders(selectedFolderId, folders);
+  const breadcrumb =
+    selectedFolderId && !isSharedWithMeFolder
+      ? buildFolderBreadcrumb(selectedFolderId, folders)
+      : [];
+
+  const resumeConversation = async (
+    id: string,
+    rowChatType: string,
+    row?: (typeof rows)[number],
+  ) => {
+    let resumeId = id;
+    if (row?.is_shared_view && row.legacy_ref) {
+      try {
+        const client = createUnifiedChatClient(tenantId);
+        const opened = await client.openSharedResearch(row.legacy_ref);
+        resumeId = opened.id;
+      } catch {
+        resumeId = row.legacy_ref;
+      }
+    }
+    navigate(buildUnifiedChatResumePath(resumeId, rowChatType), {
+      state: cohiChatResumeNavigationState(),
+    });
+  };
 
   if (!isUnifiedChatClientEnabled()) {
     return (
@@ -323,9 +385,34 @@ export default function ChatFullHistory() {
           </Select>
         </div>
 
+        <div className="mb-4 space-y-3">
+            <div className="rounded-xl border border-amber-200/80 dark:border-amber-800/50 p-3">
+              <button
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors",
+                  isSharedWithMeFolder
+                    ? "bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-100"
+                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900/50",
+                )}
+                onClick={() =>
+                  setSelectedFolderId(
+                    isSharedWithMeFolder ? null : SHARED_WITH_ME_FOLDER_ID,
+                  )
+                }
+              >
+                <Users className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="flex-1 truncate">Shared With Me</span>
+                {sharedConversations.length > 0 && (
+                  <span className="text-[10px] text-amber-700/80 dark:text-amber-300/80 tabular-nums">
+                    ({sharedConversations.length})
+                  </span>
+                )}
+              </button>
+            </div>
         {folders.length > 0 && (
-          <div className="mb-4 space-y-3">
-            {selectedFolderId && (
+          <>
+            {selectedFolderId && !isSharedWithMeFolder && (
               <nav
                 aria-label="Folder breadcrumb"
                 className="flex flex-wrap items-center gap-1 text-sm text-slate-600 dark:text-slate-400"
@@ -361,8 +448,9 @@ export default function ChatFullHistory() {
               onSelect={setSelectedFolderId}
               onMoveFolder={handleMoveFolder}
             />
-          </div>
+          </>
         )}
+        </div>
 
         {loading && rows.length === 0 ? (
           <div className="flex justify-center py-12">
@@ -385,9 +473,7 @@ export default function ChatFullHistory() {
                     type="button"
                     className="flex-1 min-w-0 text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/50"
                     onClick={() =>
-                      navigate(buildUnifiedChatResumePath(row.id, row.chat_type), {
-                        state: cohiChatResumeNavigationState(),
-                      })
+                      void resumeConversation(row.id, row.chat_type, row)
                     }
                   >
                     <p className="font-medium text-slate-900 dark:text-white truncate">
@@ -404,23 +490,35 @@ export default function ChatFullHistory() {
                           {getFolderNameById(row.folder_id, folders) ?? "Folder"}
                         </HistoryMetaPill>
                       )}
+                      {row.is_shared_view &&
+                        (row.shared_by_name || row.shared_by_email) && (
+                          <HistoryMetaPill className="bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                            Shared by{" "}
+                            {row.shared_by_name ||
+                              formatUserDisplayName(null, row.shared_by_email)}
+                          </HistoryMetaPill>
+                        )}
                       <span className="text-slate-400 dark:text-slate-500">
                         {new Date(row.updated_at).toLocaleString()}
                       </span>
                     </p>
                   </button>
-                  <ConversationMoveMenu
-                    conversationId={row.id}
-                    currentFolderId={row.folder_id}
-                    folders={folders}
-                    onMove={handleMoveConversation}
-                    triggerClassName="h-8 w-8 mr-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                  />
+                  {!row.is_shared_view && (
+                    <ConversationMoveMenu
+                      conversationId={row.id}
+                      currentFolderId={row.folder_id}
+                      folders={folders}
+                      onMove={handleMoveConversation}
+                      triggerClassName="h-8 w-8 mr-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                    />
+                  )}
                 </li>
               ))}
               {rows.length === 0 && (
                 <li className="px-4 py-8 text-center text-slate-500 text-sm">
-                  No conversations found.
+                  {isSharedWithMeFolder
+                    ? "No shared research yet."
+                    : "No conversations found."}
                 </li>
               )}
             </ul>

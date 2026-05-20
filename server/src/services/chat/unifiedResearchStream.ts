@@ -46,6 +46,7 @@ export interface UnifiedResearchStreamArgs {
   message: string;
   legacyRef?: string | null;
   deepAnalysis?: boolean;
+  uploadIds?: string[];
   policy: PolicyDecision;
   /** Hard cap so we never hold a request forever (ms). */
   maxWaitMs?: number;
@@ -82,6 +83,10 @@ export async function runUnifiedResearchStream(
     session = await loadSession(sessionId, tenantPool);
   }
   if (!session) {
+    const uploadIds =
+      Array.isArray(args.uploadIds) && args.uploadIds.length > 0
+        ? args.uploadIds.filter((id) => typeof id === "string")
+        : [];
     session = await createSession(
       tenantId,
       userId,
@@ -90,6 +95,7 @@ export async function runUnifiedResearchStream(
       args.message.trim(),
       undefined,
       mode,
+      uploadIds,
     );
   }
   sessionId = session.id;

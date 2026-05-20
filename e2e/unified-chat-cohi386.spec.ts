@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures";
 import {
   forceUnifiedChat,
+  gotoWithUnifiedChatShell,
   mockUnifiedChatApis,
   mockV1Messages,
   UNIFIED_CHAT_STUB_TEXT,
@@ -47,13 +48,13 @@ test.describe("Unified Cohi Chat (v1 API)", () => {
   }) => {
     await forceUnifiedChat(userPage);
     await mockUnifiedChatApis(userPage);
+    await gotoWithUnifiedChatShell(userPage, "/insights");
+
     const streamRequest = userPage.waitForRequest(
       (req) =>
         req.method() === "POST" &&
         /\/api\/chat\/v1\/messages:stream(?:\?.*)?$/.test(req.url()),
     );
-
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     const input = unifiedChatMessageInput(userPage);
     await expect(input).toBeVisible({ timeout: 15_000 });
     await input.fill("Stream path smoke");
@@ -70,11 +71,7 @@ test.describe("Unified Cohi Chat (v1 API)", () => {
   }) => {
     await forceUnifiedChat(userPage);
     await mockUnifiedChatApis(userPage);
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
-
-    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
-      timeout: 15_000,
-    });
+    await gotoWithUnifiedChatShell(userPage, "/insights");
     await expect(
       userPage.getByRole("button", { name: /Open Cohi Insights/i }),
     ).toHaveCount(0);

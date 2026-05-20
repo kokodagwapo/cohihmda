@@ -52,6 +52,17 @@ export function workbenchArtifactHandoffPath(artifactId: string): string {
   return `/workbench?artifactId=${encodeURIComponent(id)}`;
 }
 
+function isForceUnifiedChatEnabledInStorage(): boolean {
+  try {
+    return (
+      window.sessionStorage?.getItem(FORCE_UNIFIED_KEY) === "1" ||
+      window.localStorage?.getItem(FORCE_UNIFIED_KEY) === "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function isUnifiedChatClientEnabled(): boolean {
   if (typeof window !== "undefined") {
     try {
@@ -61,12 +72,8 @@ export function isUnifiedChatClientEnabled(): boolean {
     } catch {
       /* ignore */
     }
-    try {
-      if (window.sessionStorage?.getItem(FORCE_UNIFIED_KEY) === "1") {
-        return true;
-      }
-    } catch {
-      /* ignore */
+    if (isForceUnifiedChatEnabledInStorage()) {
+      return true;
     }
   }
   try {

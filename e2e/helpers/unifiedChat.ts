@@ -60,11 +60,14 @@ export const UNIFIED_CHAT_STUB_TEXT =
 
 export const QA_AGENT_RUN_TAG = "wave6-e2e-unified-chat";
 
+/** Runs before any document load in this browser context (CI-safe vs page-only init). */
 export async function forceUnifiedChat(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.context().addInitScript(() => {
     try {
       sessionStorage.setItem("cohi_force_unified_chat", "1");
-      window.localStorage.setItem(
+      localStorage.setItem("cohi_force_unified_chat", "1");
+      localStorage.removeItem("cohi_e2e_legacy_chat_only");
+      localStorage.setItem(
         "cohi-welcome-tour-last-shown",
         new Date().toISOString(),
       );
@@ -72,6 +75,31 @@ export async function forceUnifiedChat(page: Page): Promise<void> {
       /* ignore */
     }
   });
+}
+
+/** Navigate and wait for the horizontal unified shell (30s for slow CI deploys). */
+export async function gotoWithUnifiedChatShell(
+  page: Page,
+  path: string,
+  options?: { timeout?: number },
+): Promise<void> {
+  const timeout = options?.timeout ?? 30_000;
+  await page.goto(path, { waitUntil: "domcontentloaded" });
+  await dismissBlockingOverlays(page);
+  await expect(page.getByTestId("unified-chat-shell")).toBeVisible({ timeout });
+}
+
+/** When chat is in full-page mode, insights widgets sit in a hidden column — restore compact band. */
+export async function ensureDashboardPageContentVisible(page: Page): Promise<void> {
+  const shell = page.getByTestId("unified-chat-shell");
+  const shellVisible = await shell.isVisible({ timeout: 5_000 }).catch(() => false);
+  if (!shellVisible) return;
+
+  const compact = page.getByRole("button", { name: "Compact" });
+  if (await compact.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await compact.click({ force: true });
+    await page.waitForTimeout(300);
+  }
 }
 
 export async function forceLegacyChatOnly(page: Page): Promise<void> {
@@ -149,8 +177,7 @@ export type StreamMockOptions = {
 
 /** Open consolidated Research mode on Insights (COHI-404 / COHI-406). */
 export async function openConsolidatedResearchChat(page: Page): Promise<void> {
-  await page.goto("/insights?mode=research", { waitUntil: "domcontentloaded" });
-  await dismissBlockingOverlays(page);
+  await gotoWithUnifiedChatShell(page, "/insights?mode=research");
   await expandChatShellForResearch(page);
   await selectUnifiedChatType(page, "Research");
 }
@@ -162,7 +189,7 @@ type StreamBlock = {
 };
 
 /** Mirror server `emitValidatedStreamWithDeltas` — client reads `block.completed`, not `turn.completed.blocks`. */
-function buildV1StreamSseBody(
+export function buildV1StreamSseBody(
   conversationId: string,
   turnId: string,
   blocks: StreamBlock[],
@@ -331,26 +358,86 @@ export async function mockV1ConversationsList(
     chat_type: string;
     updated_at?: string;
     folder_id?: string | null;
+    is_shared_view?: boolean;
+    shared_by_email?: string;
+    legacy_ref?: string;
   }>,
+  options?: {
+    sharedWithMe?: Array<{
+      id: string;
+      title: string;
+      chat_type: string;
+      shared_by_email: string;
+      legacy_ref?: string;
+    }>;
+  },
 ): Promise<void> {
   await page.route(/\/api\/chat\/v1\/conversations(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
     }
+    const url = route.request().url();
+    const isSharedList = url.includes("shared_with_me=true");
+    const rows = isSharedList
+      ? (options?.sharedWithMe ?? []).map((c) => ({
+          folder_id: null,
+          updated_at: new Date().toISOString(),
+          is_shared_view: true,
+          ...c,
+        }))
+      : conversations.map((c) => ({
+          folder_id: null,
+          updated_at: new Date().toISOString(),
+          ...c,
+        }));
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        conversations: conversations.map((c) => ({
-          folder_id: null,
-          updated_at: new Date().toISOString(),
-          ...c,
-        })),
-        total: conversations.length,
+        conversations: rows,
+        total: rows.length,
       }),
     });
   });
+}
+
+export async function mockResearchSession(
+  page: Page,
+  session: {
+    id: string;
+    topic?: string;
+    phase?: string;
+    isOwner?: boolean;
+    ownerEmail?: string;
+  },
+): Promise<void> {
+  await page.route(
+    new RegExp(`/api/research/sessions/${session.id}(?:\\?.*)?$`),
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: session.id,
+          topic: session.topic ?? "Shared research",
+          phase: session.phase ?? "complete",
+          plan: null,
+          findings: [],
+          report: null,
+          events: [],
+          visibility: "shared",
+          sharedWithUserIds: [],
+          isOwner: session.isOwner ?? false,
+          ownerEmail: session.ownerEmail ?? "owner@example.com",
+        }),
+      });
+    },
+  );
 }
 
 export async function mockV1FoldersTree(

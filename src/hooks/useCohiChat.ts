@@ -40,6 +40,8 @@ import { insightBuilderApproveClientMessageId } from "@/lib/insightBuilderApprov
 export interface SendMessageOptions {
   /** Start a new server conversation (e.g. compact shell send). */
   forceNewConversation?: boolean;
+  /** Research: dataset upload IDs for a new investigation only. */
+  researchUploadIds?: string[];
   /** Insight builder: pass edited draft and/or approve action. */
   insightBuilder?: {
     action?: "approve" | "revise";
@@ -318,6 +320,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       const forceNew = options?.forceNewConversation ?? false;
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
+      const priorLegacyRef = forceNew ? null : legacyRef;
+      const researchUploadIds =
+        chatType === "research" &&
+        (forceNew || (!activeSessionId && !priorLegacyRef)) &&
+        options?.researchUploadIds &&
+        options.researchUploadIds.length > 0
+          ? options.researchUploadIds
+          : undefined;
 
       const userMessageId = generateMessageId();
       const assistantMessageId = generateMessageId();
@@ -442,6 +452,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               clientMessageId: approveClientMessageId,
               history,
               deepAnalysis: researchDeepAnalysis,
+              uploadIds: researchUploadIds,
               context:
                 ibDraft && chatType === "insight_builder"
                   ? { insightBuilderDraft: ibDraft }
@@ -559,6 +570,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       isLoading,
       messages,
       sessionId,
+      legacyRef,
       tenantId,
       onError,
       chatType,
@@ -698,6 +710,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
           } else {
+            const composedUploadIds =
+              chatType === "research" &&
+              !sessionId &&
+              !legacyRef &&
+              options?.researchUploadIds &&
+              options.researchUploadIds.length > 0
+                ? options.researchUploadIds
+                : undefined;
             const { conversationId, parsed } = await sendUnifiedGlobalStream({
               client,
               message: composed,
@@ -705,6 +725,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               conversationId: sessionId,
               history,
               deepAnalysis: researchDeepAnalysis,
+              uploadIds: composedUploadIds,
               onStreamEvent: applyUnifiedStreamEvent,
               onStreamText,
             });

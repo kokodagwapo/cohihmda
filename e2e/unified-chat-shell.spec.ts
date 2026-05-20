@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures";
 import {
   forceUnifiedChat,
+  gotoWithUnifiedChatShell,
   mockUnifiedChatApis,
   mockV1MessageStream,
   expandChatShellForResearch,
@@ -17,9 +18,8 @@ test.describe("Unified chat shell (COHI-404)", () => {
   test("@critical @COHI-386 @COHI-404 AC2 default chat band height near 500px", async ({
     userPage,
   }) => {
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await gotoWithUnifiedChatShell(userPage, "/insights");
     const shell = userPage.getByTestId("unified-chat-shell");
-    await expect(shell).toBeVisible({ timeout: 15_000 });
 
     await userPage.getByRole("button", { name: "Taller" }).click();
     await expect(shell).toBeVisible();
@@ -32,16 +32,10 @@ test.describe("Unified chat shell (COHI-404)", () => {
   test("@critical @COHI-386 @COHI-404 AC3 route navigation resets expand state", async ({
     userPage,
   }) => {
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
-      timeout: 15_000,
-    });
+    await gotoWithUnifiedChatShell(userPage, "/insights");
 
     await userPage.getByRole("button", { name: "Full page" }).click();
-    await userPage.goto("/actors", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
-      timeout: 15_000,
-    });
+    await gotoWithUnifiedChatShell(userPage, "/actors");
 
     const stacked = await userPage
       .getByTestId("unified-chat-shell")
@@ -57,10 +51,7 @@ test.describe("Unified chat shell (COHI-404)", () => {
       researchShellExpand: true,
       researchSessionId: "e2e-research-session-1",
     });
-    await userPage.goto("/insights?mode=research", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
-      timeout: 15_000,
-    });
+    await gotoWithUnifiedChatShell(userPage, "/insights?mode=research");
     await expandChatShellForResearch(userPage);
     await selectUnifiedChatType(userPage, "Research");
 

@@ -34,6 +34,7 @@ export interface SendUnifiedGlobalParams {
   clientMessageId?: string;
   history?: { role: "user" | "assistant"; content: string }[];
   deepAnalysis?: boolean;
+  uploadIds?: string[];
   context?: Record<string, unknown>;
   insightBuilder?: { action?: "approve" | "revise" };
   onStreamText?: (text: string) => void;
@@ -80,7 +81,14 @@ export async function sendUnifiedGlobalStream(
       options: {
         stream: true,
         ...(chatType === "research"
-          ? { research: { deepAnalysis: params.deepAnalysis ?? false } }
+          ? {
+              research: {
+                deepAnalysis: params.deepAnalysis ?? false,
+                ...(params.uploadIds && params.uploadIds.length > 0
+                  ? { uploadIds: params.uploadIds }
+                  : {}),
+              },
+            }
           : {}),
         ...(chatType === "insight_builder" && params.insightBuilder
           ? { insightBuilder: params.insightBuilder }

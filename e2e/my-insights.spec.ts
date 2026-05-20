@@ -1,5 +1,9 @@
 import { test, expect } from "./fixtures";
 import type { Page, Route } from "@playwright/test";
+import {
+  ensureDashboardPageContentVisible,
+  forceUnifiedChat,
+} from "./helpers/unifiedChat";
 
 /**
  * My Insights — Phase 1 (COHI-367)
@@ -469,12 +473,14 @@ function myInsightsTabButton(page: Page) {
 }
 
 async function openInsightsPage(page: Page) {
+  await forceUnifiedChat(page);
   await page.goto("/insights", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("navigation", { name: /main navigation/i })).toBeVisible({
     timeout: 30_000,
   });
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await dismissBlockingOverlays(page);
+  await ensureDashboardPageContentVisible(page);
   await expect(cohiInsights(page)).toBeVisible({ timeout: 30_000 });
 }
 
