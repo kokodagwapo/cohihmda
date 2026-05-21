@@ -16,6 +16,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { cohiTourIdFromDataTour } from "@/lib/tourTargets";
 
 /** Matches top-nav `iconStyleMap` (Navigation.tsx). */
 export type SidebarNavAccent =
@@ -155,6 +156,7 @@ export function SidebarExpandableSection({
   onCollapsedClick,
   accent,
   active = false,
+  dataTour,
 }: {
   isDarkMode: boolean;
   isExpanded: boolean;
@@ -169,9 +171,12 @@ export function SidebarExpandableSection({
   onCollapsedClick?: () => void;
   accent?: SidebarNavAccent;
   active?: boolean;
+  /** Joyride spotlight anchor (header row only). */
+  dataTour?: string;
 }) {
   const flyout = useSidebarFlyout();
   const accentStyles = accent ? SIDEBAR_NAV_ACCENT[accent] : null;
+  const tourAnchorId = cohiTourIdFromDataTour(dataTour);
 
   const renderFlyoutChildren = () => {
     const close = () => flyout.setOpen(false);
@@ -191,6 +196,7 @@ export function SidebarExpandableSection({
       <div className="mb-2">
         <button
           type="button"
+          id={tourAnchorId}
           onClick={onToggleSection}
           style={SIDEBAR_SECTION_BUTTON_STYLE}
           className={cn(
@@ -199,7 +205,9 @@ export function SidebarExpandableSection({
           )}
           {...(active ? {} : sidebarSectionRowHover(isDarkMode))}
         >
-          <SidebarSectionIcon icon={Icon} accent={accent} />
+          <span className="inline-flex shrink-0 pointer-events-none">
+            <SidebarSectionIcon icon={Icon} accent={accent} />
+          </span>
           <p
             className={cn(
               "text-sm font-semibold flex-1 m-0",
@@ -239,6 +247,7 @@ export function SidebarExpandableSection({
     <button
       type="button"
       aria-label={label}
+      id={tourAnchorId}
       onClick={(e) => {
         e.stopPropagation();
         flyout.setOpen(false);
@@ -267,6 +276,7 @@ export function SidebarExpandableSection({
           : accentStyles?.iconTile ?? "bg-slate-50 dark:bg-slate-800/30",
       )}
       aria-label={label}
+      id={tourAnchorId}
       role="img"
     >
       <Icon
@@ -324,6 +334,7 @@ export function SidebarNavRow({
   active,
   onClick,
   accent = "emerald",
+  dataTour,
 }: {
   isDarkMode: boolean;
   isExpanded: boolean;
@@ -332,8 +343,10 @@ export function SidebarNavRow({
   active?: boolean;
   onClick: () => void;
   accent?: SidebarNavAccent;
+  dataTour?: string;
 }) {
   const accentStyles = SIDEBAR_NAV_ACCENT[accent];
+  const tourAnchorId = cohiTourIdFromDataTour(dataTour);
 
   if (!isExpanded) {
     return (
@@ -342,6 +355,7 @@ export function SidebarNavRow({
           <TooltipTrigger asChild>
             <button
               type="button"
+              id={tourAnchorId}
               onClick={onClick}
               className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center",
@@ -351,7 +365,9 @@ export function SidebarNavRow({
               )}
               aria-current={active ? "page" : undefined}
             >
-              <Icon className={cn("w-4 h-4", accentStyles.icon)} />
+              <span className="inline-flex h-9 w-9 items-center justify-center pointer-events-none">
+                <Icon className={cn("w-4 h-4", accentStyles.icon)} />
+              </span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">{label}</TooltipContent>
@@ -364,13 +380,16 @@ export function SidebarNavRow({
     <div className="mb-2">
       <button
         type="button"
+        id={tourAnchorId}
         onClick={onClick}
         style={SIDEBAR_SECTION_BUTTON_STYLE}
         className={cn("rounded-lg", active && accentStyles.activeIconTile)}
         {...(active ? {} : sidebarSectionRowHover(isDarkMode))}
         aria-current={active ? "page" : undefined}
       >
-        <SidebarSectionIcon icon={Icon} accent={accent} />
+        <span className="inline-flex shrink-0 pointer-events-none">
+          <SidebarSectionIcon icon={Icon} accent={accent} />
+        </span>
         <p className={cn("text-sm font-semibold flex-1 m-0", accentStyles.label)}>
           {label}
         </p>

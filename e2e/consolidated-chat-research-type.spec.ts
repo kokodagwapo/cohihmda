@@ -353,7 +353,9 @@ test.describe("@critical Consolidated chat — Research type", () => {
         userPage.getByText(/Existing Seed Widget|Existing Workbench Widget/i).first(),
       ).toBeVisible({ timeout: 20_000 });
 
-      await openConsolidatedResearchChat(userPage);
+      await openConsolidatedResearchChat(userPage, {
+        path: `/my-dashboard/${createdCanvasId}?mode=research`,
+      });
       const input = unifiedChatMessageInput(userPage);
       await input.fill("Show conversion by channel.");
       await input.press("Enter");

@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { resetUnifiedChatShellToCompact } from "./helpers/unifiedChat";
 import fs from "node:fs/promises";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 
@@ -278,6 +279,7 @@ async function openTopTiering(page: Page) {
   await initialResponse;
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await dismissBlockingOverlays(page);
+  await resetUnifiedChatShellToCompact(page);
 }
 
 async function switchActorMode(page: Page, tabLabel: "Branch" | "Loan Officer") {
