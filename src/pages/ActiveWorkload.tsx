@@ -1,7 +1,4 @@
-import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
-import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
-import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { ActiveWorkloadView } from "@/components/views/ActiveWorkloadView";
 import { useChannelStore } from "@/stores/channelStore";
@@ -13,13 +10,14 @@ const ActiveWorkload = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Active Workload" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
+      <div className="flex min-h-[calc(100vh-4rem)] flex-col">
+        <TopTieringTopBar title="Active Workload" />
+        <main className="flex-1 overflow-y-auto px-4 py-2 sm:px-6 sm:py-3">
           <div className="mx-auto max-w-[1800px]">
             <ActiveWorkloadView selectedTenantId={selectedTenantId} selectedChannel={selectedChannel} />
           </div>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 };

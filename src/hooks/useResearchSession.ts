@@ -416,43 +416,6 @@ export function useResearchSession(tenantId?: string | null) {
   );
 
   // ── Load a saved session (view only, no stream) ──
-  const applySessionPayload = useCallback((data: any) => {
-    const loadedPhase =
-      data.phase === "created" ? "idle" : (data.phase as SessionPhase);
-    const isActivePhase = ACTIVE_SESSION_PHASES.has(data.phase);
-
-    setSessionId(data.id);
-    sessionIdRef.current = data.id;
-    setPhase(loadedPhase);
-    setPlan(data.plan || null);
-    setFindings(Array.isArray(data.findings) ? data.findings : []);
-    setReport(data.report || null);
-    setEvents(Array.isArray(data.events) ? data.events : []);
-    setError(data.error || null);
-    setIsRunning(isActivePhase);
-    setIsPaused(false);
-    setSessionVisibility(data.visibility ?? "private");
-    setSessionSharedWithUserIds(
-      Array.isArray(data.sharedWithUserIds) ? data.sharedWithUserIds : [],
-    );
-
-    return isActivePhase;
-  }, []);
-
-  const refreshSession = useCallback(
-    async (id: string) => {
-      try {
-        const data = await api.request<any>(
-          `/api/research/sessions/${id}${tenantParam}`,
-        );
-        applySessionPayload(data);
-      } catch (err: any) {
-        console.error("[Research] Failed to refresh session:", err);
-      }
-    },
-    [applySessionPayload, tenantParam],
-  );
-
   const loadSession = useCallback(
     async (id: string) => {
       if (abortRef.current) {
@@ -461,10 +424,22 @@ export function useResearchSession(tenantId?: string | null) {
       }
 
       try {
-        const data = await api.request<any>(
-          `/api/research/sessions/${id}${tenantParam}`,
-        );
-        const isActivePhase = applySessionPayload(data);
+        const data = await api.request<any>(`/api/research/sessions/${id}${tenantParam}`);
+        const loadedPhase = data.phase === "created" ? "idle" : (data.phase as SessionPhase);
+        const isActivePhase = ACTIVE_SESSION_PHASES.has(data.phase);
+
+        setSessionId(data.id);
+        sessionIdRef.current = data.id;
+        setPhase(loadedPhase);
+        setPlan(data.plan || null);
+        setFindings(data.findings || []);
+        setReport(data.report || null);
+        setEvents(data.events || []);
+        setError(data.error || null);
+        setIsRunning(isActivePhase);
+        setIsPaused(false);
+        setSessionVisibility(data.visibility ?? "private");
+        setSessionSharedWithUserIds(Array.isArray(data.sharedWithUserIds) ? data.sharedWithUserIds : []);
 
         if (isActivePhase) {
           readSSEStream(`/api/research/sessions/${id}/stream${tenantParam}`);
@@ -474,7 +449,7 @@ export function useResearchSession(tenantId?: string | null) {
         setError(err.message);
       }
     },
-    [applySessionPayload, readSSEStream, tenantParam],
+    [readSSEStream, tenantParam]
   );
 
   // ── Run an existing session (start the SSE stream for a pre-created session) ──
@@ -609,7 +584,6 @@ export function useResearchSession(tenantId?: string | null) {
     resume,
     askFollowUp,
     loadSession,
-    refreshSession,
     fetchSessions,
     deleteSession: deleteSessionById,
     submitFeedback,

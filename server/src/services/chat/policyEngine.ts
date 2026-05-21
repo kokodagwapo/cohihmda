@@ -1,16 +1,12 @@
 /**
  * Unified chat policy facade (COHI-389).
+ * Re-exports enforcement helpers used by the orchestrator and routes.
  */
 
 export {
   assertUnifiedChatAllowed,
-  evaluateUnifiedChatPolicy,
-  buildUnifiedChatPermissions,
   sanitizeNavigationHints,
-  assertPlatformTenantScope,
   type UnifiedChatPolicyInput,
   type UnifiedChatSurface,
   type UnifiedScopeType,
-  type PolicyDecision,
-  type UnifiedChatPermissionsPayload,
 } from "./unifiedChatPolicy.js";

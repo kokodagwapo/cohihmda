@@ -33,7 +33,6 @@ import {
   Lock,
   Layers,
   Database,
-  Mail,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -58,7 +57,6 @@ import {
 } from "@/components/dashboard/SidebarRouteSearch";
 import { fetchSidebarSearchTargets } from "@/data/sidebarSearchTargets";
 import { useWorkbenchNav } from "@/hooks/useWorkbenchNav";
-import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 
 export interface NavigationProps {
   onMenuToggle?: () => void;
@@ -388,7 +386,6 @@ export function Navigation(
 ) {
   const navigate = useNavigate();
   const location = useLocation();
-  const unifiedChatIa = isUnifiedChatClientEnabled();
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const [displayName, setDisplayName] = useState<string | null>(null);
 
@@ -729,12 +726,7 @@ export function Navigation(
       return "Top Tiering";
     }
     if (location.pathname === "/my-dashboard") return "My Workbench";
-    if (location.pathname.startsWith("/workbench/distributions")) {
-      return "Communications Center";
-    }
-    if (location.pathname === "/" || location.pathname === "/cohi-chat") {
-      return "Cohi Chat";
-    }
+    if (location.pathname === "/cohi-chat") return "Cohi Chat";
     return "Navigation";
   };
 
@@ -957,25 +949,6 @@ export function Navigation(
             <LayoutPanelLeft className="w-4 h-4 flex-shrink-0" />
             <span>Workbench</span>
           </button>
-          {unifiedChatIa && (
-            <button
-              type="button"
-              data-track="nav_communications_center_mobile"
-              onClick={() => {
-                navigate("/workbench/distributions");
-                setMobileMenuOpen(false);
-              }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-                location.pathname.startsWith("/workbench/distributions")
-                  ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
-              )}
-            >
-              <Mail className="w-4 h-4 flex-shrink-0" />
-              <span>Communications Center</span>
-            </button>
-          )}
           {ownedCanvases.slice(0, 5).map((canvas) => (
             <button
               key={canvas.id}
@@ -990,7 +963,7 @@ export function Navigation(
           ))}
         </div>
 
-        {!unifiedChatIa && (
+        {/* Research Lab */}
         <div className="space-y-1">
           <button
             data-track="nav_research"
@@ -1035,7 +1008,6 @@ export function Navigation(
             Data Explorer
           </button>
         </div>
-        )}
 
         {/* Help */}
         <div className="space-y-1">
@@ -1646,7 +1618,7 @@ export function Navigation(
                 </AnimatePresence>
               </div>
 
-              {!unifiedChatIa ? (
+              {/* Research Lab Dropdown */}
               <div
                 ref={researchRef}
                 className="relative"
@@ -1710,22 +1682,6 @@ export function Navigation(
                   )}
                 </AnimatePresence>
               </div>
-              ) : (
-                <button
-                  type="button"
-                  data-track="nav_communications_center"
-                  onClick={() => navigate("/workbench/distributions")}
-                  className={cn(
-                    topNavPillBase,
-                    location.pathname.startsWith("/workbench/distributions")
-                      ? topNavPillActive
-                      : topNavPillDefault,
-                  )}
-                >
-                  <Mail className="w-4 h-4" />
-                  <span>Communications Center</span>
-                </button>
-              )}
 
               {/* Divider */}
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />

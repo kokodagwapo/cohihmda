@@ -1,6 +1,6 @@
 /**
- * Unified chat policy (COHI-389).
- * Mode-aware matrix; meeting spec §10 #14 — no extra entitlements vs cohi_chat.
+ * Unified chat policy (COHI-389 baseline).
+ * Aligns global + workbench assistant behind checkSectionAccess('cohi_chat').
  */
 
 import type { AuthRequest } from "../../middleware/auth.js";
@@ -8,7 +8,6 @@ import {
   checkSectionAccess,
   type QueryContext,
 } from "../ai/queryBuilderService.js";
-import type { UnifiedConversationChatType } from "./unifiedConversationService.js";
 
 export type UnifiedChatSurface =
   | "site"
@@ -28,26 +27,6 @@ export type UnifiedScopeType =
 export interface UnifiedChatPolicyInput {
   surface?: UnifiedChatSurface;
   scopeType?: UnifiedScopeType;
-  chatType?: UnifiedConversationChatType;
-  deepAnalysis?: boolean;
-}
-
-export interface PolicyDecision {
-  allowed: boolean;
-  code?: string;
-  message?: string;
-  decisionId: string;
-  chatType: UnifiedConversationChatType;
-  /** Knowledge retrieval gate (COHI-391). */
-  retrieval: "allow" | "deny";
-  /** SQL execution posture for this mode (COHI-392). */
-  sqlExecution: "allow" | "deny" | "scoped";
-  research?: {
-    quotasEnforced: boolean;
-    deepAnalysisAllowed: boolean;
-    /** Numeric caps TBD — structure only in Wave 2. */
-    caps?: Record<string, number | null>;
-  };
 }
 
 /** Allowed first URL path segments for in-app navigation links (see App.tsx routes). */
@@ -95,6 +74,7 @@ const ALLOWED_APP_PATH_ROOTS = new Set([
   "unsubscribe",
 ]);
 
+/** Legacy prefix allowlist (Appendix A.2). Kept for backward compatibility. */
 const NAV_HINT_PREFIXES = [
   "/insights",
   "/research",
@@ -153,178 +133,30 @@ function buildQueryContext(req: AuthRequest): QueryContext {
   };
 }
 
-function normalizeChatType(input?: UnifiedConversationChatType): UnifiedConversationChatType {
-  if (
-    input === "research" ||
-    input === "insight_builder" ||
-    input === "workbench" ||
-    input === "chat"
-  ) {
-    return input;
-  }
-  return "chat";
-}
-
-function buildModeDecision(
-  chatType: UnifiedConversationChatType,
-  deepAnalysis?: boolean,
-): Pick<PolicyDecision, "sqlExecution" | "research" | "retrieval"> {
-  const research = {
-    quotasEnforced: chatType === "research",
-    deepAnalysisAllowed: chatType === "research",
-    caps: {
-      maxConcurrentSessions: null,
-      maxTokensPerDay: null,
-    } as Record<string, number | null>,
-  };
-  switch (chatType) {
-    case "workbench":
-      return { sqlExecution: "scoped", retrieval: "allow", research: undefined };
-    case "research":
-      return {
-        sqlExecution: "scoped",
-        retrieval: "allow",
-        research: { ...research, deepAnalysisAllowed: !!deepAnalysis || true },
-      };
-    case "insight_builder":
-      return { sqlExecution: "deny", retrieval: "deny", research: undefined };
-    default:
-      return { sqlExecution: "allow", retrieval: "allow", research: undefined };
-  }
-}
-
-export async function evaluateUnifiedChatPolicy(
+/**
+ * Returns false if the user may not use unified chat for this tenant.
+ * Workbench surfaces use the same gate as global chat for parity (architecture Appendix A).
+ */
+export async function assertUnifiedChatAllowed(
   req: AuthRequest,
-  input: UnifiedChatPolicyInput,
-): Promise<PolicyDecision> {
-  const chatType = normalizeChatType(input.chatType);
-  const decisionId = `pol_${chatType}_${Date.now()}`;
-  const mode = buildModeDecision(chatType, input.deepAnalysis);
-
+  _input: UnifiedChatPolicyInput,
+): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
   try {
     const ctx = buildQueryContext(req);
     const allowed = await checkSectionAccess("cohi_chat", ctx);
     if (!allowed) {
       return {
-        allowed: false,
+        ok: false,
         code: "cohi_chat_forbidden",
         message: "You don't have access to Cohi Chat",
-        decisionId,
-        chatType,
-        retrieval: "deny",
-        sqlExecution: "deny",
       };
     }
-
-    if (input.deepAnalysis && chatType !== "research") {
-      return {
-        allowed: false,
-        code: "deep_analysis_research_only",
-        message: "Deep analysis is only available in Research mode",
-        decisionId,
-        chatType,
-        retrieval: "deny",
-        sqlExecution: "deny",
-      };
-    }
-
-    return {
-      allowed: true,
-      decisionId,
-      chatType,
-      ...mode,
-    };
+    return { ok: true };
   } catch (e: any) {
     return {
-      allowed: false,
+      ok: false,
       code: "policy_error",
       message: e?.message || "Policy check failed",
-      decisionId,
-      chatType,
-      retrieval: "deny",
-      sqlExecution: "deny",
     };
   }
-}
-
-export async function assertUnifiedChatAllowed(
-  req: AuthRequest,
-  input: UnifiedChatPolicyInput,
-): Promise<{ ok: true; decision: PolicyDecision } | { ok: false; code: string; message: string }> {
-  const decision = await evaluateUnifiedChatPolicy(req, input);
-  if (!decision.allowed) {
-    return {
-      ok: false,
-      code: decision.code ?? "policy_denied",
-      message: decision.message ?? "Policy denied",
-    };
-  }
-  return { ok: true, decision };
-}
-
-export interface UnifiedChatPermissionsPayload {
-  cohiChat: boolean;
-  chatTypes: UnifiedConversationChatType[];
-  policy?: {
-    modes: Record<
-      UnifiedConversationChatType,
-      { allowed: boolean; sqlExecution: string; deepAnalysis?: boolean }
-    >;
-    researchQuotasTbd: boolean;
-  };
-}
-
-export async function buildUnifiedChatPermissions(
-  req: AuthRequest,
-): Promise<UnifiedChatPermissionsPayload> {
-  const base = await evaluateUnifiedChatPolicy(req, { chatType: "chat" });
-  const types: UnifiedConversationChatType[] = base.allowed
-    ? ["chat", "research", "insight_builder", "workbench"]
-    : [];
-
-  const modes: Record<
-    UnifiedConversationChatType,
-    { allowed: boolean; sqlExecution: string; deepAnalysis?: boolean }
-  > = {
-    chat: { allowed: false, sqlExecution: "deny" },
-    research: { allowed: false, sqlExecution: "deny" },
-    insight_builder: { allowed: false, sqlExecution: "deny" },
-    workbench: { allowed: false, sqlExecution: "deny" },
-  };
-  for (const t of types) {
-    const d = await evaluateUnifiedChatPolicy(req, { chatType: t });
-    modes[t] = {
-      allowed: d.allowed,
-      sqlExecution: d.sqlExecution,
-      ...(t === "research" ? { deepAnalysis: true } : {}),
-    };
-  }
-
-  return {
-    cohiChat: base.allowed,
-    chatTypes: types,
-    policy: {
-      modes,
-      researchQuotasTbd: true,
-    },
-  };
-}
-
-/**
- * Platform tenant_id usage — only platform staff roles (Appendix A.3).
- */
-export function assertPlatformTenantScope(
-  req: AuthRequest,
-  requestedTenantId: string,
-): { ok: true } | { ok: false; code: string; message: string } {
-  const ctxTenant = req.tenantContext?.tenantId || req.tenantId;
-  if (requestedTenantId === ctxTenant) return { ok: true };
-  if (req.isSuperAdmin || req.userRole === "admin") {
-    return { ok: true };
-  }
-  return {
-    ok: false,
-    code: "tenant_scope_forbidden",
-    message: "Cross-tenant access denied",
-  };
 }

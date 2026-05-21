@@ -39,7 +39,6 @@ import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import { sanitizeGeneratedSQL } from '../services/ai/cohiChatService.js';
 import { getLoanAccessContext } from '../services/userLoanAccessService.js';
 import { NAVIGATION_TARGETS } from '../services/chat/navigationTargetCatalog.js';
-import { evaluateUnifiedChatPolicy } from '../services/chat/unifiedChatPolicy.js';
 
 const router = Router();
 
@@ -150,15 +149,12 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
       });
     }
 
+    // Process the question
     const chatContext = await buildChatContext(req);
-    const policy = await evaluateUnifiedChatPolicy(req, { chatType: 'chat' });
-    const includeRag = policy.allowed && policy.retrieval !== 'deny';
-
     const response = await processCohiQuestion(
       question.trim(),
       chatContext,
-      conversationHistory || [],
-      { includeRag },
+      conversationHistory || []
     );
 
     // Save to chat history if we have a session
