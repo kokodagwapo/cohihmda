@@ -18,7 +18,10 @@ export async function dismissBlockingOverlays(page: Page): Promise<void> {
   for (let i = 0; i < 5; i++) {
     const blockingDialog = page
       .locator("[role='dialog']")
-      .filter({ hasText: /quick tour|welcome|what's new|let us give you a quick tour/i })
+      .filter({
+        hasText:
+          /quick tour|welcome|what's new|let us give you a quick tour|cohi chat has a new home|tour the changes/i,
+      })
       .first();
     const overlay = page.locator("div[data-state='open'][aria-hidden='true']").first();
 
@@ -69,6 +72,10 @@ export async function forceUnifiedChat(page: Page): Promise<void> {
       localStorage.removeItem("cohi_e2e_legacy_chat_only");
       localStorage.setItem(
         "cohi-welcome-tour-last-shown",
+        new Date().toISOString(),
+      );
+      localStorage.setItem(
+        "cohi-chat-changes-announce-handled",
         new Date().toISOString(),
       );
     } catch {

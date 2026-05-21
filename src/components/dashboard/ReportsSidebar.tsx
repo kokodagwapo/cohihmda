@@ -28,7 +28,8 @@ import { useTenantLosLastSyncedAt } from '@/hooks/useTenantLosLastSyncedAt';
 import { formatDataLastSyncedLine } from '@/utils/losSyncDisplay';
 import { useWorkbenchNav, type SidebarCanvas } from '@/hooks/useWorkbenchNav';
 import { UnifiedChatSidebarSections } from '@/components/cohi/UnifiedChatSidebarSections';
-import { SIDEBAR_NAV_ACCENT } from '@/components/cohi/sidebarNavPrimitives';
+import { SIDEBAR_NAV_ACCENT, SidebarTourAnchor } from '@/components/cohi/sidebarNavPrimitives';
+import { COHI_TOUR_ACTIVE_EVENT, cohiTourAnchorId } from '@/lib/tourTargets';
 import { UnifiedSidebarInsightsNav } from '@/components/cohi/UnifiedSidebarInsightsNav';
 import { isUnifiedChatClientEnabled } from '@/lib/unifiedChatEnvelope';
 import {
@@ -634,6 +635,8 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const unifiedChatIa = isUnifiedChatClientEnabled();
   const [dashboardsExpanded, setDashboardsExpanded] = useState(() => !unifiedChatIa);
 
+  const [tourSidebarLock, setTourSidebarLock] = useState(false);
+
   useEffect(() => {
     const onTourOpenSidebar = () => {
       setSidebarOpen(true);
@@ -642,6 +645,15 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
     return () =>
       window.removeEventListener("cohi-tour-open-app-sidebar", onTourOpenSidebar);
   }, [setSidebarOpen]);
+
+  useEffect(() => {
+    const onTourActive = (event: Event) => {
+      const active = (event as CustomEvent<{ active?: boolean }>).detail?.active;
+      setTourSidebarLock(active === true);
+    };
+    window.addEventListener(COHI_TOUR_ACTIVE_EVENT, onTourActive);
+    return () => window.removeEventListener(COHI_TOUR_ACTIVE_EVENT, onTourActive);
+  }, []);
   const [researchExpanded, setResearchExpanded] = useState(true);
   const [toptieringExpanded, setToptieringExpanded] = useState(false);
   const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(true);
@@ -1297,7 +1309,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
 
         <SidebarContent
           data-tour-root="desktop-sidebar-nav"
-          className={cn("pb-3 overflow-y-auto flex-1 min-h-0")}
+          className={cn(
+            "pb-3 flex-1 min-h-0",
+            tourSidebarLock ? "overflow-visible" : "overflow-y-auto",
+          )}
         >
         <div className={cn("py-2", isExpanded ? "pl-1 pr-2" : "px-1")}>
           {/* Search moved to top nav - sidebar no longer shows search bar */}
@@ -1582,9 +1597,9 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
           {/* Dashboard - category always shown; submenu shows pinned items from top nav */}
           {isExpanded ? (
             <div className={cn("mb-2")}>
+              <SidebarTourAnchor tourAnchorId={cohiTourAnchorId("myDashboards")}>
               <button
                 type="button"
-                id="cohi-tour-sidebar-my-dashboards"
                 onClick={() => setDashboardsExpanded(!dashboardsExpanded)}
                 style={{ width: '100%', padding: '12px 10px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, transition: 'all 0.2s ease' }}
                 className="rounded-lg"
@@ -1602,6 +1617,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 <p className={cn("text-sm font-semibold flex-1 m-0", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                 <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: dashboardsExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
               </button>
+              </SidebarTourAnchor>
               <AnimatePresence initial={false}>
                 {dashboardsExpanded && (
                   <motion.div
@@ -1667,14 +1683,17 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
           ) : (
             <Popover open={pinnedDashboardFlyoutOpen} onOpenChange={setPinnedDashboardFlyoutOpen}>
               <PopoverTrigger asChild>
+                <SidebarTourAnchor
+                  tourAnchorId={cohiTourAnchorId("myDashboards")}
+                  className="flex justify-center py-2"
+                >
                 <div
-                  className="w-full flex justify-center py-2"
+                  className="inline-flex"
                   onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setPinnedDashboardFlyoutOpen(true); }}
                   onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setPinnedDashboardFlyoutOpen(false), 150); }}
                 >
                   <button
                     type="button"
-                    id="cohi-tour-sidebar-my-dashboards"
                     className={cn("w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}
                     aria-label="My Dashboards"
                   >
@@ -1685,6 +1704,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     </span>
                   </button>
                 </div>
+                </SidebarTourAnchor>
               </PopoverTrigger>
               <PopoverContent
                 side="right"

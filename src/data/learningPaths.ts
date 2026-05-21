@@ -34,9 +34,9 @@ export const missions: Mission[] = [
     id: "mission-track-insight",
     title: "Track your first insight",
     description:
-      "Bookmark an insight from Daily Briefings to add it to your watchlist.",
+      "Bookmark an insight to add it to your watchlist (under the My Insights tab).",
     icon: "Bookmark",
-    action: "Go to Insights and click the bookmark icon on any insight card.",
+    action: "Go to Insights, open the My Insights tab to see Tracked insights, or bookmark a card from either tab.",
     verifyRoute: "/insights",
   },
   {
@@ -339,13 +339,13 @@ export const learningPaths: LearningPath[] = [
       {
         week: 4,
         title: "Advanced Features",
-        focus: "Research Lab, Cohi Chat, Reports",
+        focus: "Research, Cohi Chat, Reports",
         steps: [
           {
             id: "mgr-w4-1",
-            title: "Read: Starting a Research Session",
+            title: "Read: Using Research in Cohi Chat",
             type: "article",
-            link: "/help/research-lab/starting-research",
+            link: "/help/cohi-chat/research-mode",
           },
           {
             id: "mgr-w4-2",

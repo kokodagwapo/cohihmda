@@ -275,6 +275,9 @@ export function expandEffectiveQuestionForNavigation(
 export function buildGuidanceResponse(): NavigationResolveResult {
   const helpTargets = resolveTargetsById([
     "help-what-you-can-ask",
+    "help-chat-mode",
+    "help-research-mode",
+    "help-insight-builder-mode",
     "help-example-queries",
     "help-chat-workbench",
     "insights",

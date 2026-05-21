@@ -197,6 +197,35 @@ export const NAVIGATION_TARGETS: readonly NavigationTarget[] = [
     path: "/help/cohi-chat/chat-in-workbench",
     keywords: ["chat in workbench", "workbench help"],
   },
+  {
+    id: "help-chat-mode",
+    label: "Chat mode help",
+    group: "Help",
+    kind: "route",
+    path: "/help/cohi-chat/chat-mode",
+    keywords: ["chat mode", "general chat", "data questions", "cohi chat"],
+  },
+  {
+    id: "help-research-mode",
+    label: "Research mode help",
+    group: "Help",
+    kind: "route",
+    path: "/help/cohi-chat/research-mode",
+    keywords: ["research mode", "research lab", "deep analysis", "investigation"],
+  },
+  {
+    id: "help-insight-builder-mode",
+    label: "Insight builder help",
+    group: "Help",
+    kind: "route",
+    path: "/help/cohi-chat/insight-builder-mode",
+    keywords: [
+      "insight builder",
+      "custom insight",
+      "my insights prompt",
+      "insight prompt",
+    ],
+  },
 ] as const;
 
 export function getNavigationTargetById(

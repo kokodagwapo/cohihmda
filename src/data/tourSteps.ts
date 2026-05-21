@@ -1,23 +1,25 @@
 import type { Step } from "react-joyride";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import {
+  COHI_SIDEBAR_ANCHOR_STEP_DATA_KEY,
   desktopSidebarTourTarget,
-  prepareDesktopSidebarTourStep,
   type CohiTourSidebarAnchor,
 } from "@/lib/tourTargets";
 
 const sidebarTourStep = (
   anchor: CohiTourSidebarAnchor,
-  step: Omit<Step, "target" | "before">,
+  step: Omit<Step, "target" | "data"> & { data?: Step["data"] },
 ): Step => {
-  const target = desktopSidebarTourTarget(anchor);
   return {
     ...step,
-    target,
+    target: desktopSidebarTourTarget(anchor),
     placement: step.placement ?? "right",
     disableScrolling: true,
-    spotlightPadding: 0,
-    before: () => prepareDesktopSidebarTourStep(target),
+    spotlightPadding: 4,
+    data: {
+      ...step.data,
+      [COHI_SIDEBAR_ANCHOR_STEP_DATA_KEY]: anchor,
+    },
   };
 };
 
@@ -127,8 +129,7 @@ export const welcomeTourSteps = isUnifiedChatClientEnabled()
   ? welcomeTourStepsUnified
   : welcomeTourStepsLegacy;
 
-export const cohiChatTourSteps: Step[] = isUnifiedChatClientEnabled()
-  ? [
+const cohiChatTourStepsUnified: Step[] = [
       {
         target: "body",
         content:
@@ -197,6 +198,11 @@ export const cohiChatTourSteps: Step[] = isUnifiedChatClientEnabled()
           "Open Full History to search every thread, filter by chat type, and browse older sessions with pagination.",
         title: "Full History",
       }),
+      sidebarTourStep("dataExplorer", {
+        content:
+          "Data Explorer used to live in Research Lab—now it's here. Open this page to view, manage, and work with every CSV you've uploaded for analysis.",
+        title: "Data Explorer",
+      }),
       {
         target: '[data-track="nav_communications_center"]',
         content:
@@ -211,8 +217,14 @@ export const cohiChatTourSteps: Step[] = isUnifiedChatClientEnabled()
         placement: "center",
         title: "You're set",
       },
-    ]
-  : [];
+];
+
+/** Resolved at call time so runtime unified-chat flags apply (not only build-time env). */
+export function getCohiChatTourSteps(): Step[] {
+  return isUnifiedChatClientEnabled() ? cohiChatTourStepsUnified : [];
+}
+
+export const cohiChatTourSteps: Step[] = getCohiChatTourSteps();
 
 export const workbenchTourSteps: Step[] = [
   {
@@ -490,7 +502,7 @@ export type TourId =
 
 export const tourRegistry: Record<TourId, { steps: Step[]; label: string }> = {
   welcome: { steps: welcomeTourSteps, label: "Welcome Tour" },
-  "cohi-chat": { steps: cohiChatTourSteps, label: "Cohi Chat Tour" },
+  "cohi-chat": { steps: cohiChatTourStepsUnified, label: "Cohi Chat Tour" },
   workbench: { steps: workbenchTourSteps, label: "Workbench Tour" },
   research: { steps: researchLabTourSteps, label: "Research Lab Tour" },
   toptiering: { steps: topTieringTourSteps, label: "TopTiering Tour" },
@@ -501,6 +513,13 @@ export const tourRegistry: Record<TourId, { steps: Step[]; label: string }> = {
   },
 };
 
+export function getTourSteps(tourId: TourId): Step[] {
+  if (tourId === "cohi-chat") {
+    return getCohiChatTourSteps();
+  }
+  return tourRegistry[tourId]?.steps ?? [];
+}
+
 export function tourHasSteps(tourId: TourId): boolean {
-  return (tourRegistry[tourId]?.steps.length ?? 0) > 0;
+  return getTourSteps(tourId).length > 0;
 }

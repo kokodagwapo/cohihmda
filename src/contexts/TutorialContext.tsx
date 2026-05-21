@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
+import { recordCohiChatAnnounceHandled } from '@/lib/cohiChatTourAnnounce';
 
 export interface TutorialPreferences {
   tours_completed: string[];
@@ -9,6 +10,8 @@ export interface TutorialPreferences {
   help_dismissed: boolean;
   learning_path_week: number;
   onboarding_complete: boolean;
+  /** ISO timestamp when user skipped or completed the unified chat changes announce. */
+  cohi_chat_changes_announce_handled_at?: string | null;
 }
 
 const DEFAULT_TUTORIAL_PREFS: TutorialPreferences = {
@@ -18,6 +21,7 @@ const DEFAULT_TUTORIAL_PREFS: TutorialPreferences = {
   help_dismissed: false,
   learning_path_week: 0,
   onboarding_complete: false,
+  cohi_chat_changes_announce_handled_at: null,
 };
 
 /**
@@ -39,6 +43,7 @@ interface TutorialContextType {
   isMissionCompleted: (missionId: string) => boolean;
   dismissHelp: () => Promise<void>;
   markWhatsNewSeen: () => Promise<void>;
+  markCohiChatChangesAnnounceHandled: () => Promise<void>;
   resetTours: () => Promise<void>;
   refresh: () => Promise<void>;
   setTourStepHandler: (handler: TourStepHandler | null) => void;
@@ -106,6 +111,8 @@ export function TutorialProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const completeTour = useCallback(async (tourId: string) => {
+    setActiveTourId(null);
+    setIsTourActive(false);
     const updated = {
       ...prefs,
       tours_completed: [...new Set([...prefs.tours_completed, tourId])],
@@ -113,9 +120,12 @@ export function TutorialProvider({ children }: { children: ReactNode }) {
     if (tourId === 'welcome') {
       updated.onboarding_complete = true;
     }
+    if (tourId === 'cohi-chat') {
+      recordCohiChatAnnounceHandled();
+      updated.cohi_chat_changes_announce_handled_at =
+        updated.cohi_chat_changes_announce_handled_at ?? new Date().toISOString();
+    }
     await savePrefs(updated);
-    setActiveTourId(null);
-    setIsTourActive(false);
   }, [prefs, savePrefs]);
 
   const isTourCompleted = useCallback((tourId: string) => {
@@ -143,6 +153,14 @@ export function TutorialProvider({ children }: { children: ReactNode }) {
     await savePrefs({ ...prefs, whats_new_last_seen: new Date().toISOString() });
   }, [prefs, savePrefs]);
 
+  const markCohiChatChangesAnnounceHandled = useCallback(async () => {
+    if (prefs.cohi_chat_changes_announce_handled_at) return;
+    await savePrefs({
+      ...prefs,
+      cohi_chat_changes_announce_handled_at: new Date().toISOString(),
+    });
+  }, [prefs, savePrefs]);
+
   const resetTours = useCallback(async () => {
     await savePrefs(DEFAULT_TUTORIAL_PREFS);
   }, [savePrefs]);
@@ -162,6 +180,7 @@ export function TutorialProvider({ children }: { children: ReactNode }) {
         isMissionCompleted,
         dismissHelp,
         markWhatsNewSeen,
+        markCohiChatChangesAnnounceHandled,
         resetTours,
         refresh: fetchPrefs,
         setTourStepHandler,

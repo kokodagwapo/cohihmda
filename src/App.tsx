@@ -68,6 +68,7 @@ import ChatFullHistory from "./pages/ChatFullHistory";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 import { TutorialProvider } from "@/contexts/TutorialContext";
 import { WelcomeTourTrigger } from "@/components/tutorial/WelcomeTourTrigger";
+import { CohiChatTourTrigger } from "@/components/tutorial/CohiChatTourTrigger";
 import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
 import { CohiChatTourPrep } from "@/components/tutorial/CohiChatTourPrep";
 // Workbench pages
@@ -304,6 +305,7 @@ const App = () => (
                 <GlobalCohiChat />
                 <CohiDemoExperience />
                 <WelcomeTourTrigger />
+                <CohiChatTourTrigger />
                 <CohiChatTourPrep />
                 <ActiveTourRunner />
               </FullAccessOnly>

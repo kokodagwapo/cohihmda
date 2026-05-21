@@ -2,7 +2,14 @@
  * Shared sidebar section chrome (matches ReportsSidebar "My Dashboards").
  */
 
-import { useRef, useState, type ReactNode, isValidElement, cloneElement } from "react";
+import {
+  forwardRef,
+  useRef,
+  useState,
+  type ReactNode,
+  isValidElement,
+  cloneElement,
+} from "react";
 import { ChevronDown, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -85,6 +92,33 @@ export const SIDEBAR_SECTION_BUTTON_STYLE: React.CSSProperties = {
   gap: 10,
   transition: "all 0.2s ease",
 };
+
+/**
+ * Joyride spotlight target for sidebar rows. The id sits on a wrapper (not the
+ * button) so react-joyride uses viewport rect inside fixed + scrollable sidebar.
+ */
+export const SidebarTourAnchor = forwardRef<
+  HTMLDivElement,
+  {
+    tourAnchorId?: string;
+    className?: string;
+    children: ReactNode;
+  }
+>(function SidebarTourAnchor({ tourAnchorId, className, children }, ref) {
+  if (!tourAnchorId) {
+    return <>{children}</>;
+  }
+  return (
+    <div
+      ref={ref}
+      id={tourAnchorId}
+      data-tour-spotlight-anchor=""
+      className={cn("w-full shrink-0", className)}
+    >
+      {children}
+    </div>
+  );
+});
 
 export function sidebarSectionRowHover(isDarkMode: boolean) {
   return {
@@ -194,38 +228,39 @@ export function SidebarExpandableSection({
   if (isExpanded) {
     return (
       <div className="mb-2">
-        <button
-          type="button"
-          id={tourAnchorId}
-          onClick={onToggleSection}
-          style={SIDEBAR_SECTION_BUTTON_STYLE}
-          className={cn(
-            "rounded-lg",
-            active && accentStyles?.activeIconTile,
-          )}
-          {...(active ? {} : sidebarSectionRowHover(isDarkMode))}
-        >
-          <span className="inline-flex shrink-0 pointer-events-none">
-            <SidebarSectionIcon icon={Icon} accent={accent} />
-          </span>
-          <p
+        <SidebarTourAnchor tourAnchorId={tourAnchorId}>
+          <button
+            type="button"
+            onClick={onToggleSection}
+            style={SIDEBAR_SECTION_BUTTON_STYLE}
             className={cn(
-              "text-sm font-semibold flex-1 m-0",
-              accentStyles?.label ?? "text-slate-900 dark:text-slate-100",
+              "rounded-lg",
+              active && accentStyles?.activeIconTile,
             )}
+            {...(active ? {} : sidebarSectionRowHover(isDarkMode))}
           >
-            {label}
-          </p>
-          <ChevronDown
-            size={18}
-            style={{
-              color: isDarkMode ? "#94a3b8" : "#64748b",
-              transform: sectionExpanded ? "none" : "rotate(-90deg)",
-              transition: "transform 0.2s ease",
-              flexShrink: 0,
-            }}
-          />
-        </button>
+            <span className="inline-flex shrink-0 pointer-events-none">
+              <SidebarSectionIcon icon={Icon} accent={accent} />
+            </span>
+            <p
+              className={cn(
+                "text-sm font-semibold flex-1 m-0",
+                accentStyles?.label ?? "text-slate-900 dark:text-slate-100",
+              )}
+            >
+              {label}
+            </p>
+            <ChevronDown
+              size={18}
+              style={{
+                color: isDarkMode ? "#94a3b8" : "#64748b",
+                transform: sectionExpanded ? "none" : "rotate(-90deg)",
+                transition: "transform 0.2s ease",
+                flexShrink: 0,
+              }}
+            />
+          </button>
+        </SidebarTourAnchor>
         <AnimatePresence initial={false}>
           {sectionExpanded && (
             <motion.div
@@ -247,7 +282,6 @@ export function SidebarExpandableSection({
     <button
       type="button"
       aria-label={label}
-      id={tourAnchorId}
       onClick={(e) => {
         e.stopPropagation();
         flyout.setOpen(false);
@@ -276,7 +310,6 @@ export function SidebarExpandableSection({
           : accentStyles?.iconTile ?? "bg-slate-50 dark:bg-slate-800/30",
       )}
       aria-label={label}
-      id={tourAnchorId}
       role="img"
     >
       <Icon
@@ -290,13 +323,18 @@ export function SidebarExpandableSection({
   );
 
   const collapsedAnchor = (
-    <div
-      className="w-full flex justify-center py-2"
-      onMouseEnter={flyout.onEnter}
-      onMouseLeave={flyout.onLeave}
+    <SidebarTourAnchor
+      tourAnchorId={tourAnchorId}
+      className="flex justify-center py-2"
     >
-      <div className="inline-flex">{collapsedIcon}</div>
-    </div>
+      <div
+        className="inline-flex"
+        onMouseEnter={flyout.onEnter}
+        onMouseLeave={flyout.onLeave}
+      >
+        {collapsedIcon}
+      </div>
+    </SidebarTourAnchor>
   );
 
   return (
@@ -350,12 +388,14 @@ export function SidebarNavRow({
 
   if (!isExpanded) {
     return (
-      <div className="w-full flex justify-center py-2">
+      <SidebarTourAnchor
+        tourAnchorId={tourAnchorId}
+        className="flex justify-center py-2"
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
-              id={tourAnchorId}
               onClick={onClick}
               className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center",
@@ -372,15 +412,14 @@ export function SidebarNavRow({
           </TooltipTrigger>
           <TooltipContent side="right">{label}</TooltipContent>
         </Tooltip>
-      </div>
+      </SidebarTourAnchor>
     );
   }
 
   return (
-    <div className="mb-2">
+    <SidebarTourAnchor tourAnchorId={tourAnchorId} className="mb-2">
       <button
         type="button"
-        id={tourAnchorId}
         onClick={onClick}
         style={SIDEBAR_SECTION_BUTTON_STYLE}
         className={cn("rounded-lg", active && accentStyles.activeIconTile)}
@@ -394,6 +433,6 @@ export function SidebarNavRow({
           {label}
         </p>
       </button>
-    </div>
+    </SidebarTourAnchor>
   );
 }

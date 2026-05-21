@@ -70,7 +70,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { SidebarExpandableSection } from "@/components/cohi/sidebarNavPrimitives";
+import {
+  SidebarExpandableSection,
+  SidebarTourAnchor,
+} from "@/components/cohi/sidebarNavPrimitives";
 import { cohiTourAnchorId } from "@/lib/tourTargets";
 
 const SIDEBAR_HISTORY_LIMIT = 5;
@@ -1014,34 +1017,49 @@ export function UnifiedChatSidebarSections({
 
       {isExpanded ? (
         <div className="px-1 pt-1 pb-2 space-y-2">
-          <Button
-            variant="outline"
-            id={includeTourAnchors ? cohiTourAnchorId("fullHistory") : undefined}
-            className="w-full justify-center gap-2 h-9 text-sm font-medium"
-            asChild
+          <SidebarTourAnchor
+            tourAnchorId={
+              includeTourAnchors ? cohiTourAnchorId("fullHistory") : undefined
+            }
           >
-            <Link to="/chat/history">
-              <History className="h-4 w-4" />
-              Full History
-            </Link>
-          </Button>
-          <Button
-            variant="outline"
-            className="w-full justify-center gap-2 h-9 text-sm font-medium"
-            asChild
+            <Button
+              variant="outline"
+              className="w-full justify-center gap-2 h-9 text-sm font-medium"
+              asChild
+            >
+              <Link to="/chat/history">
+                <History className="h-4 w-4" />
+                Full History
+              </Link>
+            </Button>
+          </SidebarTourAnchor>
+          <SidebarTourAnchor
+            tourAnchorId={
+              includeTourAnchors ? cohiTourAnchorId("dataExplorer") : undefined
+            }
           >
-            <Link to="/research/data-explorer">
-              <Table2 className="h-4 w-4" />
-              Data Explorer
-            </Link>
-          </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-center gap-2 h-9 text-sm font-medium"
+              asChild
+            >
+              <Link to="/research/data-explorer">
+                <Table2 className="h-4 w-4" />
+                Data Explorer
+              </Link>
+            </Button>
+          </SidebarTourAnchor>
         </div>
       ) : (
-        <div className="flex justify-center py-2">
+        <SidebarTourAnchor
+          tourAnchorId={
+            includeTourAnchors ? cohiTourAnchorId("fullHistory") : undefined
+          }
+          className="flex justify-center py-2"
+        >
           <Button
             variant="outline"
             size="icon"
-            id={includeTourAnchors ? cohiTourAnchorId("fullHistory") : undefined}
             className="h-9 w-9 shrink-0"
             asChild
           >
@@ -1053,7 +1071,7 @@ export function UnifiedChatSidebarSections({
               <History className="h-4 w-4" />
             </Link>
           </Button>
-        </div>
+        </SidebarTourAnchor>
       )}
       </div>
       <DragOverlay dropAnimation={null}>

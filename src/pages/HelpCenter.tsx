@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useParams, useNavigate, Routes, Route } from 'react-router-dom';
+import { Link, useParams, useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
 import { Navigation } from '@/components/layout/Navigation';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,6 +13,7 @@ import { useTutorial } from '@/contexts/TutorialContext';
 import { useHelpArticles } from '@/hooks/useHelpArticles';
 import { helpCategories, type HelpCategory } from '@/data/helpArticles';
 import { tourHasSteps, type TourId } from '@/data/tourSteps';
+import { scheduleCohiChatTourStart } from '@/lib/cohiChatTour';
 import { LearningPathView } from '@/components/tutorial/LearningPathView';
 import {
   Search,
@@ -41,6 +42,157 @@ const iconMap: Record<string, React.ElementType> = {
   TrendingUp, MessageSquare, Settings, Shield, HelpCircle, BookOpen,
 };
 
+type MarkdownLinkSegment =
+  | { type: 'text'; text: string }
+  | { type: 'link'; label: string; href: string };
+
+/** Paths only — blocks \`protocol:\` spoofing (\`javascript:\`, external URLs passed as markdown). */
+function isSafeMarkdownHelpHref(raw: string): boolean {
+  const h = raw.trim();
+  return h.startsWith('/') && !h.startsWith('//') && !/:/i.test(h);
+}
+
+function splitMarkdownLinks(line: string): MarkdownLinkSegment[] {
+  const re = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const out: MarkdownLinkSegment[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) {
+      out.push({ type: 'text', text: line.slice(last, m.index) });
+    }
+    out.push({ type: 'link', label: m[1], href: m[2] });
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) {
+    out.push({ type: 'text', text: line.slice(last) });
+  }
+  if (out.length === 0) {
+    out.push({ type: 'text', text: line });
+  }
+  return out;
+}
+
+/** Bold / italic / inline code segments that appear outside of \`[](...)\` link syntax. */
+function applyNonLinkFormatting(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+?)`/g, '<code class="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">$1</code>');
+}
+
+/**
+ * Parses \`[label](/relative/path)\` into client-side \`<Link>\` so help articles read naturally
+ * and navigation stays SPA-fast. Unknown / unsafe href shapes fall back to visible raw markdown.
+ */
+function MarkdownInlineSpans({ text }: { text: string }) {
+  const segments = splitMarkdownLinks(text);
+  return (
+    <>
+      {segments.map((seg, idx) => {
+        if (seg.type === 'link') {
+          const trimmed = seg.href.trim();
+          if (isSafeMarkdownHelpHref(trimmed)) {
+            return (
+              <Link
+                key={idx}
+                to={trimmed}
+                className="text-primary underline underline-offset-2 font-medium hover:text-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <span dangerouslySetInnerHTML={{ __html: applyNonLinkFormatting(seg.label) }} />
+              </Link>
+            );
+          }
+          return (
+            <span key={idx} className="font-mono text-xs">
+              [{seg.label}]({seg.href})
+            </span>
+          );
+        }
+        if (!seg.text) return null;
+        return <span key={idx} dangerouslySetInnerHTML={{ __html: applyNonLinkFormatting(seg.text) }} />;
+      })}
+    </>
+  );
+}
+
+/** Split `\` | a | b |\` rows into trimmed cell texts (handles optional outer pipes). */
+function splitMarkdownTableRow(trimmed: string): string[] {
+  const s = trimmed.trim();
+  let inner = s;
+  if (inner.startsWith('|')) inner = inner.slice(1);
+  if (inner.endsWith('|')) inner = inner.slice(0, -1);
+  return inner.split('|').map((c) => c.trim());
+}
+
+function isMarkdownTableSeparatorRowCells(cells: string[]): boolean {
+  if (cells.length < 2) return false;
+  return cells.every((c) => /^:?-{3,}:?$/.test(c.trim()));
+}
+
+/**
+ * Consume a GitHub-flavored markdown pipe table starting at line index \`start\`.
+ * Requires header row + dashed separator row, then arbitrary body rows.
+ */
+function tryParseMarkdownTable(lines: string[], start: number): { element: React.ReactNode; nextIndex: number } | null {
+  if (start >= lines.length) return null;
+  const trimmed0 = lines[start].trimEnd().trimStart();
+  if (!trimmed0.startsWith('|') || trimmed0.lastIndexOf('|') <= 0) return null;
+
+  const headerCells = splitMarkdownTableRow(trimmed0);
+  if (headerCells.length < 2) return null;
+
+  const trimmed1 = lines[start + 1]?.trimEnd().trimStart();
+  if (trimmed1 == null || !trimmed1.includes('|')) return null;
+
+  const sepCells = splitMarkdownTableRow(trimmed1);
+  if (sepCells.length !== headerCells.length || !isMarkdownTableSeparatorRowCells(sepCells)) return null;
+
+  const body: string[][] = [];
+  let j = start + 2;
+  for (; j < lines.length; j++) {
+    const t = lines[j].trimEnd().trimStart();
+    if (t === '') break;
+    if (!t.includes('|')) break;
+    const rowCells = splitMarkdownTableRow(t);
+    if (rowCells.length !== headerCells.length) break;
+    body.push(rowCells);
+  }
+
+  const tableKey = `md-table-${start}`;
+  const cellClass = 'border border-border px-3 py-2 align-top text-muted-foreground';
+  const thClass = 'border border-border px-3 py-2 text-left align-top font-semibold text-foreground bg-muted/50';
+
+  const element = (
+    <div key={tableKey} className="overflow-x-auto mb-6">
+      <table className="w-full min-w-[280px] border-collapse border border-border rounded-md overflow-hidden text-sm">
+        <thead>
+          <tr>
+            {headerCells.map((cell, idx) => (
+              <th key={idx} className={thClass}>
+                <MarkdownInlineSpans text={cell} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, ri) => (
+            <tr key={ri}>
+              {row.map((cell, ci) => (
+                <td key={ci} className={cellClass}>
+                  <MarkdownInlineSpans text={cell} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return { element, nextIndex: j };
+}
+
 function SimpleMarkdown({ content }: { content: string }) {
   const lines = content.split('\n');
   const elements: React.ReactNode[] = [];
@@ -55,8 +207,16 @@ function SimpleMarkdown({ content }: { content: string }) {
     }
   };
 
-  lines.forEach((line, i) => {
-    const trimmed = line.trimEnd();
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimEnd();
+
+    const tableBlock = tryParseMarkdownTable(lines, i);
+    if (tableBlock) {
+      flushList();
+      elements.push(tableBlock.element);
+      i = tableBlock.nextIndex - 1;
+      continue;
+    }
 
     if (trimmed.startsWith('# ')) {
       flushList();
@@ -69,45 +229,60 @@ function SimpleMarkdown({ content }: { content: string }) {
       elements.push(<h3 key={i} className="text-lg font-semibold mt-4 mb-2 text-foreground">{trimmed.slice(4)}</h3>);
     } else if (trimmed.startsWith('- **')) {
       inList = true;
-      const match = trimmed.match(/^- \*\*(.+?)\*\*\s*[-—]?\s*(.*)/);
+      const match = trimmed.match(/^- \*\*(.+?)\*\*\s*(.*)$/);
       if (match) {
         listItems.push(
           <li key={i} className="text-muted-foreground">
             <strong className="text-foreground">{match[1]}</strong>
-            {match[2] ? ` — ${match[2]}` : ''}
-          </li>
+            {match[2]?.trim()
+              ? (
+                  <>
+                    {' '}
+                    <MarkdownInlineSpans text={match[2]} />
+                  </>
+                )
+              : null}
+          </li>,
         );
       } else {
-        const text = trimmed.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        listItems.push(<li key={i} className="text-muted-foreground" dangerouslySetInnerHTML={{ __html: text }} />);
+        listItems.push(
+          <li key={i} className="text-muted-foreground">
+            <MarkdownInlineSpans text={trimmed.slice(2)} />
+          </li>,
+        );
       }
     } else if (trimmed.startsWith('- ')) {
       inList = true;
-      const text = trimmed.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      listItems.push(<li key={i} className="text-muted-foreground" dangerouslySetInnerHTML={{ __html: text }} />);
+      listItems.push(
+        <li key={i} className="text-muted-foreground">
+          <MarkdownInlineSpans text={trimmed.slice(2)} />
+        </li>,
+      );
     } else if (/^\d+\.\s/.test(trimmed)) {
       flushList();
-      const text = trimmed.replace(/^\d+\.\s/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      const text = trimmed.replace(/^\d+\.\s/, '');
       if (!inList) {
         elements.push(<ol key={`ol-start-${i}`} className="list-decimal pl-6 space-y-1 mb-4" />);
       }
       elements.push(
         <div key={i} className="flex gap-2 pl-6 mb-1">
           <span className="text-muted-foreground font-medium min-w-[20px]">{trimmed.match(/^(\d+)\./)?.[1]}.</span>
-          <span className="text-muted-foreground" dangerouslySetInnerHTML={{ __html: text }} />
-        </div>
+          <span className="text-muted-foreground">
+            <MarkdownInlineSpans text={text} />
+          </span>
+        </div>,
       );
     } else if (trimmed === '') {
       flushList();
     } else {
       flushList();
-      const text = trimmed
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/`(.+?)`/g, '<code class="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">$1</code>');
-      elements.push(<p key={i} className="text-muted-foreground mb-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: text }} />);
+      elements.push(
+        <p key={i} className="text-muted-foreground mb-3 leading-relaxed">
+          <MarkdownInlineSpans text={trimmed} />
+        </p>,
+      );
     }
-  });
+  }
   flushList();
 
   return <div className="prose-sm max-w-none">{elements}</div>;
@@ -432,6 +607,7 @@ function ArticleEditor({
 function ArticlePage() {
   const { categorySlug, articleSlug } = useParams<{ categorySlug: string; articleSlug: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { startTour } = useTutorial();
   const { getArticleBySlug, getArticlesByCategory, isOverridden, saveOverride, revertOverride, saving, canEdit } = useHelpArticles();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -496,11 +672,12 @@ function ArticlePage() {
                         ? '/research'
                         : tourId === 'admin'
                           ? '/admin'
-                          : tourId === 'cohi-chat'
-                            ? '/insights'
-                            : '/insights';
+                          : '/insights';
+                  if (tourId === 'cohi-chat') {
+                    scheduleCohiChatTourStart(navigate, startTour, location.pathname);
+                    return;
+                  }
                   navigate(path);
-                  // Delay so the target page mounts and tour targets exist in the DOM
                   setTimeout(() => startTour(tourId), 800);
                 }}
                 className="gap-1"
@@ -562,6 +739,15 @@ export default function HelpCenter() {
         <Routes>
           <Route index element={<HelpHome />} />
           <Route path="learning-paths" element={<LearningPathView />} />
+          {/* Legacy Research Lab help category → unified Research guide */}
+          <Route
+            path="research-lab"
+            element={<Navigate to="/help/cohi-chat/research-mode" replace />}
+          />
+          <Route
+            path="research-lab/:articleSlug"
+            element={<Navigate to="/help/cohi-chat/research-mode" replace />}
+          />
           <Route path=":categorySlug" element={<CategoryPage />} />
           <Route path=":categorySlug/:articleSlug" element={<ArticlePage />} />
         </Routes>
