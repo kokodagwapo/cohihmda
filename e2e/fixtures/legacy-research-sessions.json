@@ -1,0 +1,7 @@
+{
+  "description": "Legacy Research URL spot-check ids for COHI-403 AC4 / meeting spec §11.6 (staging manual + redirect E2E).",
+  "sessionIds": [
+    "e2e-legacy-session-1",
+    "e2e-legacy-session-2"
+  ]
+}

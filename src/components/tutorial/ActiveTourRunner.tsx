@@ -1,6 +1,12 @@
-import { useTutorial } from '@/contexts/TutorialContext';
-import { FeatureTour } from './FeatureTour';
-import type { TourId } from '@/data/tourSteps';
+import { useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useTutorial } from "@/contexts/TutorialContext";
+import { FeatureTour } from "./FeatureTour";
+import type { TourId } from "@/data/tourSteps";
+import {
+  COHI_CHAT_TOUR_PAGE_PATH,
+  isCohiChatTourPage,
+} from "@/lib/cohiChatTour";
 
 /**
  * Renders the active tour (Joyride) when startTour() is called from anywhere.
@@ -9,8 +15,20 @@ import type { TourId } from '@/data/tourSteps';
  */
 export function ActiveTourRunner() {
   const { activeTourId } = useTutorial();
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  if (!activeTourId || activeTourId === 'welcome') return null;
+  useEffect(() => {
+    if (activeTourId === "cohi-chat" && !isCohiChatTourPage(location.pathname)) {
+      navigate(COHI_CHAT_TOUR_PAGE_PATH, { replace: true });
+    }
+  }, [activeTourId, location.pathname, navigate]);
+
+  if (!activeTourId || activeTourId === "welcome") return null;
+
+  if (activeTourId === "cohi-chat" && !isCohiChatTourPage(location.pathname)) {
+    return null;
+  }
 
   return <FeatureTour key={activeTourId} tourId={activeTourId as TourId} />;
 }

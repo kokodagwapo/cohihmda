@@ -78,7 +78,7 @@ export const videoScripts: VideoScript[] = [
       'Track important insights for monitoring',
       'Chat for deeper analysis on any insight',
     ],
-    relatedHelpArticles: ['ins-daily-briefings', 'ins-tracking', 'ins-details'],
+    relatedHelpArticles: ['ins-daily-briefings', 'ins-my-insights', 'ins-my-prompts', 'ins-tracking', 'ins-details'],
   },
 
   // ─── Insights & Analytics Series ───────────────────────────────────
@@ -381,7 +381,7 @@ export const videoScripts: VideoScript[] = [
       'AI investigates your data like a human analyst would',
       'Findings include actionable recommendations',
     ],
-    relatedHelpArticles: ['rl-starting', 'rl-findings'],
+    relatedHelpArticles: ['cc-research-mode'],
   },
   {
     id: 'v17',
@@ -404,7 +404,7 @@ export const videoScripts: VideoScript[] = [
       'Use topic suggestions for inspiration',
       'Follow up to go deeper on any finding',
     ],
-    relatedHelpArticles: ['rl-starting', 'rl-followup'],
+    relatedHelpArticles: ['cc-research-mode'],
   },
 
   // ─── Data Management Series ────────────────────────────────────────
@@ -601,7 +601,7 @@ export const videoScripts: VideoScript[] = [
       'Each AI feature serves a different purpose',
       'Specificity and context improve AI responses',
     ],
-    relatedHelpArticles: ['cc-overview', 'rl-starting', 'ins-daily-briefings'],
+    relatedHelpArticles: ['cc-overview', 'cc-research-mode', 'ins-daily-briefings'],
   },
   {
     id: 'v26',

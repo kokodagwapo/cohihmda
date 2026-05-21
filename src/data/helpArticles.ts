@@ -38,12 +38,6 @@ export const helpCategories: HelpCategory[] = [
     description: "Custom dashboards and widgets",
   },
   {
-    slug: "research-lab",
-    label: "Research Lab",
-    icon: "FlaskConical",
-    description: "AI-powered data investigation",
-  },
-  {
     slug: "toptiering",
     label: "TopTiering Analytics",
     icon: "TrendingUp",
@@ -53,7 +47,7 @@ export const helpCategories: HelpCategory[] = [
     slug: "cohi-chat",
     label: "Cohi Chat",
     icon: "MessageSquare",
-    description: "AI assistant and natural language queries",
+    description: "Unified chat, modes, history, and example queries",
   },
   {
     slug: "settings",
@@ -109,7 +103,7 @@ Use the top navigation bar to access:
 - **Insights** — Your home dashboard with AI briefings and KPIs
 - **Dashboard** — TopTiering analytics (funnels, scorecards, comparisons)
 - **My Workbench** — Build custom dashboards with drag-and-drop widgets
-- **Research Lab** — Ask deep analytical questions to the AI
+- **Cohi Chat (Research)** — Deep AI investigations from the chat band on any page
 
 ## 5. Set Up Your Profile
 Visit **Settings** (from the user menu, top-right) to change your password, enable MFA for security, and set your preferred theme.`,
@@ -126,7 +120,7 @@ Visit **Settings** (from the user menu, top-right) to change your password, enab
 The Insights dashboard is divided into several sections, each providing a different perspective on your business:
 
 ## Cohi Insights
-AI-generated executive insights that highlight significant changes, risks, and opportunities in your loan pipeline. Each insight can be tracked to your watchlist for monitoring.
+AI-generated executive insights that highlight significant changes, risks, and opportunities in your loan pipeline. Bookmark any insight to track it; monitored items appear under **Insights → My Insights → Tracked insights** (see [Tracking Insights to Your Watchlist](/help/insights/tracking-insights)). For the personal feed, see [My Insights](/help/insights/my-insights); for saved custom prompts, see [My Prompts](/help/insights/my-prompts).
 
 ## Cohi Mortgage News
 Curated industry news aggregated from trusted sources, keeping you informed about market conditions.
@@ -162,8 +156,7 @@ The navigation bar at the top of every page provides access to all major section
 - **Insights** (dropdown) — Jump to Cohi Insights or Cohi Mortgage News
 - **Dashboard** (dropdown) — Access TopTiering analytics including Scorecards, Credit Risk, Financial Modeling, and more
 - **My Workbench** — Your custom dashboard builder
-- **Research Lab** — AI-powered data investigation tool
-- **Data Chat** — A dedicated AI conversation page for focused analysis
+- **Cohi Chat** — Unified AI assistant (Chat, Research, Insight builder, Workbench) on every page
 
 ## Right Side Controls
 - **Tenant Selector** — Switch between tenants (platform admins only)
@@ -235,7 +228,7 @@ Each insight card shows:
 - **Details** — Click to expand for full analysis and supporting data
 
 ## Tracking Insights
-Click the bookmark icon on any insight to add it to your watchlist. Tracked insights are monitored over time, and you'll see updates if the underlying situation changes.
+Click the bookmark icon on any insight to add it to your watchlist. Tracked insights are monitored over time, and you'll see updates if the underlying situation changes. View and manage tracked items on the **My Insights** tab — see [Tracking Insights to Your Watchlist](/help/insights/tracking-insights).
 
 ## Asking Follow-Up Questions
 Open any insight's detail view and use the chat feature to ask follow-up questions. For example: "Which specific loans are contributing to this trend?" or "How does this compare to last quarter?"`,
@@ -249,8 +242,10 @@ Open any insight's detail view and use the chat feature to ask follow-up questio
     summary: "Monitor important insights over time.",
     content: `# Tracking Insights to Your Watchlist
 
+Tracked insights live on the **Insights** page under the **My Insights** tab, in the **Tracked insights** section at the bottom of that tab.
+
 ## Adding to Watchlist
-Click the **bookmark icon** on any insight card to track it. Tracked insights appear in your watchlist section where you can monitor how they evolve over time.
+Click the **bookmark icon** on any insight card—in either the **Insights** tab (organization-wide Cohi Insights) or **My Insights** (your personalized feed)—to track it. Tracked items appear in **Tracked insights** on the **My Insights** tab, where you can monitor how they evolve over time.
 
 ## Why Track Insights?
 Tracking is useful for:
@@ -259,9 +254,103 @@ Tracking is useful for:
 - Keeping executives informed about key metrics
 
 ## Managing Your Watchlist
-- View all tracked insights from the watchlist panel
-- Remove items by clicking the bookmark icon again
+- Open **Insights → My Insights** and scroll to **Tracked insights**
+- Remove items by clicking the bookmark icon again on the original card, or from the watchlist
 - Insights update automatically as new data arrives`,
+  },
+  {
+    id: "ins-my-insights",
+    slug: "my-insights",
+    title: "My Insights",
+    category: "Insights",
+    categorySlug: "insights",
+    summary:
+      "Overview of your personal Insights tab: profile-based cards and watchlist.",
+    content: `# My Insights
+
+On the **Insights** page, switch to **My Insights** for your personal dashboard on top of the tenant-wide briefing. Organization-wide AI briefings remain on the **Insights** tab; **My Insights** is scoped to **you**.
+
+## What's on this tab
+
+**Personalized cards** — Cohi summarizes how you tend to use the product (pages you visit, filters you apply across dashboards and analytics, themes in chat, Workbench usage, insight feedback). After each sync, new cards aim at that footprint. Behavioral cards explain **why you're seeing this** when grounded in your interest profile.
+
+**Tracked insights** — Bookmarking still bookmarks the insight; monitored items gather in **Tracked insights** at the bottom of this tab. Tracking behavior is unchanged from before—only the home for the list moved here. Details: [Tracking Insights to Your Watchlist](/help/insights/tracking-insights).
+
+**My Prompts** — Saved questions produce **custom** My Insights cards (they carry a **Custom Insight** cue and reference the originating prompt). How to author, schedule, specifier, run, edit, disable, or delete prompts is documented in **[My Prompts](/help/insights/my-prompts)**.
+
+## Insights vs My Insights (quick contrast)
+
+| Aspect | **Insights** tab | **My Insights** tab |
+| --- | --- | --- |
+| Audience | Whole organization | You only |
+| Source | Tenant insight agents | Your profile + prompts you saved |
+| Watchlist bucket | Bookmark from insights here or on My Insights | **Tracked insights** lists every bookmark |
+
+## Practical tips
+
+Keep using Cohi the way you already do—changing filters and asking questions—is what keeps personalization relevant. Combine tenant briefings (**Insights**) with your personal lane (**My Insights**) so nothing important gets noisy.
+
+**See also:** [My Prompts](/help/insights/my-prompts) · [Reading Your Cohi Insights](/help/insights/daily-briefings) · [Using Insight Builder in Cohi Chat](/help/cohi-chat/insight-builder-mode)`,
+  },
+  {
+    id: "ins-my-prompts",
+    slug: "my-prompts",
+    title: "My Prompts",
+    category: "Insights",
+    categorySlug: "insights",
+    summary:
+      "Save custom prompts that become My Insights cards—form fields, Insight builder, and examples.",
+    content: `# My Prompts
+
+**My Prompts** lives inside **Insights → My Insights**. Each saved prompt is a question or analysis you ask Cohi to run periodically or when you explicitly trigger it; the output appears as cards in **My Insights** beside your personalized behavioral cards.
+
+## Add or edit prompts
+
+Choose **Add Prompt** from the My Prompts block, or **Edit** from the row menu for an existing prompt:
+
+**Title** — Short label identifying the insight in lists and badges.
+
+**Schedule** — Dropdown with two choices:
+- **Batch (with My Insights sync)** — Runs when My Insights refreshes alongside new ingest.
+- **On demand** — Does not auto-run; use **Run** (play icon) on the prompt row whenever you want a fresh card now.
+
+Subsidiary help text in the modal: batch prompts piggy-back on sync; on-demand waits for your Run action.
+
+**Prompt text** — The natural-language briefing you want synthesized into a card (patterns, cohort comparisons, diagnostics, operational triage wording, etc.). This is narrative direction; narrowing the **loan cohort** belongs in Specifiers unless you deliberately keep it conversational only.
+
+**Tag** — Optional. Tags categorize the synthesized card inside My Insights lanes. Default stays **(blank)** per product copy.
+
+**Specifiers** — Optional filters you attach with **Add specifier**. Each row has a loans-table **Column** dropdown and matching **Filter** choices (loan type FHA, branch 2001, status application denied, and similar). Those rows behave like chained AND clauses: only loans matching **every** specifier are included before Cohi runs your Prompt text—and they are structured filters, not text you paste inside the Prompt field. Insight builder previews often draft suggestive specifiers; **Add Prompt** exposes the exact same specifier panel UI. Rows can be cleared with row **X**.
+
+Closing actions: **Cancel** closes without saving drafts; **Save changes** persists the prompt for batch/sync or on-demand **Run**.
+
+For the conversational authoring path—and **Approve**, **Request changes**, and preview cards—see [Using Insight Builder](/help/cohi-chat/insight-builder-mode); approved drafts sync into **My Prompts** without re-entering modal fields blind.
+
+Heavy jobs can overlap oddly: batched prompts, manually triggered **Run**, and full refresh passes should be staggered if one hangs—only one strenuous My Insights pathway should churn at once.
+
+Prompt rows meanwhile carry **On** toggles and **Run** / **Edit** / trash controls so upkeep rarely needs reopening the modal.
+
+Back to contextual overview: [My Insights](/help/insights/my-insights).
+
+## Examples (realistic saved prompts)
+
+**Example A — FHA denial patterns**
+
+Title: FHA Denial Patterns  
+Schedule: Batch (with My Insights sync)  
+Prompt Text: Are there any patterns in FHA denials? What are the top reasons and which LOs have the highest denial rates?  
+Tag: (blank)  
+Specifiers:
+- Loan Type (\`loan_type\`) · **Loan Type: FHA**
+- Current Loan Status · **Current Loan Status: Application denied**
+
+**Example B — Branch 2001 weekly health**
+
+Title: Branch 2001 weekly health  
+Schedule: Batch (with My Insights sync)  
+Prompt Text: How is Branch 2001 performing this week compared to last month? Focus on pull-through and cycle time.  
+Tag: (blank)  
+Specifiers: Branch (\`branch\`) · **Branch: 2001**`,
   },
   {
     id: "ins-details",
@@ -783,102 +872,6 @@ When **Notify Managers** is enabled, managers receive:
 - Start with a higher minimum risk score (e.g., 70+) and lower it as your team adjusts
 - Use Daily Digest to avoid alert fatigue
 - Review the LO Responses tab weekly to identify patterns and coaching opportunities`,
-  },
-
-  // ─── Research Lab ──────────────────────────────────────────────────
-  {
-    id: "rl-starting",
-    slug: "starting-research",
-    title: "Starting a Research Session",
-    category: "Research Lab",
-    categorySlug: "research-lab",
-    summary: "How to use the AI research analyst.",
-    relatedTour: "research",
-    content: `# Starting a Research Session
-
-## What is the Research Lab?
-The Research Lab is an AI-powered analyst that investigates your loan data to answer complex questions. Unlike quick chat responses, the Research Lab performs deep, multi-step analysis.
-
-## Starting a Session
-1. Navigate to **Research Lab** from the top navigation
-2. Type your research question in the input box
-3. Click **Investigate** or press Enter
-4. Watch the AI work through its investigation in real-time
-
-## Good Research Questions
-- "What factors are driving loan fallout in our Wholesale channel?"
-- "How has our turn time performance changed over the past 6 months?"
-- "Which branches have the highest and lowest pull-through rates, and why?"
-- "Identify risk patterns in our FHA loan portfolio"
-- "Compare Q4 vs Q1 performance across all metrics"
-
-## Topic Suggestions
-If you're not sure what to ask, click on one of the pre-built topic suggestions:
-- Pipeline health analysis
-- Personnel performance deep dive
-- Risk pattern identification
-- Turn time trends
-- Product mix analysis
-- Revenue driver investigation`,
-  },
-  {
-    id: "rl-findings",
-    slug: "interpreting-findings",
-    title: "Interpreting Research Findings",
-    category: "Research Lab",
-    categorySlug: "research-lab",
-    summary: "Understanding what the AI discovered.",
-    content: `# Interpreting Research Findings
-
-## Finding Structure
-Each research session produces findings organized by:
-
-- **Severity** — How significant the finding is (Critical, High, Medium, Low, Informational)
-- **Category** — What area it relates to (Performance, Risk, Operations, Revenue, etc.)
-- **Evidence** — The data and analysis supporting the finding
-
-## Reading a Finding
-Click on any finding card to see:
-- **Summary** — A concise description of what was found
-- **Supporting Data** — Charts, tables, and metrics
-- **Root Cause Analysis** — Why this is happening
-- **Recommendations** — Suggested actions to take
-- **Affected Entities** — Which branches, LOs, or loan types are involved
-
-## Severity Levels
-- **Critical** — Immediate attention required (e.g., significant revenue loss)
-- **High** — Important issue that should be addressed soon
-- **Medium** — Notable finding worth monitoring
-- **Low** — Minor observation for awareness
-- **Informational** — Context and background data
-
-## Following Up
-Use the chat below the findings to ask follow-up questions about any discovery. The AI retains context from the full research session.`,
-  },
-  {
-    id: "rl-followup",
-    slug: "research-followup",
-    title: "Following Up with the AI Analyst",
-    category: "Research Lab",
-    categorySlug: "research-lab",
-    summary: "Continue the conversation after initial research.",
-    content: `# Following Up with the AI Analyst
-
-## Continuing the Conversation
-After the initial research completes, you can ask follow-up questions in the chat. The AI remembers the full context of the session.
-
-## Effective Follow-Ups
-- "Drill deeper into finding #2 — which specific loans are involved?"
-- "What would happen if we improved turn times by 5 days?"
-- "Show me the month-over-month trend for the risk patterns you identified"
-- "Who are the top performers and what are they doing differently?"
-- "Create an action plan based on these findings"
-
-## Tips
-- Reference specific findings for targeted answers
-- Ask for comparisons: "How does branch A compare to branch B on this metric?"
-- Request visualizations: "Show this as a chart"
-- Ask for summaries: "Summarize the key takeaways for an executive audience"`,
   },
 
   // ─── Insights (continued) ───────────────────────────────────────────
@@ -1532,36 +1525,291 @@ Use the export button to download rankings as an Excel file. Multiple export for
     title: "What You Can Ask Cohi",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
-    summary: "Understand the AI assistant capabilities.",
+    summary: "Cohi Chat in one place—modes, layout, and what you can ask.",
+    relatedTour: "cohi-chat",
     content: `# What You Can Ask Cohi
 
-## Overview
-Cohi Chat is an AI assistant available on every page. It understands your loan data schema and can answer questions, generate reports, and help you navigate the platform.
+## One chat, same capabilities
+Cohi Chat is still your AI assistant for loan data, analytics, and navigation. What changed is **where** you use it: one chat band **below the top navigation** on every page, instead of a separate panel on the right or scattered entry points.
 
-## Data Questions
+Your past conversations, Research sessions, and Workbench chats are part of the **same history**—see Chat History, Folders, and Full History in this Help category.
+
+## Where to find it
+- Open any page (Insights, dashboards, Workbench)—the chat band appears under the top bar.
+- Use **layout controls** to stay compact, go taller, fill the page, or split the screen with page content.
+- **Research** opens in full-page layout when you start an investigation (same Timeline / Findings / Report workflow as the former Research Lab).
+
+## Chat types
+Pick a type before you send—the assistant routes your request the same way as the old dedicated screens:
+
+- **Chat** — Quick metrics, definitions, navigation (same as general Cohi Chat / data questions). Default for new conversations. → [Using Chat mode](/help/cohi-chat/chat-mode)
+- **Research** — Deep investigations, reports, timeline (same as Research Lab). → [Using Research](/help/cohi-chat/research-mode)
+- **Insight builder** — Author custom insight prompts in conversation. → [Using Insight builder](/help/cohi-chat/insight-builder-mode)
+- **Workbench** — Create widgets, canvases, SQL, exports (same as Workbench AI assistant). → [Using Cohi Chat in the Workbench](/help/cohi-chat/chat-in-workbench)
+
+## What you can ask (Chat mode)
+### Data questions
 - "How many loans are in our current pipeline?"
 - "What's the average loan amount for FHA loans?"
 - "Which branch has the highest pull-through rate?"
-- "Show me all loans closing this week"
 
-## Analytical Questions
+### Analytical questions
 - "Why did our volume drop last month?"
 - "Compare Retail vs Wholesale performance"
-- "What's trending in our turn times?"
 
-## Help & Navigation
+### Help and navigation
 - "How do I create a dashboard?"
 - "Where can I find the Loan Funnel?"
-- "What does pull-through rate mean?"
 
-## Report Generation
+### Reports
 - "Generate a pipeline summary report"
 - "Create a PowerPoint for the executive meeting"
 
 ## Tips
-- Be specific with time periods: "last 30 days", "Q4 2025", "this month"
-- Mention the metric: "funded volume" vs just "volume"
-- Specify filters: "for Retail channel" or "in the West region"`,
+- Be specific with time periods and metrics.
+- Switch chat type when you need Research, insight prompts, or dashboard building—no need to leave the page.`,
+  },
+  {
+    id: "cc-chat-mode",
+    slug: "chat-mode",
+    title: "Using Chat Mode in Cohi Chat",
+    category: "Cohi Chat",
+    categorySlug: "cohi-chat",
+    summary:
+      "Default chat type—quick answers, charts, navigation, and exports.",
+    content: `# Using Chat Mode in Cohi Chat
+
+## Same assistant, Chat mode
+**Chat** is the default type for new conversations. Use it for everyday questions about your loan data, product definitions, and where to find reports in Cohi—without starting a full Research investigation or opening Workbench.
+
+Select **Chat** in the chat type menu on the unified band below the top navigation. You can use it on any page (Insights, dashboards, Workbench, etc.).
+
+## What kind of response to expect
+Cohi answers in **plain language**, streamed as it is generated. Depending on your question, a turn may include:
+
+- **Text** — A direct answer, explanation, or summary (often grounded in your tenant’s loan data when the question is analytical).
+- **Chart or table** — When the question calls for metrics over time or breakdowns, Cohi may attach an interactive **visualization** you can inspect in the chat thread.
+- **Navigation links** — For “where do I find…?” questions, Cohi can suggest **links to dashboards and pages** in the app (for example Pipeline Analysis, Leaderboard, or Workbench).
+- **Follow-up suggestions** — Short **suggested questions** appear after many turns so you can drill down without rephrasing everything.
+
+Chat mode uses the same data and knowledge pipeline as the former global Cohi Chat / Data Chat experience. It is optimized for **fast, conversational** answers—not the multi-step Research timeline.
+
+## What you can ask
+
+### Data and metrics
+Ask for counts, averages, rankings, and comparisons. Include **time period** and **filters** when you can (branch, LO, product, channel).
+
+- "How many loans are in our current pipeline?"
+- "What's the average loan amount for FHA loans?"
+- "Top 5 loan officers by funded volume this month"
+- "Compare Retail vs Wholesale pull-through last quarter"
+
+### Analytical and diagnostic (lightweight)
+You can ask *why* or *what changed* style questions; Cohi will query and summarize. For multi-step investigations with a formal report, switch to **Research** instead.
+
+- "Why did our volume drop last month?"
+- "Which branch has the highest pull-through rate?"
+
+### Definitions and policy
+- "What are the FHA requirements?"
+- "What does fallout rate mean in Cohi?"
+
+### Help and navigation
+- "How do I create a dashboard?"
+- "Where can I find the Loan Funnel?"
+- "Open help for example queries"
+
+### Reports and exports from chat
+When a visualization is shown, you can **export** (PDF, PowerPoint) or **save to Workbench** from the artifact actions on that turn—useful for one-off charts without building a full canvas first.
+
+## What Chat mode does not do
+- **Research workspace** — No Timeline / Findings / Report tabs; no Deep analysis toggle. Use **Research** for that.
+- **Insight prompt authoring** — No approve/deny preview card for My Insights. Use **Insight builder**.
+- **Canvas editing** — No automatic widget placement on a Workbench canvas unless you use **Workbench** type (or save a chart from chat into Workbench).
+
+## Tips
+- Be specific: metric name, date range, branch or LO, loan type.
+- Use follow-up suggestions to refine the same thread.
+- Switch to **Research** when you need a structured investigation and exportable report; switch to **Workbench** when you are building or editing a dashboard.`,
+  },
+  {
+    id: "cc-research-mode",
+    slug: "research-mode",
+    title: "Using Research in Cohi Chat",
+    category: "Cohi Chat",
+    categorySlug: "cohi-chat",
+    summary:
+      "Deep investigations with timeline, findings, reports, and follow-ups.",
+    relatedTour: "research",
+    content: `# Using Research in Cohi Chat
+
+## What is Research?
+**Research** is Cohi's AI-powered analyst for complex loan-data questions. Unlike **Chat** mode (quick answers and charts), Research runs **deep, multi-step analysis**—querying your data, reasoning through drivers, and producing structured findings you can drill into, share, and export.
+
+Select **Research** in the chat type menu on the unified band below the top navigation (any page). Past sessions—including those started in the former standalone Research Lab—appear in **unified chat history**; resume from **History**, **Folders**, or **Full History**.
+
+## Starting a session
+1. Open Cohi Chat and choose **Research** as the chat type.
+2. Optionally enable **Deep analysis** for longer investigations (checkbox appears only in Research type).
+3. Type your question or pick a **topic suggestion** on the empty state.
+4. Click **Investigate** (or **Get answer** in quick mode) or press Enter.
+5. The shell **expands to full page** automatically. Watch the **Timeline** as agents work; review **Findings** and the **Report** as they complete.
+
+You can attach **CSV uploads** when starting a session (same as Data Explorer / legacy Research Lab). Session lists live in the **app sidebar** (History / Full History)—not a separate SESSIONS column inside Research.
+
+## What kind of response to expect
+Each turn updates the **Research workspace**:
+
+- **Timeline** — Steps the analyst takes (queries, reasoning, checkpoints) in real time.
+- **Findings** — Evidence cards with severity, category, charts, and drill-downs.
+- **Report** — Narrative summary for executives; shareable and exportable.
+
+**Quick** vs **Deep analysis**:
+
+| Option | Best for |
+|--------|----------|
+| **Quick** (default) | Focused questions; faster path to answer and report. |
+| **Deep analysis** | Broader topics; more agent steps, richer timeline, longer run. |
+
+## Good research questions
+Research fits **why**, **what changed**, and **where to act**—not single KPI lookups.
+
+- "What factors are driving loan fallout in our Wholesale channel?"
+- "How has our turn time performance changed over the past 6 months?"
+- "Which branches have the highest and lowest pull-through rates, and why?"
+- "Identify risk patterns in our FHA loan portfolio"
+- "Compare Q4 vs Q1 performance across all metrics"
+
+### Topic suggestions
+When you are not sure where to start, use the built-in starters (also in [Example Queries](/help/cohi-chat/example-queries)):
+
+- Pipeline health and conversion performance
+- LO scorecard and performance outliers
+- Risk patterns (FICO, LTV, DTI)
+- Turn time trends by role
+- Product mix and channel analysis
+- Revenue drivers and margin concentration
+
+## Interpreting findings
+Findings are organized for scanability and prioritization:
+
+- **Severity** — Critical, High, Medium, Low, or Informational
+- **Category** — Performance, Risk, Operations, Revenue, and related areas
+- **Evidence** — Data and analysis supporting each finding
+
+Click a finding card to open:
+
+- **Summary** — What was discovered
+- **Supporting data** — Charts, tables, metrics
+- **Root cause analysis** — Why it is happening
+- **Recommendations** — Suggested next steps
+- **Affected entities** — Branches, LOs, loan types, or channels involved
+
+### Severity guide
+- **Critical** — Immediate attention (e.g., significant revenue or risk exposure)
+- **High** — Address soon
+- **Medium** — Worth monitoring
+- **Low** — Awareness item
+- **Informational** — Context and background
+
+Use **drill-down** views where offered to inspect underlying loans or segments.
+
+## Following up with the analyst
+After the initial run completes, use **Continue the conversation** in the Research workspace. The AI retains **full session context**.
+
+Effective follow-ups:
+
+- "Drill deeper into finding #2 — which specific loans are involved?"
+- "What would happen if we improved turn times by 5 days?"
+- "Show me the month-over-month trend for the risk patterns you identified"
+- "Who are the top performers and what are they doing differently?"
+- "Create an action plan based on these findings"
+- "Summarize the key takeaways for an executive audience"
+
+Tips: reference **finding numbers or titles**, ask for **comparisons** across branches or LOs, and request **charts** when a table is hard to scan.
+
+## Actions in the Research workspace
+- **Share** and **Export** report outputs
+- **Save to Workbench** — Push findings or visualizations to a canvas
+- **New investigation** — Start a fresh topic in a new Research thread
+- **Move from Insights** — Some insight cards still offer "investigate further" into Research
+
+## What Research does not do
+- **Quick metric lookups** — Use **Chat** for "how many loans…" without a full investigation.
+- **My Insights prompt authoring** — Use **Insight builder**.
+- **Workbench layout editing** — Use **Workbench** on a canvas (you can still save Research outputs there).
+
+## Tips
+- Lead with a **clear topic**; Deep analysis works best with a slightly broader scope.
+- Keep follow-ups in the **same conversation** so history and folders stay coherent.
+- For one-off charts without a formal report, **Chat** is faster; for audit-style steps and exportable narrative, use **Research**.`,
+  },
+  {
+    id: "cc-insight-builder-mode",
+    slug: "insight-builder-mode",
+    title: "Using Insight Builder in Cohi Chat",
+    category: "Cohi Chat",
+    categorySlug: "cohi-chat",
+    summary:
+      "Create and approve custom My Insights prompts through conversation.",
+    content: `# Using Insight Builder in Cohi Chat
+
+## Same prompt list, Insight builder type
+**Insight builder** helps you create **custom insight prompts** for **My Insights** on the Insights page—through conversation instead of filling the editor cold. Select **Insight builder** in the chat type menu, then describe what you want Cohi to watch or analyze. Context for the tab is in **[My Insights](/help/insights/my-insights)**; the Add Prompt modal, schedules, specifiers, and examples are covered in **[My Prompts](/help/insights/my-prompts)**.
+
+Saved prompts run on the same schedule and specifier rules as prompts you create manually on \`/insights\`.
+
+## What kind of response to expect
+Insight builder turns usually fall into two phases:
+
+### 1. Gathering
+Cohi asks **clarifying questions** when something important is missing or ambiguous—for example:
+
+- **Schedule** — Recurring **batch** (e.g. weekly digest) vs **on-demand** (run when you open it).
+- **Scope** — Branch, LO, loan type, channel, or other filters.
+- **Column mapping** — If a filter name does not match your loans table, Cohi suggests valid column names.
+
+Answer in plain language in the same thread.
+
+### 2. Preview
+When enough detail is present, Cohi shows an inline **Review insight prompt draft** card with:
+
+- **Title**
+- **Prompt text** — What the insight agent should analyze each run
+- **Schedule** — Batch or on-demand
+- **Category tag** (optional) — Operations, Sales, Finance, Secondary marketing, Compliance
+- **Specifiers** — Structured filters (branch, loan type, etc.)
+
+You can **edit any field directly** in the preview before saving.
+
+**Approve** — Persists the prompt to your **My Insights** list (enabled by default). The card becomes read-only and shows as saved.
+
+**Request changes** — Sends your feedback back to Cohi to revise the draft in-thread. Nothing is saved until you Approve.
+
+Cohi will **not** write to your prompt list without an explicit **Approve**.
+
+## What you can ask
+Describe the insight you want in natural language—branch performance, risk patterns, operational triage, etc.
+
+- "Create a weekly batch insight for Branch 204: pull-through and cycle time vs last month"
+- "Create an insight about FHA denial patterns—top reasons and LO denial rates"
+- "Create an on-demand insight to triage suspended loans—aging and top suspend reasons"
+- "Set up a recurring insight comparing my branch to similar-sized branches"
+
+See [Example Queries](/help/cohi-chat/example-queries) for more starters.
+
+After save, open **Insights → My Insights → My Prompts** to **edit, disable, or delete** the prompt like any other saved row. Modal fields and specifier behavior are spelled out under **[My Prompts](/help/insights/my-prompts)**.
+
+## What Insight builder does not do
+- **Run the insight immediately in chat** — It authors the **prompt definition**; execution happens on the Insights schedule or when you trigger on-demand insights.
+- **Replace Research** — Research produces investigative reports; insight prompts feed your **daily / on-demand insight** feed.
+- **Build Workbench dashboards** — Use **Workbench** for canvases and widgets.
+
+## Tips
+- State **who or what** the insight is for (branch, product, LO cohort) up front to reduce back-and-forth.
+- Choose **batch** for recurring monitoring; **on-demand** for ad-hoc checks.
+- Review **specifiers** in the preview—they control which loans the insight considers.
+- Use **Request changes** with specific corrections ("use funding date, not lock date") rather than starting over.`,
   },
   {
     id: "cc-examples",
@@ -1569,38 +1817,48 @@ Cohi Chat is an AI assistant available on every page. It understands your loan d
     title: "Example Queries",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
-    summary: "Sample questions to try with Cohi Chat.",
+    summary: "Starter questions for each chat type.",
     content: `# Example Queries for Cohi Chat
 
-## Pipeline Overview
+Examples below match the **suggested prompts** shown when you pick each chat type. Capabilities are the same as before—only the entry point is centralized.
+
+For how each type behaves and what responses look like, see the dedicated guides: [Chat mode](/help/cohi-chat/chat-mode), [Research](/help/cohi-chat/research-mode), [Insight builder](/help/cohi-chat/insight-builder-mode), and [Workbench](/help/cohi-chat/chat-in-workbench).
+
+## Chat (general)
+- "What's important to know today?"
+- "Show me loan volume by month"
+- "What are the FHA requirements?"
+- "Top loan officers by revenue"
+
+## Pipeline and performance (Chat)
 - "How many active loans do we have?"
-- "What's our current pipeline value?"
-- "Show me the pipeline breakdown by status"
-
-## Performance Metrics
 - "What's our pull-through rate this quarter?"
-- "Average cycle time from application to closing?"
 - "Top 5 loan officers by funded volume this month"
-
-## Branch & Channel Analysis
 - "Compare all branches by revenue"
-- "Which channel has the fastest turn times?"
-- "Show me Wholesale pipeline health"
 
-## Risk & Compliance
-- "How many loans have LTV over 80%?"
-- "What's our average FICO score?"
-- "Show me the DTI distribution"
+## Research
+- "Overall pipeline health and conversion performance"
+- "LO scorecard: compute TTS scores, tier distribution, and performance outliers"
+- "Risk patterns and credit exposure: FICO, LTV, DTI distribution"
+- "Turn time trends and operational efficiency by role"
+- "Product mix and channel analysis: loan type, purpose, and program breakdown"
 
-## Trends
-- "How has our monthly volume changed over the past year?"
-- "Is our pull-through rate improving?"
-- "Show revenue trends by quarter"
+Enable **Deep analysis** (Research type only) for longer investigations.
 
-## Data Queries
-- "List all loans assigned to John Smith"
-- "Show me loans in 'Clear to Close' status"
-- "Find all jumbo loans over $1M"`,
+## Insight builder
+- "Create a weekly batch insight for Branch 204: pull-through and cycle time vs last month"
+- "Create an insight about FHA denial patterns—top reasons and LO denial rates"
+- "Create an on-demand insight to triage suspended loans—aging and top suspend reasons"
+
+Review the preview card, edit fields, then **Approve** to save to your prompt list on Insights.
+
+## Workbench
+- "Prepare a board-ready overview of this month's performance"
+- "Add a bar chart of monthly funded volume"
+- "Build an executive dashboard with key KPIs"
+- "Generate a PowerPoint from this canvas"
+
+When you are on a canvas, Workbench mode is **context-aware**—it knows which widgets you are editing.`,
   },
   {
     id: "cc-workbench",
@@ -1608,64 +1866,76 @@ Cohi Chat is an AI assistant available on every page. It understands your loan d
     title: "Using Cohi Chat in the Workbench",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
-    summary: "AI-powered dashboard building.",
+    summary: "AI-powered dashboard building in Workbench chat type.",
     content: `# Using Cohi Chat in the Workbench
 
-## Workbench-Specific Capabilities
-When using Cohi Chat within the Workbench, it gains additional capabilities:
+## Same assistant, Workbench mode
+Workbench still has AI-powered dashboard building. Select **Workbench** in the chat type menu on the unified chat band (on the Workbench page or anywhere else).
 
-## Widget Creation
+You no longer need a separate right-side chat drawer—the **same conversation** can include general questions and Workbench actions when the type is set to Workbench.
+
+## What you can do
+### Widget creation
 - "Add a bar chart of monthly funded volume"
 - "Create a KPI card for average loan amount"
-- "Build a pie chart of loan types"
 
-## Widget Modification
+### Widget modification
 - "Change this chart to a line chart"
-- "Update the colors to use a blue palette"
 - "Add a filter for Conventional loans only"
 
-## Dashboard Building
+### Canvas and layout
 - "Create a new canvas called 'Monthly Review'"
 - "Arrange the widgets in a 2x2 grid"
 
-## SQL Generation
+### SQL and reports
 - "Write a SQL query to find all loans with rate > 7%"
-- "Show me the SQL behind this widget"
-
-## Report Building
 - "Generate a PowerPoint from this canvas"
-- "Create a PDF report with all widgets"
 
-The Workbench AI assistant is context-aware — it knows which canvas and widgets you're working with.`,
+## Context-aware behavior
+On a Workbench canvas, Cohi receives your **canvas and widget context** automatically—the same as the former Workbench AI panel.
+
+## My Dashboards
+Pin canvases from the sidebar **My Dashboards** section (with pinned TopTiering dashboards). Pins sync across devices with no per-user cap.`,
   },
   {
     id: "cc-data-chat",
     slug: "data-chat-page",
-    title: "Using the Data Chat Page",
+    title: "Chat History, Folders, and Full History",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
     summary:
-      "Use Data Chat for focused, standalone AI analysis conversations.",
-    content: `# Using the Data Chat Page
+      "Find, organize, and resume every Cohi conversation in one place.",
+    content: `# Chat History, Folders, and Full History
 
-## What Is Data Chat?
-Data Chat is a dedicated page for conversational analysis when you want a focused chat workflow outside full dashboard context.
+## One timeline for everything
+General chat, **Research** sessions, **Insight builder** threads, and **Workbench** conversations all appear in the **same history**. Legacy Research Lab sessions were merged in—you will not lose past work.
 
-## When to Use It
-- Quick investigative questions without switching between multiple dashboards
-- Iterative follow-up questions on a single analysis thread
-- Fast ad-hoc checks before sharing findings with your team
+## Sidebar: History
+The **History** section lists your most recent chats. Click a row to resume on the page where you left off. Each row shows a **chat type** label (Chat, Research, Insight builder, Workbench).
 
-## Example Questions
-- "What changed in pull-through this month by branch?"
-- "Show top contributors to current fallout risk."
-- "Compare this month to last month for funded volume and margin."
-- "Which segments show worsening turn time trend?"
+## Sidebar: Folders
+Use **Folders** to organize conversations:
+- Create folders and nest up to **five** levels
+- **Drag** a chat from **History** onto a folder, or use the **Move to folder** button on a conversation row (in History or Full History) and choose a folder from the menu
+- Rename or delete folders—deleting moves chats to the parent folder or **unsorted**
+- Folders are private to you (no sharing in v1)
 
-## Workflow Tips
-- Start broad, then narrow with filters and follow-ups
-- Ask for period-over-period comparisons
-- Move high-value outputs into Workbench or reports for distribution`,
+A chat can live in **at most one folder** at a time.
+
+## Full History page
+Open **Full History** from the sidebar to:
+- **Search** across all conversations
+- **Filter by chat type**
+- Browse with **pagination** when you have more than 50 results
+
+Route: /chat/history
+
+## Standalone Data Chat page
+If you bookmarked the old Data Chat or /cohi-chat route, you land on the same **unified chat** experience. Use **Chat** type for focused analysis threads; use folders and Full History to pick up later.
+
+## Tips
+- Start broad, then narrow with follow-ups in the same thread
+- Move important Research or Workbench outputs into dashboards or reports when you are ready to share`,
   },
 
   // ─── Settings ──────────────────────────────────────────────────────

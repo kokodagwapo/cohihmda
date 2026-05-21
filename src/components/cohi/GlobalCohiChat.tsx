@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CohiChatPanel } from '@/components/dashboard/CohiChatPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTenantStore } from '@/stores/tenantStore';
+import { isUnifiedChatClientEnabled } from '@/lib/unifiedChatEnvelope';
 
 export function GlobalCohiChat() {
   const { isAuthenticated, user } = useAuth();
@@ -21,8 +22,10 @@ export function GlobalCohiChat() {
 
   if (!isAuthenticated) return null;
 
-  // Use selected tenant from store (for super admins who select tenants)
-  // Fall back to user's tenant_id (for regular tenant users)
+  if (isUnifiedChatClientEnabled()) {
+    return null;
+  }
+
   const effectiveTenantId = selectedTenantId || user?.tenant_id || undefined;
 
   return (

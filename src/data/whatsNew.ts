@@ -24,8 +24,8 @@ export const whatsNewEntries: WhatsNewEntry[] = [
     title: 'Research Lab Enhancements',
     description: 'The AI Research Analyst now supports follow-up conversations, topic suggestions, and improved finding detail with severity-based organization.',
     category: 'improvement',
-    link: '/research',
-    linkLabel: 'Try Research Lab',
+    link: '/help/cohi-chat/research-mode',
+    linkLabel: 'Research help',
   },
   {
     id: 'wn-workbench-reports',

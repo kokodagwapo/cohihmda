@@ -5,6 +5,7 @@ import { Menu, ChevronLeft } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import { useIsMobile } from "@/hooks/use-mobile";
+import { COHI_TOUR_ACTIVE_EVENT } from "@/lib/tourTargets";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,7 @@ const SidebarProvider = React.forwardRef<
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
   const hasAutoHiddenOnce = React.useRef(false);
+  const [tourSidebarLock, setTourSidebarLock] = React.useState(false);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -95,17 +97,38 @@ const SidebarProvider = React.forwardRef<
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [toggleSidebar]);
 
+  // Suppress /insights auto-collapse while a Joyride tour is running.
+  React.useEffect(() => {
+    const onTourActive = (event: Event) => {
+      const active = (event as CustomEvent<{ active?: boolean }>).detail?.active;
+      setTourSidebarLock(active === true);
+      if (active) {
+        setOpen(true);
+      }
+    };
+    window.addEventListener(COHI_TOUR_ACTIVE_EVENT, onTourActive);
+    return () => window.removeEventListener(COHI_TOUR_ACTIVE_EVENT, onTourActive);
+  }, [setOpen]);
+
   // Auto-hide sidebar after 15s on first load of /insights only (desktop). If user expands again, do not auto-hide.
   const { pathname } = useLocation();
   const isInsights = pathname === "/insights";
   React.useEffect(() => {
-    if (!isInsights || isMobile || hasAutoHiddenOnce.current || !open) return;
+    if (
+      !isInsights ||
+      isMobile ||
+      hasAutoHiddenOnce.current ||
+      !open ||
+      tourSidebarLock
+    ) {
+      return;
+    }
     const id = window.setTimeout(() => {
       setOpen(false);
       hasAutoHiddenOnce.current = true;
     }, 15000);
     return () => window.clearTimeout(id);
-  }, [open, setOpen, isMobile, isInsights]);
+  }, [open, setOpen, isMobile, isInsights, tourSidebarLock]);
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.

@@ -24,6 +24,7 @@ import {
   type ColumnMeta,
   type InferredColumnType,
 } from "../../services/research/uploadProcessor.js";
+import { getConversationsForUpload } from "../../services/research/uploadConversationService.js";
 
 const router = Router();
 
@@ -181,6 +182,42 @@ router.get(
       res.status(500).json({ error: err.message });
     }
   }
+);
+
+// ============================================================================
+// GET /api/research/uploads/:id/conversations — chats that used this upload
+// ============================================================================
+
+router.get(
+  "/:id/conversations",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const userId = req.userId || "";
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+      const check = await tenantPool.query(
+        `SELECT id FROM research_uploads WHERE id = $1 AND user_id = $2 AND status != 'expired'`,
+        [id, userId],
+      );
+      if (check.rows.length === 0) {
+        res.status(404).json({ error: "Upload not found." });
+        return;
+      }
+
+      const conversations = await getConversationsForUpload(
+        tenantPool,
+        id,
+        userId,
+      );
+      res.json({ conversations });
+    } catch (err: any) {
+      console.error("[ResearchUploads] Conversations list error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
 );
 
 // ============================================================================

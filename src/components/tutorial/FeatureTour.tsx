@@ -1,7 +1,29 @@
-import { useState, useCallback, useRef } from 'react';
-import Joyride, { CallBackProps, STATUS, ACTIONS, EVENTS } from 'react-joyride';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useChatShell } from '@/contexts/ChatShellContext';
+import { isCohiChatTourPage } from '@/lib/cohiChatTour';
+import Joyride, {
+  CallBackProps,
+  STATUS,
+  ACTIONS,
+  EVENTS,
+  type Step,
+  type StoreHelpers,
+} from 'react-joyride';
 import { useTutorial } from '@/contexts/TutorialContext';
-import { tourRegistry, type TourId } from '@/data/tourSteps';
+import { getTourSteps, tourHasSteps, tourRegistry, type TourId } from '@/data/tourSteps';
+import {
+  dispatchOpenAppSidebarForTour,
+  getCohiSidebarAnchorFromStep,
+  isCohiSidebarTourStep,
+  isUnifiedChatJoyrideTarget,
+  prepareCohiSidebarTourStepFromJoyrideStep,
+  recoverUnifiedChatTourStep,
+  removeTourSpotlightMirror,
+  resetTourSidebarPrepState,
+  scheduleJoyrideReflow,
+  setTourSidebarLock,
+} from '@/lib/tourTargets';
 
 interface FeatureTourProps {
   tourId: TourId;
@@ -59,70 +81,226 @@ const joyrideStyles = {
   },
 };
 
-export function FeatureTour({ tourId, autoStart = false }: FeatureTourProps) {
-  const { activeTourId, isTourCompleted, completeTour, endTour, tourStepHandlerRef } = useTutorial();
-  const [stepIndex, setStepIndex] = useState(0);
-  const [isWaiting, setIsWaiting] = useState(false);
-  const waitingRef = useRef(false);
+/** Joyride portals can outlive React unmount — remove explicitly. */
+function purgeJoyrideDom(): void {
+  removeTourSpotlightMirror();
+  document.querySelectorAll('#react-joyride-portal').forEach((el) => el.remove());
+}
 
-  const tour = tourRegistry[tourId];
-  if (!tour) return null;
+export function FeatureTour({ tourId, autoStart = false }: FeatureTourProps) {
+  const { pathname } = useLocation();
+  const { mode, setMode, isChatHomePage } = useChatShell();
+  const {
+    activeTourId,
+    isTourCompleted,
+    completeTour,
+    tourStepHandlerRef,
+  } = useTutorial();
+
+  const tourMeta = tourRegistry[tourId];
+  const steps = getTourSteps(tourId);
+  if (!tourMeta || !tourHasSteps(tourId)) return null;
 
   const isRunning = activeTourId === tourId;
   const shouldAutoStart = autoStart && !isTourCompleted(tourId);
+  const tourIsActive = isRunning || shouldAutoStart;
 
-  const handleCallback = useCallback(async (data: CallBackProps) => {
-    const { status, action, type, index } = data;
+  const [stepIndex, setStepIndex] = useState(0);
+  const [joyrideRunning, setJoyrideRunning] = useState(false);
+  const joyrideHelpersRef = useRef<StoreHelpers | null>(null);
+  const finishingRef = useRef(false);
 
-    if (status === STATUS.FINISHED) {
-      completeTour(tourId);
+  const finishTour = useCallback(() => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    try {
+      joyrideHelpersRef.current?.close('tour_complete');
+    } catch {
+      /* Joyride may already be torn down */
+    }
+    setJoyrideRunning(false);
+    purgeJoyrideDom();
+    resetTourSidebarPrepState();
+    setTourSidebarLock(false);
+    void completeTour(tourId).finally(() => {
+      finishingRef.current = false;
+    });
+  }, [tourId, completeTour]);
+
+  const stopJoyride = useCallback(() => {
+    setJoyrideRunning(false);
+    purgeJoyrideDom();
+    resetTourSidebarPrepState();
+    setTourSidebarLock(false);
+  }, []);
+
+  useEffect(() => {
+    if (!tourIsActive) {
+      setJoyrideRunning(false);
       return;
     }
-    if (status === STATUS.SKIPPED || action === ACTIONS.CLOSE) {
-      completeTour(tourId);
-      return;
-    }
-    if (type === EVENTS.TOUR_END) {
-      endTour(tourId);
-      return;
-    }
+    finishingRef.current = false;
+    setStepIndex(0);
+    setJoyrideRunning(true);
+    resetTourSidebarPrepState();
+    setTourSidebarLock(true);
+    void dispatchOpenAppSidebarForTour();
+    return () => {
+      stopJoyride();
+    };
+  }, [tourIsActive, stopJoyride]);
 
-    if (type === EVENTS.STEP_AFTER) {
-      if (action === ACTIONS.NEXT) {
-        const handler = tourStepHandlerRef.current;
-        if (handler && !waitingRef.current) {
-          const result = handler(tourId, index);
-          if (result && typeof result.then === 'function') {
-            waitingRef.current = true;
-            setIsWaiting(true);
-            try {
-              await result;
-            } finally {
-              waitingRef.current = false;
-              setIsWaiting(false);
-            }
-          }
-        }
-        setStepIndex(index + 1);
-      } else if (action === ACTIONS.PREV) {
-        setStepIndex(index - 1);
+  const goToStep = useCallback(
+    async (nextIndex: number) => {
+      if (nextIndex < 0 || nextIndex >= steps.length) return;
+      const nextStep = steps[nextIndex] as Step;
+      await prepareCohiSidebarTourStepFromJoyrideStep(nextStep);
+      setStepIndex(nextIndex);
+      scheduleJoyrideReflow();
+    },
+    [steps],
+  );
+
+  /**
+   * With continuous + controlled Joyride, the last-step "Done" button calls
+   * helpers.next(), which is a no-op when controlled — so FINISHED never fires.
+   */
+  useEffect(() => {
+    if (!joyrideRunning || stepIndex !== steps.length - 1) return;
+
+    const onPrimaryDone = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-action="primary"]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      finishTour();
+    };
+
+    document.addEventListener('click', onPrimaryDone, true);
+    return () => document.removeEventListener('click', onPrimaryDone, true);
+  }, [joyrideRunning, stepIndex, steps.length, finishTour]);
+
+  const handleCallback = useCallback(
+    async (data: CallBackProps) => {
+      const { status, action, type, index, step } = data;
+      const joyrideStep = step as Step | undefined;
+
+      if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
+        finishTour();
+        return;
       }
-    }
-  }, [tourId, completeTour, endTour, tourStepHandlerRef]);
+      if (action === ACTIONS.CLOSE) {
+        finishTour();
+        return;
+      }
 
-  if (!isRunning && !shouldAutoStart) return null;
+      if (type === EVENTS.TOUR_END) {
+        stopJoyride();
+        return;
+      }
+
+      if (type === EVENTS.STEP_BEFORE && isCohiSidebarTourStep(joyrideStep)) {
+        await prepareCohiSidebarTourStepFromJoyrideStep(joyrideStep);
+        scheduleJoyrideReflow();
+        return;
+      }
+
+      if (
+        type === EVENTS.STEP_BEFORE &&
+        tourId === "cohi-chat" &&
+        isCohiChatTourPage(pathname) &&
+        isUnifiedChatJoyrideTarget(joyrideStep)
+      ) {
+        const target =
+          typeof joyrideStep?.target === "string" ? joyrideStep.target : "";
+        if (
+          !isChatHomePage &&
+          mode === "compact" &&
+          target.includes("unified-chat-suggestions")
+        ) {
+          setMode("tall");
+          await recoverUnifiedChatTourStep();
+        }
+        scheduleJoyrideReflow();
+        return;
+      }
+
+      if (type === EVENTS.STEP_AFTER) {
+        if (action === ACTIONS.NEXT) {
+          const nextIndex = index + 1;
+          if (nextIndex >= steps.length) {
+            finishTour();
+            return;
+          }
+          const handler = tourStepHandlerRef.current;
+          // Run layout prep before advancing so shell resize does not drop the next target.
+          if (handler && tourId === "cohi-chat") {
+            await handler(tourId, index);
+          }
+          await goToStep(nextIndex);
+          if (handler && tourId !== "cohi-chat") {
+            await handler(tourId, index);
+          }
+          scheduleJoyrideReflow();
+          return;
+        }
+        if (action === ACTIONS.PREV) {
+          await goToStep(index - 1);
+          return;
+        }
+      }
+
+      if (type === EVENTS.TARGET_NOT_FOUND) {
+        if (isCohiSidebarTourStep(joyrideStep)) {
+          await prepareCohiSidebarTourStepFromJoyrideStep(joyrideStep);
+          scheduleJoyrideReflow();
+          return;
+        }
+        if (tourId === "cohi-chat" && isUnifiedChatJoyrideTarget(joyrideStep)) {
+          if (
+            isCohiChatTourPage(pathname) &&
+            !isChatHomePage &&
+            typeof joyrideStep?.target === "string" &&
+            joyrideStep.target.includes("unified-chat-suggestions")
+          ) {
+            setMode("tall");
+          }
+          await recoverUnifiedChatTourStep();
+          await goToStep(index);
+          return;
+        }
+      }
+    },
+    [
+      tourId,
+      steps,
+      finishTour,
+      stopJoyride,
+      goToStep,
+      tourStepHandlerRef,
+      pathname,
+      mode,
+      setMode,
+      isChatHomePage,
+    ],
+  );
+
+  if (!tourIsActive || !joyrideRunning) return null;
 
   return (
     <Joyride
-      steps={tour.steps}
+      key={`${tourId}-${joyrideRunning}`}
+      steps={steps}
       stepIndex={stepIndex}
-      run={(isRunning || shouldAutoStart) && !isWaiting}
+      run={joyrideRunning}
       continuous
       showProgress
       showSkipButton
-      scrollToFirstStep
       disableScrollParentFix
       callback={handleCallback}
+      getHelpers={(helpers) => {
+        joyrideHelpersRef.current = helpers;
+      }}
       styles={joyrideStyles}
       locale={{
         back: 'Back',
@@ -133,7 +311,7 @@ export function FeatureTour({ tourId, autoStart = false }: FeatureTourProps) {
         skip: 'Skip tour',
       }}
       floaterProps={{
-        disableAnimation: false,
+        disableAnimation: true,
       }}
     />
   );

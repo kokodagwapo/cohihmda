@@ -126,7 +126,8 @@ export class FolderReconciliationService {
     for (const row of dbResult.rows) {
       const norm = normalizeGuid(row.guid);
       if (!folderByGuid.has(norm)) {
-        guidsToDelete.push(norm);
+        // Use DB-stored guid (may include braces/casing); delete uses exact match.
+        guidsToDelete.push(row.guid);
       }
     }
 

@@ -1,0 +1,63 @@
+import type { UnifiedChatType } from "@/lib/unifiedChatClient";
+import { CHAT_TYPE_LABELS } from "@/lib/unifiedChatTypeStyles";
+
+/** Brief empty-state copy per chat type (from centralization spec §3). */
+export const CHAT_TYPE_DESCRIPTIONS: Record<UnifiedChatType, string> = {
+  chat: "Ask questions, explore metrics, and get quick answers about your business.",
+  research:
+    "Run deep investigations with timeline, findings, and structured reports.",
+  insight_builder:
+    "Describe custom daily insights you want to see, and AI will help you create the custom prompts",
+  workbench:
+    "Build and refine dashboards with AI—add widgets, layouts, and KPI views.",
+};
+
+/**
+ * Research Lab topic starters (legacy `/research` empty state — `ResearchAnalyst.tsx`).
+ */
+export const RESEARCH_TOPIC_SUGGESTIONS = [
+  "Overall pipeline health and conversion performance",
+  "LO scorecard: compute TTS scores, tier distribution (Top/Second/Bottom), and identify performance outliers",
+  "Risk patterns and credit exposure: FICO, LTV, DTI distribution and high-risk concentrations",
+  "Turn time trends and operational efficiency by role (processor, underwriter, closer)",
+  "Product mix and channel analysis: loan type, purpose, and program breakdown",
+  "Revenue drivers: margin analysis, BPS by LO/channel, and revenue concentration",
+] as const;
+
+/**
+ * Insight builder empty-state starters — natural language a user would say to author
+ * a My Insights custom prompt (title, prompt text, specifiers, batch vs on-demand).
+ */
+export const INSIGHT_BUILDER_TOPIC_SUGGESTIONS = [
+  "Create a weekly batch insight for Branch 204: how is it performing this week compared to last month? Focus on pull-through and cycle time.",
+  "Create an insight about FHA denial patterns—top reasons, trends, and which loan officers have the highest denial rates on denied FHA loans.",
+  "Set up a recurring insight that compares my branch's production to similar-sized branches across the company.",
+  "Create an on-demand insight to check whether we're losing locks to competitors on conventional purchase loans—look at fallout and pricing patterns.",
+  "Create a batch insight for VA refinance loans: are fallout or extension rates rising vs last quarter, and which branches or LOs drive it?",
+  "Create an on-demand insight to triage suspended loans—longest aging, top suspend reasons, and LOs with the largest backlog.",
+  "Create an insight prompt that analyzes fallout for loans with FICO below 650, broken down by loan type",
+] as const;
+
+/** Default starter prompts when the server has not returned suggestions yet. */
+export const CHAT_TYPE_DEFAULT_SUGGESTIONS: Record<UnifiedChatType, string[]> = {
+  chat: [
+    "What's important to know today?",
+    "Show me loan volume by month",
+    "What are the FHA requirements?",
+    "Top loan officers by revenue",
+  ],
+  research: [...RESEARCH_TOPIC_SUGGESTIONS],
+  insight_builder: [...INSIGHT_BUILDER_TOPIC_SUGGESTIONS],
+  workbench: [
+    "Prepare a board-ready overview of this month's performance",
+    "Summarize pipeline health and pull-through trends",
+    "What needs my attention right now?",
+    "Build an executive dashboard with key KPIs",
+  ],
+};
+
+export const DEFAULT_CHAT_SUGGESTIONS = CHAT_TYPE_DEFAULT_SUGGESTIONS.chat;
+
+export function getChatTypeLabel(chatType: UnifiedChatType) {
+  return CHAT_TYPE_LABELS[chatType];
+}
