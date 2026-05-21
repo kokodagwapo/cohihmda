@@ -166,7 +166,7 @@ export function normalizeInsightBuilderSpecifiers(
   }
 
   const pred = buildSpecifierPredicateSql(out, allowedColumns);
-  if (pred.ok === false) {
+  if (!pred.ok) {
     for (const bad of pred.invalidKeys) {
       delete out[bad];
     }

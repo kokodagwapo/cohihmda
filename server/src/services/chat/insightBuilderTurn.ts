@@ -247,7 +247,7 @@ async function validateDraft(
   }
   const specifiers = specifiersWithTag(normalized);
   const pred = buildSpecifierPredicateSql(specifiers, allowedColumns);
-  if (pred.ok === false) {
+  if (!pred.ok) {
     return {
       ok: false,
       message: buildClarificationMessage(pred.invalidKeys, allowedColumns, columns),
@@ -352,7 +352,7 @@ export async function runInsightBuilderTurn(args: {
       columns,
       args.tenantId,
     );
-    if (validated.ok === false) {
+    if (!validated.ok) {
       return {
         blocks: [{ type: "text", markdown: validated.message }],
         metadata: {
@@ -436,7 +436,7 @@ export async function runInsightBuilderTurn(args: {
       columns,
       args.tenantId,
     );
-    if (validated.ok === false) {
+    if (!validated.ok) {
       return {
         blocks: [{ type: "text", markdown: validated.message }],
         metadata: {
