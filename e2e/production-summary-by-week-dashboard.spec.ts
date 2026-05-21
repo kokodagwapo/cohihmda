@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { Page, Route } from "@playwright/test";
+import { resetUnifiedChatShellToCompact } from "./helpers/unifiedChat";
 
 type MockLoan = Record<string, unknown>;
 
@@ -209,6 +210,7 @@ test.describe("Production Summary by Week Dashboard (COHI-345)", () => {
       .waitForLoadState("networkidle", { timeout: 20_000 })
       .catch(() => {});
     await dismissBlockingOverlays(userPage);
+    await resetUnifiedChatShellToCompact(userPage);
   }
 
   async function gotoWorkbench(userPage: Page) {
@@ -217,6 +219,7 @@ test.describe("Production Summary by Week Dashboard (COHI-345)", () => {
       .waitForLoadState("networkidle", { timeout: 20_000 })
       .catch(() => {});
     await dismissBlockingOverlays(userPage);
+    await resetUnifiedChatShellToCompact(userPage);
   }
 
   async function addProductionSummaryWorkbenchGroup(userPage: Page) {

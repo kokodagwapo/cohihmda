@@ -2,10 +2,13 @@ import { test, expect } from "./fixtures";
 import {
   forceUnifiedChat,
   gotoWithUnifiedChatShell,
+  gotoWorkbenchHubWithUnifiedShell,
   mockUnifiedChatApis,
+  mockUnifiedChatTenantApi,
   mockV1Messages,
+  mockV1Permissions,
   UNIFIED_CHAT_STUB_TEXT,
-  unifiedChatMessageInput,
+  submitWorkbenchHubAsk,
 } from "./helpers/unifiedChat";
 
 test.describe("Unified Cohi Chat (v1 API)", () => {
@@ -14,6 +17,8 @@ test.describe("Unified Cohi Chat (v1 API)", () => {
   }) => {
     await forceUnifiedChat(userPage);
     let sawMessagesPost = false;
+    await mockUnifiedChatTenantApi(userPage);
+    await mockV1Permissions(userPage);
     await mockV1Messages(userPage);
     await userPage.route(/\/api\/chat\/v1\/messages(?!:stream)(?:\?.*)?$/, async (route) => {
       if (route.request().method() === "POST") sawMessagesPost = true;
@@ -31,11 +36,8 @@ test.describe("Unified Cohi Chat (v1 API)", () => {
       });
     });
 
-    await userPage.goto("/workbench/favorites", { waitUntil: "domcontentloaded" });
-    await userPage.getByRole("button", { name: "Open Ask Cohi" }).click();
-    const input = userPage.getByPlaceholder("Ask a follow-up…");
-    await input.fill("AC2 structural POST /messages smoke");
-    await input.press("Enter");
+    await gotoWorkbenchHubWithUnifiedShell(userPage, "/workbench/favorites");
+    await submitWorkbenchHubAsk(userPage, "AC2 structural POST /messages smoke");
 
     await expect.poll(() => sawMessagesPost).toBeTruthy();
     await expect(userPage.getByText(new RegExp(UNIFIED_CHAT_STUB_TEXT, "i"))).toBeVisible({

@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { resetUnifiedChatShellToCompact } from "./helpers/unifiedChat";
 import type { Page } from "@playwright/test";
 
 /**
@@ -180,6 +181,7 @@ async function gotoProductionTrends(userPage: Page) {
   await userPage.goto("/production-trends", { waitUntil: "domcontentloaded" });
   await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   await dismissBlockingOverlays(userPage);
+  await resetUnifiedChatShellToCompact(userPage);
 }
 
 async function gotoNewWorkbenchCanvas(userPage: Page) {
@@ -285,6 +287,7 @@ test.describe("Production Trends (COHI-346)", () => {
     const productionResponse = await responsePromise;
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
+    await resetUnifiedChatShellToCompact(userPage);
 
     await expect(userPage).toHaveURL(/\/production-trends/);
     await expect(userPage.locator("h1")).toContainText("Production Trends");

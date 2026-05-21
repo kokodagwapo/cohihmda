@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
+import { resetUnifiedChatShellToCompact } from "./helpers/unifiedChat";
 
 const BULLET_HEADLINE = "Pipeline bottlenecks are concentrated in underwriting";
 const PARAGRAPH_HEADLINE = "Conversion trends improved after targeted coaching";
@@ -209,6 +210,7 @@ async function ensureInsightsSectionVisible(page: Page) {
     await confirmInsightsVisibilityInputs(page);
     await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(page);
+    await resetUnifiedChatShellToCompact(page);
     await page.waitForTimeout(750);
     await dismissBlockingOverlays(page);
 

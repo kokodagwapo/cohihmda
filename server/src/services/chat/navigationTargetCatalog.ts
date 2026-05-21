@@ -153,11 +153,25 @@ export const NAVIGATION_TARGETS: readonly NavigationTarget[] = [
   },
   {
     id: "research",
-    label: "Research Lab",
+    label: "Cohi Chat (Research)",
     group: "Pages",
     kind: "route",
-    path: "/research",
-    keywords: ["research", "deeper analysis", "diagnose drivers", "root cause"],
+    path: "/insights",
+    keywords: ["research", "deeper analysis", "diagnose drivers", "root cause", "research lab"],
+  },
+  {
+    id: "help-chat-history",
+    label: "Chat history and folders",
+    group: "Help",
+    kind: "route",
+    path: "/help/cohi-chat/data-chat-page",
+    keywords: [
+      "chat history",
+      "folders",
+      "full history",
+      "organize conversations",
+      "move to folder",
+    ],
   },
   {
     id: "help-what-you-can-ask",

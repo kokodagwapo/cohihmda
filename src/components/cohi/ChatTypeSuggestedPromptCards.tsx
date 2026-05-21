@@ -181,6 +181,7 @@ export function ChatTypeSuggestedPromptCards({
     return (
       <motion.div
         {...shellMotion}
+        data-tour="unified-chat-suggestions"
         className={cn(
           "min-w-0 w-full overflow-x-auto overflow-y-hidden pb-1 scrollbar-thin snap-x snap-mandatory",
           className,
@@ -199,6 +200,7 @@ export function ChatTypeSuggestedPromptCards({
   return (
     <motion.div
       {...shellMotion}
+      data-tour="unified-chat-suggestions"
       className={cn(
         "min-w-0 grid w-full grid-cols-2 gap-3 items-center",
         className,

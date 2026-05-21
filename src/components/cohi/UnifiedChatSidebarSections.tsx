@@ -71,6 +71,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { SidebarExpandableSection } from "@/components/cohi/sidebarNavPrimitives";
+import { cohiTourAnchorId } from "@/lib/tourTargets";
 
 const SIDEBAR_HISTORY_LIMIT = 5;
 /** Fetch enough recents to populate folder nesting in the sidebar. */
@@ -103,6 +104,8 @@ export interface UnifiedChatSidebarSectionsProps {
   isDarkMode?: boolean;
   isExpanded?: boolean;
   className?: string;
+  /** When false, omit data-tour anchors (e.g. mobile slide-down menu). */
+  includeTourAnchors?: boolean;
 }
 
 type FolderRow = ReturnType<typeof useUnifiedChatHistory>["folders"][number];
@@ -714,6 +717,7 @@ export function UnifiedChatSidebarSections({
   isDarkMode = false,
   isExpanded = true,
   className,
+  includeTourAnchors = true,
 }: UnifiedChatSidebarSectionsProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -741,6 +745,7 @@ export function UnifiedChatSidebarSections({
   }, [sharedConversations.length]);
   const [foldersExpanded, setFoldersExpanded] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(true);
+
   const [folderDialogMode, setFolderDialogMode] =
     useState<FolderDialogMode | null>(null);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
@@ -978,6 +983,7 @@ export function UnifiedChatSidebarSections({
         onToggleSection={() => setFoldersExpanded((v) => !v)}
         icon={Folder}
         label="Folders"
+        dataTour={includeTourAnchors ? "sidebar-folders" : undefined}
         accent="purple"
         flyoutWidth="w-56"
         flyoutChildren={
@@ -995,6 +1001,7 @@ export function UnifiedChatSidebarSections({
         onCollapsedClick={() => navigate("/chat/history")}
         icon={Clock}
         label="History"
+        dataTour={includeTourAnchors ? "sidebar-history" : undefined}
         accent="blue"
         active={isHistoryPage}
         flyoutWidth="w-64"
@@ -1005,10 +1012,11 @@ export function UnifiedChatSidebarSections({
         <HistoryListBody {...historyListProps} />
       </SidebarExpandableSection>
 
-      {isExpanded && (
+      {isExpanded ? (
         <div className="px-1 pt-1 pb-2 space-y-2">
           <Button
             variant="outline"
+            id={includeTourAnchors ? cohiTourAnchorId("fullHistory") : undefined}
             className="w-full justify-center gap-2 h-9 text-sm font-medium"
             asChild
           >
@@ -1025,6 +1033,24 @@ export function UnifiedChatSidebarSections({
             <Link to="/research/data-explorer">
               <Table2 className="h-4 w-4" />
               Data Explorer
+            </Link>
+          </Button>
+        </div>
+      ) : (
+        <div className="flex justify-center py-2">
+          <Button
+            variant="outline"
+            size="icon"
+            id={includeTourAnchors ? cohiTourAnchorId("fullHistory") : undefined}
+            className="h-9 w-9 shrink-0"
+            asChild
+          >
+            <Link
+              to="/chat/history"
+              aria-label="Full History"
+              title="Full History"
+            >
+              <History className="h-4 w-4" />
             </Link>
           </Button>
         </div>

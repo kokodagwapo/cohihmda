@@ -69,6 +69,7 @@ import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 import { TutorialProvider } from "@/contexts/TutorialContext";
 import { WelcomeTourTrigger } from "@/components/tutorial/WelcomeTourTrigger";
 import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
+import { CohiChatTourPrep } from "@/components/tutorial/CohiChatTourPrep";
 // Workbench pages
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
@@ -303,6 +304,7 @@ const App = () => (
                 <GlobalCohiChat />
                 <CohiDemoExperience />
                 <WelcomeTourTrigger />
+                <CohiChatTourPrep />
                 <ActiveTourRunner />
               </FullAccessOnly>
               </CohiChatSessionProvider>
