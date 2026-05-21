@@ -1,7 +1,6 @@
 import { test, expect } from "./fixtures";
 import {
   forceUnifiedChat,
-  gotoWithUnifiedChatShell,
   mockUnifiedChatApis,
   mockV1Messages,
   mockV1MessageStream,
@@ -19,14 +18,16 @@ test.describe("Unified chat surfaces (COHI-396 / COHI-397)", () => {
   test("@critical @COHI-386 @COHI-396 AC1 workbench canvas uses messages stream", async ({
     userPage,
   }) => {
-    await gotoWithUnifiedChatShell(userPage, "/my-dashboard/new");
-
     const streamRequest = userPage.waitForRequest(
       (req) =>
         req.method() === "POST" &&
         /\/api\/chat\/v1\/messages:stream(?:\?.*)?$/.test(req.url()),
     );
 
+    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
     const input = unifiedChatMessageInput(userPage);
     await input.fill("Workbench stream smoke");
     await input.press("Enter");
@@ -73,7 +74,10 @@ test.describe("Unified chat surfaces (COHI-396 / COHI-397)", () => {
 
   test("@critical @COHI-386 @COHI-397 AC4 hub resume loads conversation", async ({ userPage }) => {
     await mockV1MessageStream(userPage);
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
 
     await userPage.evaluate(() => {
       window.dispatchEvent(
@@ -88,7 +92,10 @@ test.describe("Unified chat surfaces (COHI-396 / COHI-397)", () => {
 
   test("@critical @COHI-386 @COHI-397 @COHI-393 AC4 workbench action smoke", async ({ userPage }) => {
     await mockV1MessageStream(userPage, { actionsBlock: true });
-    await gotoWithUnifiedChatShell(userPage, "/my-dashboard/new");
+    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
 
     await selectUnifiedChatType(userPage, "Workbench");
 

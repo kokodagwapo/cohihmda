@@ -337,7 +337,6 @@ export async function processUnifiedChatMessage(
       conversationId,
       legacyRef,
       deepAnalysis: body.options?.research?.deepAnalysis,
-      uploadIds: body.options?.research?.uploadIds,
       policy,
     });
     blocks = research.blocks;

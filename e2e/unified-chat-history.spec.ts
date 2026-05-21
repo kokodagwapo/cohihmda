@@ -5,7 +5,6 @@ import {
   computeFolderTreeDepth,
   dismissBlockingOverlays,
   forceUnifiedChat,
-  gotoWithUnifiedChatShell,
   mockUnifiedChatTenantApi,
   mockV1ConversationsList,
   mockV1FoldersTree,
@@ -40,7 +39,8 @@ test.describe("Unified chat history (COHI-403)", () => {
     await mockV1Permissions(userPage);
     await mockV1FoldersTree(userPage, DEEP_FOLDER_TREE);
     await mockV1ConversationsList(userPage, []);
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await dismissBlockingOverlays(userPage);
     await expect(userPage.getByRole("button", { name: "Folders" })).toBeVisible({
       timeout: 15_000,
     });
@@ -66,7 +66,8 @@ test.describe("Unified chat history (COHI-403)", () => {
       await route.continue();
     });
 
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await dismissBlockingOverlays(userPage);
     await expect(userPage.getByRole("button", { name: "Folders" })).toBeVisible({
       timeout: 15_000,
     });
@@ -121,9 +122,6 @@ test.describe("Unified chat history (COHI-403)", () => {
   }) => {
     const sessionId = legacySessions.sessionIds[0] ?? "e2e-legacy-session-1";
 
-    await mockUnifiedChatTenantApi(userPage);
-    await mockV1Permissions(userPage);
-
     await userPage.goto("/research-lab", { waitUntil: "domcontentloaded" });
     await expect(userPage).toHaveURL(/\/insights\?mode=research/);
 
@@ -134,17 +132,11 @@ test.describe("Unified chat history (COHI-403)", () => {
       new RegExp(`\\?.*resume=${encodeURIComponent(sessionId)}.*mode=research`),
     );
     expect(new URL(userPage.url()).pathname).toBe("/");
-    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
-      timeout: 30_000,
-    });
 
     await userPage.goto(`/research/session?session=${sessionId}`, {
       waitUntil: "domcontentloaded",
     });
     await expect(userPage).toHaveURL(/\/\?/);
     await expect(userPage).toHaveURL(new RegExp(`resume=${encodeURIComponent(sessionId)}`));
-    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
-      timeout: 30_000,
-    });
   });
 });

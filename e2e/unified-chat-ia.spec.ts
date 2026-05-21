@@ -1,9 +1,5 @@
 import { test, expect } from "./fixtures";
-import {
-  forceUnifiedChat,
-  gotoWithUnifiedChatShell,
-  mockUnifiedChatApis,
-} from "./helpers/unifiedChat";
+import { forceUnifiedChat, mockUnifiedChatApis } from "./helpers/unifiedChat";
 
 const SIDEBAR_SECTION_LABELS = [
   "Insights",
@@ -11,7 +7,6 @@ const SIDEBAR_SECTION_LABELS = [
   "Folders",
   "History",
   "Full History",
-  "Data Explorer",
 ] as const;
 
 test.describe("Unified chat IA (COHI-405)", () => {
@@ -23,7 +18,10 @@ test.describe("Unified chat IA (COHI-405)", () => {
   test("@critical @COHI-386 @COHI-405 AC1 sidebar sections order Insights through Full History", async ({
     userPage,
   }) => {
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
 
     const positions = await userPage.evaluate((labels) => {
       const bodyText = document.body.innerText;
@@ -41,7 +39,7 @@ test.describe("Unified chat IA (COHI-405)", () => {
   test("@critical @COHI-386 @COHI-405 AC2 single Insights entry no duplicate shortcuts", async ({
     userPage,
   }) => {
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     const insightsNav = userPage.getByRole("button", { name: /^Insights$/i });
     await expect(insightsNav.first()).toBeVisible({ timeout: 15_000 });
     const insightsCount = await insightsNav.count();
@@ -53,7 +51,7 @@ test.describe("Unified chat IA (COHI-405)", () => {
   test("@critical @COHI-386 @COHI-405 AC3 top nav Communications Center no Research Lab", async ({
     userPage,
   }) => {
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(
       userPage.getByRole("navigation", { name: /main navigation/i }).getByText(
         "Communications Center",
@@ -67,7 +65,10 @@ test.describe("Unified chat IA (COHI-405)", () => {
   });
 
   test("@regression @COHI-386 @COHI-405 AC4 insights page content unchanged", async ({ userPage }) => {
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(userPage.getByText("Cohi Insights").first()).toBeVisible({
       timeout: 15_000,
     });

@@ -15,18 +15,7 @@ import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/
 import { ExportMenu } from "@/components/common/ExportMenu";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Loader2, Share2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { UserSharePicker } from "@/components/common/UserSharePicker";
-import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/hooks/use-toast";
-import { HistoryMetaPill } from "@/components/cohi/UnifiedChatHistoryMeta";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChatShell } from "@/contexts/ChatShellContext";
 import { buildResearchReportExportData } from "@/lib/researchReportExport";
@@ -40,11 +29,6 @@ export interface UnifiedChatResearchWorkspaceProps {
   tenantId?: string;
   messages?: ChatMessage[];
   chatLoading?: boolean;
-  onSessionAccess?: (access: {
-    isOwner: boolean;
-    ownerEmail: string;
-    ownerName: string;
-  }) => void;
 }
 
 function phaseLabel(phase: string, isRunning: boolean) {
@@ -59,10 +43,7 @@ export function UnifiedChatResearchWorkspace({
   tenantId,
   messages = [],
   chatLoading = false,
-  onSessionAccess,
 }: UnifiedChatResearchWorkspaceProps) {
-  const { user } = useAuth();
-  const { toast } = useToast();
   const { mode } = useChatShell();
   const {
     phase,
@@ -78,21 +59,7 @@ export function UnifiedChatResearchWorkspace({
     submitFeedback,
     reset,
     startSession,
-    sessionVisibility,
-    sessionSharedWithUserIds,
-    sessionIsOwner,
-    sessionOwnerEmail,
-    sessionOwnerName,
-    updateSessionSharing,
   } = useResearchSession(tenantId);
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [shareDialogVisibility, setShareDialogVisibility] = useState<
-    "private" | "shared" | "global"
-  >("private");
-  const [shareDialogSharedIds, setShareDialogSharedIds] = useState<string[]>(
-    [],
-  );
-  const [shareDialogSaving, setShareDialogSaving] = useState(false);
   const chatSession = useOptionalCohiChatSession();
   const [activeTab, setActiveTab] = useState("report");
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
@@ -120,8 +87,6 @@ export function UnifiedChatResearchWorkspace({
         );
       }
 
-      if (!sessionIsOwner) return;
-
       if (chatSession) {
         chatSession.setResearchDeepAnalysis(true);
         void chatSession.sendMessage(topic, { forceNewConversation: true });
@@ -130,7 +95,7 @@ export function UnifiedChatResearchWorkspace({
 
       void startSession(topic, undefined, "deep");
     },
-    [chatSession, reset, sessionIsOwner, startSession],
+    [chatSession, reset, startSession],
   );
 
   useEffect(() => {
@@ -177,24 +142,6 @@ export function UnifiedChatResearchWorkspace({
     void refreshSession(researchSessionId);
   }, [researchSessionId, chatLoading, refreshSession]);
 
-  useEffect(() => {
-    if (!researchSessionId) {
-      onSessionAccess?.({ isOwner: true, ownerEmail: "", ownerName: "" });
-      return;
-    }
-    onSessionAccess?.({
-      isOwner: sessionIsOwner,
-      ownerEmail: sessionOwnerEmail,
-      ownerName: sessionOwnerName,
-    });
-  }, [
-    researchSessionId,
-    sessionIsOwner,
-    sessionOwnerEmail,
-    sessionOwnerName,
-    onSessionAccess,
-  ]);
-
   const selectedFinding =
     selectedFindingId != null
       ? (findings.find((f) => String(f.questionId) === selectedFindingId) ?? null)
@@ -240,44 +187,17 @@ export function UnifiedChatResearchWorkspace({
         heightClass,
       )}
     >
-      <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-200/60 dark:border-slate-700/60 shrink-0">
-        <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-200/60 dark:border-slate-700/60 shrink-0">
+        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
           Research
         </span>
-        <Badge variant="outline" className="text-xs capitalize px-2 py-0.5">
+        <Badge variant="outline" className="text-[10px] capitalize">
           {phaseLabel(phase, showRunningSpinner)}
         </Badge>
         {showRunningSpinner && (
-          <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
         )}
         <div className="flex-1" />
-        {!sessionIsOwner && (sessionOwnerName || sessionOwnerEmail) && (
-          <HistoryMetaPill className="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 shrink-0 text-xs px-2.5 py-1">
-            Shared by {sessionOwnerName || sessionOwnerEmail}
-          </HistoryMetaPill>
-        )}
-        {sessionIsOwner && researchSessionId && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5 text-sm"
-            data-testid="research-share"
-            onClick={() => {
-              setShareDialogVisibility(
-                sessionVisibility === "global"
-                  ? "global"
-                  : sessionVisibility === "shared"
-                    ? "shared"
-                    : "private",
-              );
-              setShareDialogSharedIds([...sessionSharedWithUserIds]);
-              setShareDialogOpen(true);
-            }}
-          >
-            <Share2 className="h-4 w-4" />
-            Share
-          </Button>
-        )}
         {report && (
           <ExportMenu
             title={reportExportTitle}
@@ -288,7 +208,7 @@ export function UnifiedChatResearchWorkspace({
         {findings.length > 1 && activeTab !== "findings" && (
           <button
             type="button"
-            className="text-xs text-violet-600 dark:text-violet-400 hover:underline"
+            className="text-[10px] text-violet-600 dark:text-violet-400 hover:underline"
             onClick={() => {
               setSelectedFindingId(null);
               setActiveTab("findings");
@@ -444,9 +364,7 @@ export function UnifiedChatResearchWorkspace({
                     setSelectedFindingId(String(f.questionId));
                     setActiveTab("findings");
                   }}
-                  onRunFurtherInvestigation={
-                    sessionIsOwner ? handleRunFurtherInvestigation : undefined
-                  }
+                  onRunFurtherInvestigation={handleRunFurtherInvestigation}
                 />
               </div>
             ) : findings.length >= 1 && phase === "complete" ? (
@@ -471,54 +389,6 @@ export function UnifiedChatResearchWorkspace({
         onClose={() => setWorkbenchPayload(null)}
         payload={workbenchPayload}
       />
-
-      <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Share2 className="h-4 w-4" />
-              Share session
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <UserSharePicker
-              visibility={shareDialogVisibility}
-              sharedWithUserIds={shareDialogSharedIds}
-              onVisibilityChange={setShareDialogVisibility}
-              onSharedWithUserIdsChange={setShareDialogSharedIds}
-              allowGlobal={["super_admin", "platform_admin", "tenant_admin"].includes(
-                user?.role || "",
-              )}
-            />
-            <Button
-              className="w-full"
-              disabled={shareDialogSaving}
-              onClick={async () => {
-                setShareDialogSaving(true);
-                try {
-                  const ok = await updateSessionSharing(
-                    shareDialogVisibility,
-                    shareDialogSharedIds,
-                  );
-                  if (ok) {
-                    toast({
-                      title: "Sharing updated",
-                      description: "Session sharing settings saved.",
-                    });
-                    setShareDialogOpen(false);
-                  } else {
-                    toast({ title: "Failed to update", variant: "destructive" });
-                  }
-                } finally {
-                  setShareDialogSaving(false);
-                }
-              }}
-            >
-              {shareDialogSaving ? "Saving…" : "Save sharing settings"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

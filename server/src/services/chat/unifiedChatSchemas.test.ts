@@ -25,32 +25,6 @@ describe("unified chat JSON schemas", () => {
     expect(ok).toBe(true);
   });
 
-  it("accepts research uploadIds when chat_type is research", () => {
-    const ok = validateUnifiedChatRequest({
-      message: "Analyze upload",
-      chat_type: "research",
-      options: {
-        research: {
-          uploadIds: ["550e8400-e29b-41d4-a716-446655440001"],
-        },
-      },
-    });
-    expect(ok).toBe(true);
-  });
-
-  it("rejects uploadIds when chat_type is not research", () => {
-    const ok = validateUnifiedChatRequest({
-      message: "x",
-      chat_type: "chat",
-      options: {
-        research: {
-          uploadIds: ["550e8400-e29b-41d4-a716-446655440001"],
-        },
-      },
-    });
-    expect(ok).toBe(false);
-  });
-
   it("rejects deepAnalysis true when chat_type is not research", () => {
     const ok = validateUnifiedChatRequest({
       message: "x",

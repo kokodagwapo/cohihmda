@@ -125,12 +125,6 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
               default: false,
               description: "Deep analysis mode; only meaningful when chat_type is research.",
             },
-            uploadIds: {
-              type: "array",
-              items: { type: "string", format: "uuid" },
-              maxItems: 10,
-              description: "Research dataset upload IDs to attach when starting a new session.",
-            },
           },
           additionalProperties: false,
         },
@@ -159,49 +153,6 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
                 required: ["deepAnalysis"],
               },
             },
-            required: ["research"],
-          },
-        },
-        required: ["options"],
-      },
-      then: {
-        properties: { chat_type: { const: "research" } },
-        required: ["chat_type"],
-      },
-    },
-    {
-      if: {
-        properties: {
-          options: {
-            type: "object",
-            properties: {
-              research: {
-                type: "object",
-                required: ["uploadIds"],
-                properties: {
-                  uploadIds: {
-                    type: "array",
-                    minItems: 1,
-                  },
-                },
-              },
-            },
-            required: ["research"],
-          },
-        },
-        required: ["options"],
-      },
-      then: {
-        properties: { chat_type: { const: "research" } },
-        required: ["chat_type"],
-      },
-    },
-    {
-      if: {
-        properties: {
-          options: {
-            type: "object",
-            properties: { research: { type: "object" } },
             required: ["research"],
           },
         },

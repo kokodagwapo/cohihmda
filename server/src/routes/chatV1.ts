@@ -40,7 +40,6 @@ import {
   deleteUnifiedChatFolder,
 } from "../services/chat/unifiedChatFolderService.js";
 import { listCanonicalHistory } from "../services/chat/historyRepository.js";
-import { ensureSharedResearchConversation } from "../services/chat/sharedResearchHistory.js";
 import {
   assertUnifiedChatAllowed,
   buildUnifiedChatPermissions,
@@ -185,8 +184,6 @@ router.get(
       const search = first(q.q) ?? first(q.search);
       const folderId = first(q.folder_id);
       const includeSubfolders = first(q.include_subfolders) !== "false";
-      const sharedWithMe =
-        first(q.shared_with_me) === "true" || first(q.shared_with_me) === "1";
       const limitRaw = first(q.limit);
       const offsetRaw = first(q.offset);
       const limitParsed = limitRaw !== undefined ? parseInt(limitRaw, 10) : undefined;
@@ -205,7 +202,6 @@ router.get(
       const rows = await listCanonicalHistory({
         tenantId,
         userId,
-        userEmail: req.userEmail,
         scopeType: scopeType || undefined,
         scopeKey: scopeKey !== undefined ? scopeKey : undefined,
         chatType: normalizedChatType,
@@ -214,7 +210,6 @@ router.get(
         offset,
         folderId: folderId || undefined,
         includeSubfolders,
-        sharedWithMe,
       });
       res.json({
         conversations: rows.map((r) => ({
@@ -230,13 +225,6 @@ router.get(
           folder_id: r.folder_id ?? null,
           ...(r.phase != null && r.phase !== ""
             ? { phase: r.phase }
-            : {}),
-          ...(r.is_shared_view ? { is_shared_view: true } : {}),
-          ...(r.shared_by_email
-            ? { shared_by_email: r.shared_by_email }
-            : {}),
-          ...(r.shared_by_name
-            ? { shared_by_name: r.shared_by_name }
             : {}),
           created_at: r.created_at ?? r.updated_at,
           updated_at: r.updated_at,
@@ -302,73 +290,6 @@ router.post(
       res.status(500).json({
         error: "internal_error",
         message: err.message || "Failed to create conversation",
-      });
-    }
-  },
-);
-
-router.post(
-  "/conversations/open-shared-research",
-  unifiedChatGuard,
-  authenticateToken,
-  attachTenantContext,
-  apiLimiter,
-  async (req: AuthRequest, res) => {
-    try {
-      const researchSessionId =
-        typeof req.body?.research_session_id === "string"
-          ? req.body.research_session_id
-          : typeof req.body?.researchSessionId === "string"
-            ? req.body.researchSessionId
-            : null;
-      if (!researchSessionId || !isUuid(researchSessionId)) {
-        return res.status(400).json({
-          error: "validation_error",
-          message: "research_session_id must be a valid UUID",
-        });
-      }
-      const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      const userId = req.userId;
-      if (!tenantId || !userId) {
-        return res.status(400).json({
-          error: "bad_request",
-          message: "Tenant and user context required",
-        });
-      }
-      const conversationId = await ensureSharedResearchConversation({
-        tenantId,
-        viewerId: userId,
-        viewerEmail: req.userEmail,
-        researchSessionId,
-      });
-      if (!conversationId) {
-        return res.status(404).json({
-          error: "not_found",
-          message: "Shared research session not found",
-        });
-      }
-      const row = await getUnifiedConversation({
-        tenantId,
-        userId,
-        conversationId,
-      });
-      if (!row) {
-        return res.status(404).json({
-          error: "not_found",
-          message: "Conversation not found",
-        });
-      }
-      res.json({
-        id: row.id,
-        chat_type: row.chat_type,
-        legacy_ref: row.legacy_ref,
-        title: row.title,
-      });
-    } catch (err: any) {
-      console.error("[chat/v1/open-shared-research] Error:", err);
-      res.status(500).json({
-        error: "internal_error",
-        message: err.message || "Failed to open shared research",
       });
     }
   },
@@ -864,7 +785,6 @@ async function handleResearchStream(
       message: body.message,
       legacyRef,
       deepAnalysis: body.options?.research?.deepAnalysis,
-      uploadIds: body.options?.research?.uploadIds,
       policy,
     });
   } catch (err: any) {

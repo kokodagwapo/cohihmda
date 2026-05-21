@@ -3,11 +3,7 @@
  */
 
 import { test, expect } from "./fixtures";
-import {
-  forceUnifiedChat,
-  gotoWithUnifiedChatShell,
-  mockUnifiedChatApis,
-} from "./helpers/unifiedChat";
+import { forceUnifiedChat, mockUnifiedChatApis } from "./helpers/unifiedChat";
 
 test.describe("Chat landing at /", () => {
   test.beforeEach(async ({ userPage }) => {
@@ -22,12 +18,18 @@ test.describe("Chat landing at /", () => {
   });
 
   test("@smoke @COHI-386 authenticated user sees chat home at /", async ({ userPage }) => {
-    await gotoWithUnifiedChatShell(userPage, "/");
+    await userPage.goto("/", { waitUntil: "domcontentloaded" });
     expect(new URL(userPage.url()).pathname).toBe("/");
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("@critical @COHI-386 layout view controls hidden on chat home", async ({ userPage }) => {
-    await gotoWithUnifiedChatShell(userPage, "/");
+    await userPage.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(
       userPage.getByRole("group", { name: "Chat layout" }),
     ).toHaveCount(0);
@@ -40,23 +42,24 @@ test.describe("Chat landing at /", () => {
   });
 
   test("@critical @COHI-386 layout view controls visible on /insights", async ({ userPage }) => {
-    await gotoWithUnifiedChatShell(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await expect(userPage.getByTestId("unified-chat-shell")).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(
       userPage.getByRole("group", { name: "Chat layout" }),
     ).toBeVisible();
   });
 
-  test("@critical @COHI-386 canvas-only user cannot access chat home at /", async ({
+  test("@critical @COHI-386 canvas-only user cannot access chat home", async ({
     canvasOnlyPage,
   }) => {
-    // AccessModeGate sends canvas-only users to /my-dashboard → /workbench (not CohiChatHome).
     await canvasOnlyPage.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(canvasOnlyPage).toHaveURL(/\/(my-dashboard|workbench)(\/|$)/, {
-      timeout: 15_000,
-    });
-    await expect(canvasOnlyPage.getByTestId("unified-chat-shell")).toHaveCount(0);
-    await expect(canvasOnlyPage.getByText("Cohi Dashboards")).toBeVisible({
-      timeout: 15_000,
-    });
+    const path = new URL(canvasOnlyPage.url()).pathname;
+    expect(path).not.toBe("/");
+    expect(path).toMatch(/^\/(my-dashboard|workbench)/);
+    await expect(
+      canvasOnlyPage.getByTestId("unified-chat-shell"),
+    ).toHaveCount(0);
   });
 });

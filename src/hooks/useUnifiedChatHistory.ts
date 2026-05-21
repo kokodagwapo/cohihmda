@@ -3,7 +3,6 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "@/contexts/AuthContext";
 import {
   createUnifiedChatClient,
   type UnifiedChatFolder,
@@ -14,22 +13,16 @@ import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import {
   dispatchUnifiedChatFoldersSync,
   UNIFIED_CHAT_FOLDERS_SYNC_EVENT,
-  UNIFIED_CHAT_HISTORY_SYNC_EVENT,
 } from "@/lib/unifiedChatFolderUtils";
 
 export function useUnifiedChatHistory(
   tenantId?: string,
   options?: { recentLimit?: number },
 ) {
-  const { user } = useAuth();
-  const effectiveTenantId = tenantId ?? user?.tenant_id ?? undefined;
   const defaultRecentLimit = options?.recentLimit ?? 10;
   const [conversations, setConversations] = useState<UnifiedConversationSummary[]>(
     [],
   );
-  const [sharedConversations, setSharedConversations] = useState<
-    UnifiedConversationSummary[]
-  >([]);
   const [folders, setFolders] = useState<UnifiedChatFolder[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -41,39 +34,22 @@ export function useUnifiedChatHistory(
       if (!enabled) return;
       setLoading(true);
       try {
-        const client = createUnifiedChatClient(effectiveTenantId);
-        const [folderRows, conversationRows, sharedRows] = await Promise.all([
+        const client = createUnifiedChatClient(tenantId);
+        const [folderRows, conversationRows] = await Promise.all([
           client.listFolders(),
           client.listConversations({
             limit: opts?.limit ?? defaultRecentLimit,
             chat_type: opts?.chat_type,
           }),
-          client.listConversations({ shared_with_me: true, limit: 50 }),
         ]);
         setFolders(folderRows);
-        const sharedLegacyRefs = new Set(
-          sharedRows
-            .map((c) => c.legacy_ref)
-            .filter((ref): ref is string => Boolean(ref)),
-        );
-        const sharedIds = new Set(sharedRows.map((c) => c.id));
-        setConversations(
-          conversationRows.filter(
-            (c) =>
-              !c.is_shared_view &&
-              !sharedIds.has(c.id) &&
-              !(c.legacy_ref && sharedLegacyRefs.has(c.legacy_ref)),
-          ),
-        );
-        setSharedConversations(sharedRows);
+        setConversations(conversationRows);
         dispatchUnifiedChatFoldersSync();
-      } catch (err) {
-        console.error("[useUnifiedChatHistory] refreshAll failed:", err);
       } finally {
         setLoading(false);
       }
     },
-    [enabled, effectiveTenantId, defaultRecentLimit],
+    [enabled, tenantId, defaultRecentLimit],
   );
 
   const refreshRecents = useCallback(
@@ -81,7 +57,7 @@ export function useUnifiedChatHistory(
       if (!enabled) return;
       setLoading(true);
       try {
-        const client = createUnifiedChatClient(effectiveTenantId);
+        const client = createUnifiedChatClient(tenantId);
         const rows = await client.listConversations({
           limit: opts?.limit ?? defaultRecentLimit,
           chat_type: opts?.chat_type,
@@ -91,15 +67,15 @@ export function useUnifiedChatHistory(
         setLoading(false);
       }
     },
-    [enabled, effectiveTenantId, defaultRecentLimit],
+    [enabled, tenantId, defaultRecentLimit],
   );
 
   const refreshFolders = useCallback(async () => {
     if (!enabled) return;
-    const client = createUnifiedChatClient(effectiveTenantId);
+    const client = createUnifiedChatClient(tenantId);
     const rows = await client.listFolders();
     setFolders(rows);
-  }, [enabled, effectiveTenantId]);
+  }, [enabled, tenantId]);
 
   const searchConversations = useCallback(
     async (query: {
@@ -111,16 +87,16 @@ export function useUnifiedChatHistory(
       offset?: number;
     }) => {
       if (!enabled) return [] as UnifiedConversationSummary[];
-      const client = createUnifiedChatClient(effectiveTenantId);
+      const client = createUnifiedChatClient(tenantId);
       return client.listConversations(query);
     },
-    [enabled, effectiveTenantId],
+    [enabled, tenantId],
   );
 
   const moveConversationToFolder = useCallback(
     async (conversationId: string, folderId: string | null) => {
       if (!enabled) return;
-      const client = createUnifiedChatClient(effectiveTenantId);
+      const client = createUnifiedChatClient(tenantId);
       setConversations((prev) =>
         prev.map((c) =>
           c.id === conversationId ? { ...c, folder_id: folderId } : c,
@@ -129,13 +105,13 @@ export function useUnifiedChatHistory(
       await client.patchConversation(conversationId, { folder_id: folderId });
       await refreshRecents();
     },
-    [enabled, effectiveTenantId, refreshRecents],
+    [enabled, tenantId, refreshRecents],
   );
 
   const createFolder = useCallback(
     async (name: string, parentId?: string | null) => {
       if (!enabled) return undefined;
-      const client = createUnifiedChatClient(effectiveTenantId);
+      const client = createUnifiedChatClient(tenantId);
       const folder = await client.createFolder({
         name,
         parent_id: parentId ?? null,
@@ -146,26 +122,26 @@ export function useUnifiedChatHistory(
       await refreshAll();
       return folder;
     },
-    [enabled, effectiveTenantId, refreshAll],
+    [enabled, tenantId, refreshAll],
   );
 
   const renameFolder = useCallback(
     async (folderId: string, name: string) => {
       if (!enabled) return;
-      const client = createUnifiedChatClient(effectiveTenantId);
+      const client = createUnifiedChatClient(tenantId);
       setFolders((prev) =>
         prev.map((f) => (f.id === folderId ? { ...f, name } : f)),
       );
       await client.renameFolder(folderId, name);
       await refreshAll();
     },
-    [enabled, effectiveTenantId, refreshAll],
+    [enabled, tenantId, refreshAll],
   );
 
   const moveFolder = useCallback(
     async (folderId: string, parentId: string | null) => {
       if (!enabled) return;
-      const client = createUnifiedChatClient(effectiveTenantId);
+      const client = createUnifiedChatClient(tenantId);
       setFolders((prev) =>
         prev.map((folder) =>
           folder.id === folderId
@@ -181,18 +157,18 @@ export function useUnifiedChatHistory(
         throw err;
       }
     },
-    [enabled, effectiveTenantId, refreshAll, refreshFolders],
+    [enabled, tenantId, refreshAll, refreshFolders],
   );
 
   const deleteFolder = useCallback(
     async (folderId: string) => {
       if (!enabled) return;
-      const client = createUnifiedChatClient(effectiveTenantId);
+      const client = createUnifiedChatClient(tenantId);
       setFolders((prev) => prev.filter((f) => f.id !== folderId));
       await client.deleteFolder(folderId);
       await refreshAll();
     },
-    [enabled, effectiveTenantId, refreshAll],
+    [enabled, tenantId, refreshAll],
   );
 
   useEffect(() => {
@@ -205,21 +181,14 @@ export function useUnifiedChatHistory(
     const onFoldersSync = () => {
       void refreshFolders();
     };
-    const onHistorySync = () => {
-      void refreshAll();
-    };
     window.addEventListener(UNIFIED_CHAT_FOLDERS_SYNC_EVENT, onFoldersSync);
-    window.addEventListener(UNIFIED_CHAT_HISTORY_SYNC_EVENT, onHistorySync);
-    return () => {
+    return () =>
       window.removeEventListener(UNIFIED_CHAT_FOLDERS_SYNC_EVENT, onFoldersSync);
-      window.removeEventListener(UNIFIED_CHAT_HISTORY_SYNC_EVENT, onHistorySync);
-    };
-  }, [enabled, refreshFolders, refreshAll]);
+  }, [enabled, refreshFolders]);
 
   return {
     enabled,
     conversations,
-    sharedConversations,
     folders,
     loading,
     refreshAll,

@@ -8,7 +8,6 @@ import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import type { UnifiedConversationChatType } from "./unifiedConversationService.js";
 import { listUnifiedConversations } from "./unifiedConversationService.js";
 import { listUnifiedChatFolders } from "./unifiedChatFolderService.js";
-import { listSharedResearchHistoryRows } from "./sharedResearchHistory.js";
 
 export interface CanonicalHistoryRow {
   conversation_id: string;
@@ -23,16 +22,11 @@ export interface CanonicalHistoryRow {
   folder_id?: string | null;
   /** Research Lab session phase when row comes from dual-read legacy list. */
   phase?: string | null;
-  /** Viewer opened someone else's shared research (unified row, not dual-read). */
-  is_shared_view?: boolean;
-  shared_by_email?: string | null;
-  shared_by_name?: string | null;
 }
 
 export interface HistoryListQuery {
   tenantId: string;
   userId: string;
-  userEmail?: string | null;
   scopeType?: string;
   scopeKey?: string | null;
   chatType?: UnifiedConversationChatType;
@@ -41,8 +35,6 @@ export interface HistoryListQuery {
   offset?: number;
   folderId?: string;
   includeSubfolders?: boolean;
-  /** When true, return only materialized shared research conversations for the viewer. */
-  sharedWithMe?: boolean;
 }
 
 function isDualReadEnabled(): boolean {
@@ -58,14 +50,6 @@ function isDualReadEnabled(): boolean {
 export async function listCanonicalHistory(
   query: HistoryListQuery,
 ): Promise<CanonicalHistoryRow[]> {
-  if (query.sharedWithMe) {
-    return listSharedResearchHistoryRows({
-      tenantId: query.tenantId,
-      userId: query.userId,
-      userEmail: query.userEmail,
-    });
-  }
-
   let folderIds: string[] | undefined;
   if (query.folderId) {
     const folders = await listUnifiedChatFolders({
@@ -127,23 +111,22 @@ export async function listCanonicalHistory(
     Boolean(query.scopeType) ||
     (query.chatType != null && query.chatType !== "research");
 
-  let merged = rows;
-
-  if (isDualReadEnabled() && !skipDualRead) {
-    const legacyResearch = await loadLegacyResearchRows(
-      query.tenantId,
-      query.userId,
-    ).catch((err: any) => {
-      console.warn(
-        "[historyRepository] legacy research load failed:",
-        err?.message ?? err,
-      );
-      return [] as CanonicalHistoryRow[];
-    });
-    merged = mergeHistoryRows(merged, legacyResearch);
+  if (!isDualReadEnabled() || skipDualRead) {
+    return rows;
   }
 
-  return merged;
+  const legacyResearch = await loadLegacyResearchRows(
+    query.tenantId,
+    query.userId,
+  ).catch((err: any) => {
+    console.warn(
+      "[historyRepository] legacy research load failed:",
+      err?.message ?? err,
+    );
+    return [] as CanonicalHistoryRow[];
+  });
+
+  return mergeHistoryRows(rows, legacyResearch);
 }
 
 /**

@@ -75,7 +75,6 @@ import { UnifiedChatRebindBanner } from "@/components/cohi/UnifiedChatRebindBann
 import { useUnifiedChatPermissions } from "@/hooks/useUnifiedChatPermissions";
 import { InsightBuilderPreviewCard } from "@/components/cohi/InsightBuilderPreviewCard";
 import { UnifiedChatResearchWorkspace } from "@/components/cohi/UnifiedChatResearchWorkspace";
-import { ResearchDatasetAttachPanel } from "@/components/research/ResearchDatasetAttachPanel";
 import {
   isUnifiedChatClientEnabled,
   workbenchArtifactHandoffPath,
@@ -440,10 +439,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   );
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [researchAttachedUploadIds, setResearchAttachedUploadIds] = useState<
-    string[]
-  >([]);
-  const [researchViewOnly, setResearchViewOnly] = useState(false);
   const [vizTypeOverrides, setVizTypeOverrides] = useState<
     Record<string, VisualizationConfig["type"]>
   >({});
@@ -529,11 +524,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     deleteSession,
     renameSession,
   } = unifiedSession ?? legacyChat;
-
-  const startNewChatSession = useCallback(async () => {
-    setResearchViewOnly(false);
-    await newSession();
-  }, [newSession]);
 
   const activeChatType = unifiedSession?.chatType ?? chatType;
   const setActiveChatType = unifiedSession?.setChatType ?? setChatType;
@@ -963,29 +953,16 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
    * Handle send message
    */
   const handleSend = async () => {
-    const isResearchMode =
-      isUnifiedChatClientEnabled() && activeChatType === "research";
-    if (isResearchMode && researchViewOnly) return;
-    const hasResearchAttach =
-      isResearchMode && researchAttachedUploadIds.length > 0;
-    if (
-      (!input.trim() && !uploadedFile && !hasResearchAttach) ||
-      isLoading
-    ) {
-      return;
-    }
+    if ((!input.trim() && !uploadedFile) || isLoading) return;
 
     const forceNewConversation = isShellCompact;
     expandShellIfCompact();
-    if (forceNewConversation) {
-      setResearchViewOnly(false);
-    }
 
-    if (!uploadedFile || isResearchMode) {
+    if (!uploadedFile) {
       navigateWorkbenchOnSubmit(forceNewConversation);
     }
 
-    if (uploadedFile && !isResearchMode) {
+    if (uploadedFile) {
       if (forceNewConversation) {
         await newSession();
       }
@@ -1040,19 +1017,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         setIsUploading(false);
       }
     } else {
-      const uploadIdsForSend =
-        isResearchMode &&
-        researchAttachedUploadIds.length > 0 &&
-        (forceNewConversation || (!currentSessionId && !legacyRef))
-          ? researchAttachedUploadIds
-          : undefined;
-      sendMessage(input.trim() || "Analyze the attached dataset.", {
-        forceNewConversation,
-        researchUploadIds: uploadIdsForSend,
-      });
-      if (uploadIdsForSend) {
-        setResearchAttachedUploadIds([]);
-      }
+      sendMessage(input.trim(), { forceNewConversation });
       setInput("");
     }
   };
@@ -1182,14 +1147,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   );
   const isTallEmptyPromptCards =
     messages.length === 0 && promptCardsLayout === "row";
-  const isSharedResearchViewOnly =
-    isUnifiedChatClientEnabled() &&
-    activeChatType === "research" &&
-    researchViewOnly;
   const showEmptyPromptCards =
-    messages.length === 0 &&
-    promptCardsLayout !== "hidden" &&
-    !isSharedResearchViewOnly;
+    messages.length === 0 && promptCardsLayout !== "hidden";
   const showResearchWorkspace =
     activeChatType === "research" &&
     isUnifiedChatClientEnabled() &&
@@ -1218,30 +1177,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     [setActiveChatType],
   );
 
-  useEffect(() => {
-    if (activeChatType !== "research" || !legacyRef) {
-      setResearchViewOnly(false);
-    }
-  }, [activeChatType, legacyRef]);
-
   const handleChatTypeChange = useCallback(
     (next: UnifiedChatType) => {
       setExpandedPromptCard(next);
-      if (next !== "research") {
-        setResearchAttachedUploadIds([]);
-        setUploadedFile(null);
-        setResearchViewOnly(false);
-      }
       setActiveChatType(next);
     },
     [setActiveChatType],
   );
-
-  useEffect(() => {
-    if (activeChatType !== "research") {
-      setResearchAttachedUploadIds([]);
-    }
-  }, [activeChatType]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -2122,20 +2064,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     return <CohiChatDockChip onClick={onOpen} />;
   }
 
-  const chatInputFooter = isSharedResearchViewOnly ? (
-    <div
-      className={cn(
-        "p-4 shrink-0 w-full border-t border-slate-200/70 dark:border-slate-700/70",
-        isStackedInsetShell
-          ? "border-slate-200/60 dark:border-slate-700/60"
-          : "bg-slate-50/50 dark:bg-slate-900/50",
-      )}
-    >
-      <p className="text-xs text-center text-amber-700 dark:text-amber-300">
-        View-only — you cannot send messages on a shared research session.
-      </p>
-    </div>
-  ) : (
+  const chatInputFooter = (
     <motion.div
       layout
       layoutId="cohi-chat-input"
@@ -2198,27 +2127,23 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Mic className="w-4 h-4" />
           )}
         </Button>
-        {!(isUnifiedChatClientEnabled() && activeChatType === "research") && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.pptx,.ppt"
-              onChange={handleFileSelect}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || isUploading}
-              className="shrink-0"
-              title="Upload file (CSV, PDF, Excel, PowerPoint, Image)"
-            >
-              <Paperclip className="w-4 h-4" />
-            </Button>
-          </>
-        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept=".csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.pptx,.ppt"
+          onChange={handleFileSelect}
+        />
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isLoading || isUploading}
+          className="shrink-0"
+          title="Upload file (CSV, PDF, Excel, PowerPoint, Image)"
+        >
+          <Paperclip className="w-4 h-4" />
+        </Button>
         <Textarea
           ref={inputRef}
           value={input}
@@ -2233,13 +2158,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               ? "Ask about this file..."
               : "What important info do I need to know today?"
           }
-          disabled={
-            isLoading ||
-            isUploading ||
-            (isUnifiedChatClientEnabled() &&
-              activeChatType === "research" &&
-              researchViewOnly)
-          }
+          disabled={isLoading || isUploading}
           className={cn(
             "flex-1 min-h-10 max-h-32 resize-none py-2.5 leading-snug",
             "rounded-xl border-slate-200/80 dark:border-slate-600/60 bg-white dark:bg-slate-800/50",
@@ -2249,12 +2168,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         <Button
           onClick={handleSend}
           disabled={
-            (!input.trim() && !uploadedFile) ||
-            isLoading ||
-            isUploading ||
-            (isUnifiedChatClientEnabled() &&
-              activeChatType === "research" &&
-              researchViewOnly)
+            (!input.trim() && !uploadedFile) || isLoading || isUploading
           }
           size="icon"
           className="rounded-xl bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/25"
@@ -2266,24 +2180,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           )}
         </Button>
       </div>
-      {isUnifiedChatClientEnabled() &&
-        activeChatType === "research" &&
-        !researchViewOnly && (
-          <>
-            <ResearchDatasetAttachPanel
-              className="mt-2.5"
-              tenantId={tenantId}
-              attachedUploadIds={researchAttachedUploadIds}
-              onAttachedUploadIdsChange={setResearchAttachedUploadIds}
-              disabled={isLoading}
-            />
-            <ResearchDeepAnalysisToggle
-              className="mt-2.5"
-              checked={activeResearchDeepAnalysis}
-              onCheckedChange={setActiveResearchDeepAnalysis}
-            />
-          </>
-        )}
+      {isUnifiedChatClientEnabled() && activeChatType === "research" && (
+        <ResearchDeepAnalysisToggle
+          className="mt-2.5"
+          checked={activeResearchDeepAnalysis}
+          onCheckedChange={setActiveResearchDeepAnalysis}
+        />
+      )}
     </motion.div>
   );
 
@@ -2367,7 +2270,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               variant="ghost"
               size="icon"
               className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
-              onClick={() => void startNewChatSession()}
+              onClick={newSession}
               title="New conversation"
             >
               <RefreshCw className="w-4 h-4" />
@@ -2487,7 +2390,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           onLoadSession={loadSession}
           onDeleteSession={deleteSession}
           onRenameSession={renameSession}
-          onNewSession={startNewChatSession}
+          onNewSession={newSession}
         />
         )}
 
@@ -2511,9 +2414,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   tenantId={tenantId}
                   messages={messages}
                   chatLoading={isLoading}
-                  onSessionAccess={({ isOwner }) => {
-                    setResearchViewOnly(!isOwner);
-                  }}
                 />
               </motion.div>
             )}
@@ -2698,8 +2598,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           {messages.length > 0 &&
             suggestedQuestions.length > 0 &&
             !isLoading &&
-            !showResearchWorkspace &&
-            !isSharedResearchViewOnly && (
+            !showResearchWorkspace && (
             <motion.div
               key="shell-suggestions"
               initial={{ opacity: 0, height: 0 }}

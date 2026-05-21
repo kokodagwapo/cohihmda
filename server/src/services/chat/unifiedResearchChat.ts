@@ -44,7 +44,6 @@ export async function runUnifiedResearchTurn(args: {
   conversationId: string;
   legacyRef?: string | null;
   deepAnalysis?: boolean;
-  uploadIds?: string[];
   policy: PolicyDecision;
 }): Promise<{
   blocks: UnifiedBlock[];
@@ -70,10 +69,6 @@ export async function runUnifiedResearchTurn(args: {
   }
 
   if (!session) {
-    const uploadIds =
-      Array.isArray(args.uploadIds) && args.uploadIds.length > 0
-        ? args.uploadIds.filter((id) => typeof id === "string")
-        : [];
     session = await createSession(
       tenantId,
       userId,
@@ -82,7 +77,6 @@ export async function runUnifiedResearchTurn(args: {
       args.message.trim(),
       undefined,
       mode,
-      uploadIds,
     );
     sessionId = session.id;
     void runResearchPipeline(session.id, tenantPool, {

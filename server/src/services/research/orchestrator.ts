@@ -347,28 +347,7 @@ export async function saveSession(session: ResearchSession, tenantPool: pg.Pool)
   }
 }
 
-/** Compare research session user ids (UUID string/object tolerant). */
-export function researchUserIdsEqual(
-  a: string | undefined | null,
-  b: string | undefined | null,
-): boolean {
-  if (a == null || b == null) return false;
-  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-}
-
-/** Drop in-memory session so the next load reads sharing/visibility from DB. */
-export function evictSessionFromCache(sessionId: string): void {
-  sessions.delete(sessionId);
-}
-
-export async function loadSession(
-  sessionId: string,
-  tenantPool: pg.Pool,
-  options?: { refresh?: boolean },
-): Promise<ResearchSession | undefined> {
-  if (options?.refresh) {
-    evictSessionFromCache(sessionId);
-  }
+export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promise<ResearchSession | undefined> {
   // Check memory cache first
   const cached = sessions.get(sessionId);
   if (cached) return cached;
@@ -483,23 +462,17 @@ export async function updateSessionSharing(
   sharedWithUserIds: string[]
 ): Promise<boolean> {
   try {
-    const validVis = ["shared", "global"].includes(visibility)
-      ? visibility
-      : "private";
     const result = await tenantPool.query(
       `UPDATE research_sessions
        SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW()
-       WHERE id = $3 AND user_id::text = $4::text
-       RETURNING id, visibility`,
-      [validVis, sharedWithUserIds, sessionId, userId]
+       WHERE id = $3 AND user_id = $4
+       RETURNING id`,
+      [["shared", "global"].includes(visibility) ? visibility : "private", sharedWithUserIds, sessionId, userId]
     );
     if (result.rows.length > 0) {
       const session = sessions.get(sessionId);
       if (session) {
-        const persisted = result.rows[0]?.visibility as string | undefined;
-        session.visibility = ["shared", "global"].includes(persisted ?? validVis)
-          ? (persisted as "shared" | "global")
-          : "private";
+        session.visibility = ["shared", "global"].includes(visibility) ? visibility as "shared" | "global" : "private";
         session.sharedWithUserIds = sharedWithUserIds;
       }
       return true;
@@ -512,14 +485,9 @@ export async function updateSessionSharing(
 }
 
 export function canAccessSession(session: ResearchSession, userId: string): boolean {
-  if (researchUserIdsEqual(session.userId, userId)) return true;
+  if (session.userId === userId) return true;
   if (session.visibility === "global") return true;
-  if (
-    session.visibility === "shared" &&
-    session.sharedWithUserIds?.some((id) => researchUserIdsEqual(id, userId))
-  ) {
-    return true;
-  }
+  if (session.visibility === "shared" && session.sharedWithUserIds?.includes(userId)) return true;
   return false;
 }
 

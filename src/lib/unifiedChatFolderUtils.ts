@@ -1,12 +1,5 @@
 import type { UnifiedChatFolder, UnifiedConversationSummary } from "@/lib/unifiedChatClient";
 
-/** Virtual sidebar folder for shared research chats (not in unified_chat_folders). */
-export const SHARED_WITH_ME_FOLDER_ID = "__cohi_shared_with_me__";
-
-export function isSharedWithMeFolderId(folderId: string | null | undefined): boolean {
-  return folderId === SHARED_WITH_ME_FOLDER_ID;
-}
-
 export function groupFoldersByParent(folders: UnifiedChatFolder[]) {
   const byParent = new Map<string | null, UnifiedChatFolder[]>();
   for (const folder of folders) {
@@ -113,14 +106,6 @@ export const UNIFIED_CHAT_FOLDERS_SYNC_EVENT = "cohi-unified-chat-folders-sync";
 export function dispatchUnifiedChatFoldersSync() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(UNIFIED_CHAT_FOLDERS_SYNC_EVENT));
-}
-
-/** Bust sidebar / Shared With Me after research session sharing changes. */
-export const UNIFIED_CHAT_HISTORY_SYNC_EVENT = "cohi-unified-chat-history-sync";
-
-export function dispatchUnifiedChatHistorySync() {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(UNIFIED_CHAT_HISTORY_SYNC_EVENT));
 }
 
 export function getDirectChildFolders(
