@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
-import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
-import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
-import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1063,8 +1060,9 @@ const ProductionTrends = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Production Trends" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
+      <div className="flex min-h-[calc(100vh-4rem)] flex-col">
+        <TopTieringTopBar title="Production Trends" />
+        <main className="flex-1 overflow-y-auto px-4 py-3">
           <div className="mx-auto max-w-[1800px] space-y-4">
             <Card className={rowBg}>
               <CardContent className="pt-5">
@@ -1504,7 +1502,7 @@ const ProductionTrends = () => {
             )}
           </div>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 };

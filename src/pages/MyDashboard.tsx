@@ -11,14 +11,6 @@ import { useDashboardVisibility } from '@/hooks/useDashboardVisibility';
 import type { ReportData } from '@/data/reportSimulations';
 import { cn } from '@/lib/utils';
 import { useWorkbenchNav } from '@/hooks/useWorkbenchNav';
-import {
-  WORKBENCH_CHAT_HANDOFF_STATE_KEY,
-  rememberWorkbenchDraftTab,
-  lookupWorkbenchDraftTab,
-  getOrCreateActiveWorkbenchDraftScope,
-  type WorkbenchChatHandoffLocationState,
-} from '@/lib/workbench/workbenchChatHandoff';
-import type { WidgetAction } from '@/types/widgetActions';
 
 type CanvasListItem = {
   id: string;
@@ -91,13 +83,6 @@ export default function MyDashboard() {
   const [tabTitles, setTabTitles] = useState<Record<string, string>>({});
   // Track which tabs have unsaved changes (dirty state from canvas autosave)
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
-  const [draftScopeToTab, setDraftScopeToTab] = useState<Record<string, string>>({});
-  const [activeHandoffDraftScopeId, setActiveHandoffDraftScopeId] = useState<
-    string | undefined
-  >();
-  const [pendingWorkbenchActions, setPendingWorkbenchActions] = useState<
-    WidgetAction[] | undefined
-  >();
 
   const reportBuilderSearch = autoOpenReportBuilder ? "?reportBuilder=1" : "";
 
@@ -165,42 +150,16 @@ export default function MyDashboard() {
       const persistedTabs = persistedTabsRaw.filter((id) => availableIds.has(id));
       const persistedActive = persistedActiveRaw && availableIds.has(persistedActiveRaw) ? persistedActiveRaw : null;
       const initialUrlCanvasId = initialUrlCanvasIdRef.current;
-      const handoffOnHydrate = (
-        location.state as WorkbenchChatHandoffLocationState | null
-      )?.[WORKBENCH_CHAT_HANDOFF_STATE_KEY];
 
       if (initialUrlCanvasId === 'new') {
-        const draftScopeId =
-          handoffOnHydrate?.draftScopeId ??
-          getOrCreateActiveWorkbenchDraftScope();
-        const existingTab = lookupWorkbenchDraftTab(draftScopeId);
-        const newTabId =
-          existingTab && existingTab.startsWith('new-')
-            ? existingTab
-            : `new-${Date.now()}`;
-        setOpenTabs((prev) =>
-          prev.includes(newTabId) ? prev : [...persistedTabs, newTabId],
-        );
+        const newTabId = `new-${Date.now()}`;
+        setOpenTabs([...persistedTabs, newTabId]);
         setActiveTabId(newTabId);
         setLoadCanvasId(null);
-        if (!existingTab) {
-          setCanvasKey((k) => k + 1);
-        }
-        setDraftScopeToTab((prev) => ({
-          ...prev,
-          [draftScopeId]: newTabId,
-        }));
-        rememberWorkbenchDraftTab(draftScopeId, newTabId);
-        setActiveHandoffDraftScopeId(draftScopeId);
-        if (handoffOnHydrate?.pendingActions?.length) {
-          setPendingWorkbenchActions(handoffOnHydrate.pendingActions);
-        }
+        setCanvasKey((k) => k + 1);
         setDirtyTabs(new Set());
         setTabTitles({});
         setIsHydratingWorkbench(false);
-        if (handoffOnHydrate) {
-          navigate(location.pathname, { replace: true, state: null });
-        }
         return;
       }
 
@@ -287,92 +246,6 @@ export default function MyDashboard() {
     // Clear the signal so subsequent renders / back-nav don't re-trigger.
     navigate(location.pathname, { replace: true, state: null });
   }, [reloadCanvasSignal, urlCanvasId, navigate, location.pathname]);
-
-  const workbenchHandoff = (
-    location.state as WorkbenchChatHandoffLocationState | null
-  )?.[WORKBENCH_CHAT_HANDOFF_STATE_KEY];
-
-  useEffect(() => {
-    if (!workbenchHandoff || isHydratingWorkbench) return;
-
-    const {
-      draftScopeId,
-      openNewTab,
-      activateDraftScopeId,
-      pendingActions,
-    } = workbenchHandoff;
-
-    if (openNewTab) {
-      const newTabId = `new-${Date.now()}`;
-      setOpenTabs((prev) => (prev.includes(newTabId) ? prev : [...prev, newTabId]));
-      setActiveTabId(newTabId);
-      setLoadCanvasId(null);
-      setCanvasKey((k) => k + 1);
-      setDraftScopeToTab((prev) => ({ ...prev, [draftScopeId]: newTabId }));
-      rememberWorkbenchDraftTab(draftScopeId, newTabId);
-      setActiveHandoffDraftScopeId(draftScopeId);
-      updateUrl(null);
-    } else if (activateDraftScopeId) {
-      const tabId =
-        draftScopeToTab[activateDraftScopeId] ??
-        lookupWorkbenchDraftTab(activateDraftScopeId);
-      if (tabId) {
-        setOpenTabs((prev) => (prev.includes(tabId) ? prev : [...prev, tabId]));
-        setActiveTabId(tabId);
-        if (tabId.startsWith("new-")) {
-          setLoadCanvasId(null);
-          updateUrl(null);
-        } else {
-          setLoadCanvasId(tabId);
-          updateUrl(tabId);
-        }
-        setDraftScopeToTab((prev) => ({
-          ...prev,
-          [activateDraftScopeId]: tabId,
-        }));
-        rememberWorkbenchDraftTab(activateDraftScopeId, tabId);
-      } else if (urlCanvasId !== "new") {
-        const newTabId = `new-${Date.now()}`;
-        setOpenTabs((prev) => [...prev, newTabId]);
-        setActiveTabId(newTabId);
-        setLoadCanvasId(null);
-        setCanvasKey((k) => k + 1);
-        setDraftScopeToTab((prev) => ({
-          ...prev,
-          [activateDraftScopeId]: newTabId,
-        }));
-        rememberWorkbenchDraftTab(activateDraftScopeId, newTabId);
-        updateUrl(null);
-      }
-      setActiveHandoffDraftScopeId(activateDraftScopeId);
-    }
-
-    if (pendingActions?.length) {
-      setPendingWorkbenchActions(pendingActions);
-    }
-
-    navigate(location.pathname, { replace: true, state: null });
-  }, [
-    workbenchHandoff,
-    isHydratingWorkbench,
-    navigate,
-    location.pathname,
-    draftScopeToTab,
-    updateUrl,
-    urlCanvasId,
-  ]);
-
-  const canvasInitialDraftScopeId = useMemo(() => {
-    if (!activeTabId?.startsWith("new-")) return undefined;
-    const fromMap = Object.entries(draftScopeToTab).find(
-      ([, tab]) => tab === activeTabId,
-    )?.[0];
-    return (
-      fromMap ??
-      activeHandoffDraftScopeId ??
-      getOrCreateActiveWorkbenchDraftScope()
-    );
-  }, [activeTabId, draftScopeToTab, activeHandoffDraftScopeId]);
 
   // Open a canvas tab (from sidebar click)
   const handleSelectCanvas = useCallback((id: string) => {
@@ -628,12 +501,6 @@ export default function MyDashboard() {
                   tenantId={effectiveTenantId}
                   isOwner={activeCanvasIsOwner}
                   autoOpenReportBuilder={autoOpenReportBuilder}
-                  initialDraftScopeId={canvasInitialDraftScopeId}
-                  isActiveTab
-                  pendingWorkbenchActions={pendingWorkbenchActions}
-                  onPendingWorkbenchActionsConsumed={() =>
-                    setPendingWorkbenchActions(undefined)
-                  }
                 />
               )}
             </div>

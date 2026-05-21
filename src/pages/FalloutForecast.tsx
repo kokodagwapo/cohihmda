@@ -3,9 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
 import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
-import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
-import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
-import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
 import { useChannelStore } from "@/stores/channelStore";
@@ -36,9 +33,10 @@ const FalloutForecast = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Coheus Fallout Report" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
-          <DashboardPageContent>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="Coheus Fallout Report" />
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3">
+          <div className="max-w-[1800px] mx-auto">
             <ClosingFalloutForecast
               dateFilter="mtd"
               selectedTenantId={selectedTenantId}
@@ -46,9 +44,9 @@ const FalloutForecast = () => {
               openLoanId={openLoanId}
               onOpenLoanIdHandled={handleLoanIdHandled}
             />
-          </DashboardPageContent>
+          </div>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 };

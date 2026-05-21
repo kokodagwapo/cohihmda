@@ -174,6 +174,7 @@ export class EncompassEtlService {
     let loansUpdated = 0;
     let loansUnchanged = 0;
     let loansDeleted = 0;
+    let loansFoldersRefreshed = 0;
 
     if (!this.tenantPool) {
       throw new Error("Tenant database pool not available");
@@ -278,10 +279,15 @@ export class EncompassEtlService {
             options.loanStartDate,
           );
           loansDeleted = reconcileResult.loansDeleted;
-          if (reconcileResult.loansDeleted > 0) {
+          loansFoldersRefreshed = reconcileResult.loansFoldersRefreshed;
+          if (
+            reconcileResult.loansDeleted > 0 ||
+            reconcileResult.loansFoldersRefreshed > 0
+          ) {
             console.log(
-              `[Sync] Reconciliation: ${reconcileResult.loansDeleted} loan(s) deleted (moved out of synced folders), ` +
-              `${reconcileResult.loansChecked} total checked`,
+              `[Sync] Reconciliation: ${reconcileResult.loansDeleted} deleted, ` +
+              `${reconcileResult.loansFoldersRefreshed} folder(s) refreshed, ` +
+              `${reconcileResult.loansChecked} checked`,
             );
           }
         } catch (reconcileErr: any) {
@@ -433,7 +439,7 @@ export class EncompassEtlService {
       }
 
       console.log(
-        `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, =${loansUnchanged} unchanged, -${loansDeleted} deleted, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
+        `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, =${loansUnchanged} unchanged, -${loansDeleted} deleted, ${loansFoldersRefreshed} folder(s) refreshed, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
       );
 
       // Fire post-sync hooks asynchronously (don't block return)

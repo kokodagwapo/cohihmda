@@ -6,7 +6,6 @@ import { AskCohiChat } from '@/components/workbench/AskCohiChat';
 import { IconBadge } from '@/components/workbench/IconBadge';
 import { api } from '@/lib/api';
 import { isUnifiedChatClientEnabled, postUnifiedWorkbenchHubQuery } from '@/lib/unifiedChatEnvelope';
-import { WORKBENCH_HUB_SCOPE_IDS } from '@/lib/unifiedChatClient';
 import { DashboardLayout } from '@/components/dashboard/DashboardLayout';
 import { useDashboardVisibility } from '@/hooks/useDashboardVisibility';
 import type { ReportData } from '@/data/reportSimulations';
@@ -27,11 +26,7 @@ export default function Favorites() {
     try {
       let answer = '';
       if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
-        answer = await postUnifiedWorkbenchHubQuery(
-          prompt,
-          undefined,
-          WORKBENCH_HUB_SCOPE_IDS.favorites,
-        );
+        answer = await postUnifiedWorkbenchHubQuery(prompt);
       } else {
         const res = await api.request<{ response: string }>('/api/workbench/ai/query', {
           method: 'POST',

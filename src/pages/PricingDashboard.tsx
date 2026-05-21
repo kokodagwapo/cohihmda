@@ -2,9 +2,6 @@
 
 import { PricingDashboardView } from "@/components/views/PricingDashboardView";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
-import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
-import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
-import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
@@ -18,17 +15,18 @@ const PricingDashboard = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Pricing Dashboard" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
-          <DashboardPageContent>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="Pricing Dashboard" />
+        <main className="flex-1 overflow-y-auto px-2 sm:px-4 py-2 sm:py-3">
+          <div className="max-w-[1800px] mx-auto">
             <PricingDashboardView
               tenantId={tenantId}
               selectedTenantId={selectedTenantId}
               selectedChannel={selectedChannel}
             />
-          </DashboardPageContent>
+          </div>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 };

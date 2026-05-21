@@ -5,10 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
-import { DASHBOARD_MAIN_CLASSNAME } from '@/components/cohi/pageContentStyles';
-import { DashboardPageContent } from '@/components/layout/DashboardPageContent';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
-import { TopTieringPageFrame } from '@/components/layout/TopTieringPageFrame';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import {
   Dialog,
@@ -552,9 +549,10 @@ export default function CreditRiskManagement() {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Credit Risk Management" />}>
-        <main className={cn(DASHBOARD_MAIN_CLASSNAME, isDarkMode ? 'bg-slate-900' : 'bg-transparent')}>
-        <DashboardPageContent>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="Credit Risk Management" />
+        <main className={`relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3 max-w-[1800px] mx-auto ${isDarkMode ? 'bg-slate-900' : 'bg-transparent'}`}>
+        <div className="space-y-4">
         {/* Header Section */}
         <div className="flex flex-col gap-6">
           {/* Canvas Mode Exit Button */}
@@ -620,7 +618,6 @@ export default function CreditRiskManagement() {
               </div>
             )}
           </div>
-        </div>
 
           <DashboardInsightsStrip
             insights={dashboardInsights}
@@ -645,6 +642,8 @@ export default function CreditRiskManagement() {
             dateFilter="ytd"
             selectedTenantId={selectedTenantId}
           />
+
+        </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -1041,9 +1040,9 @@ export default function CreditRiskManagement() {
             </Button>
           </div>
         )}
-        </DashboardPageContent>
+        </div>
       </main>
-      </TopTieringPageFrame>
+      </div>
 
       {/* Enhanced Drilldown Modal */}
       <Dialog open={showDrilldownModal} onOpenChange={setShowDrilldownModal}>

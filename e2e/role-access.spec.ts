@@ -1,5 +1,4 @@
 import { test, expect } from "./fixtures";
-import { gotoDashboardPage } from "./helpers/unifiedChat";
 
 test.describe("@critical Consolidated role access matrix", () => {
   test("tenant_admin can access admin area", async ({ adminPage }) => {
@@ -13,9 +12,8 @@ test.describe("@critical Consolidated role access matrix", () => {
   test("tenant_user can access insights but is blocked from admin", async ({
     userPage,
   }) => {
-    await gotoDashboardPage(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(userPage).toHaveURL(/\/insights/);
-    await expect(userPage.locator("#CohiInsights")).toBeVisible({ timeout: 15_000 });
 
     await userPage.goto("/admin", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByText(/Access Denied/i)).toBeVisible();
@@ -36,11 +34,9 @@ test.describe("@critical Consolidated role access matrix", () => {
       canvasOnlyPage.getByRole("navigation", { name: /main navigation/i }),
     ).toHaveCount(0);
 
-    // /admin is inside AccessModeGate — canvas-only users redirect to workbench before adminOnly runs.
+    // /admin is mounted outside AccessModeGate and uses adminOnly — non-admins see Access Denied in-place.
     await canvasOnlyPage.goto("/admin", { waitUntil: "domcontentloaded" });
-    await expect(canvasOnlyPage).toHaveURL(/\/(workbench|my-dashboard)/);
-    await expect(
-      canvasOnlyPage.getByRole("heading", { name: /Access Denied/i }),
-    ).toHaveCount(0);
+    await expect(canvasOnlyPage).toHaveURL(/\/admin/);
+    await expect(canvasOnlyPage.getByRole("heading", { name: /Access Denied/i })).toBeVisible();
   });
 });

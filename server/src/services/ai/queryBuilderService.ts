@@ -101,23 +101,9 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<UserPermissions>> = {
  * Get permissions for a user
  * First tries to load from database, then falls back to role-based defaults
  */
-function roleDefaultPermissions(context: QueryContext): UserPermissions {
-  const defaultPerms =
-    DEFAULT_ROLE_PERMISSIONS[context.userRole] || DEFAULT_ROLE_PERMISSIONS.user;
-  return {
-    sectionAccess: defaultPerms.sectionAccess || ["insights"],
-    rowFilters: defaultPerms.rowFilters || [],
-    fieldRestrictions: defaultPerms.fieldRestrictions || [],
-  };
-}
-
 export async function getUserPermissions(
   context: QueryContext
 ): Promise<UserPermissions> {
-  if (process.env.SKIP_DB === "true") {
-    return roleDefaultPermissions(context);
-  }
-
   // Try to load from database
   try {
     const tenantPool = await tenantDbManager.getTenantPool(context.tenantId);
@@ -163,7 +149,14 @@ export async function getUserPermissions(
     console.log('[QueryBuilder] Custom roles not available, using defaults');
   }
 
-  return roleDefaultPermissions(context);
+  // Fall back to role-based defaults
+  const defaultPerms = DEFAULT_ROLE_PERMISSIONS[context.userRole] || DEFAULT_ROLE_PERMISSIONS.user;
+  
+  return {
+    sectionAccess: defaultPerms.sectionAccess || ['insights'],
+    rowFilters: defaultPerms.rowFilters || [],
+    fieldRestrictions: defaultPerms.fieldRestrictions || [],
+  };
 }
 
 // ============================================================================

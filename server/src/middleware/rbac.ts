@@ -61,7 +61,7 @@ const CANVAS_ONLY_RULES: CanvasOnlyRule[] = [
   { prefix: '/api/predictions', methods: new Set(['GET', 'POST']) },
   { prefix: '/api/fallout', methods: new Set(['GET', 'POST']) },
   { prefix: '/api/pricing-dashboard', methods: new Set(['GET', 'POST']) },
-  { prefix: '/api/chat/v1', methods: new Set(['GET', 'POST', 'DELETE']) },
+  { prefix: '/api/chat/v1', methods: new Set(['POST']) },
   { prefix: '/api/cohi-chat/workbench', methods: new Set(['POST', 'GET']) },
 ];
 

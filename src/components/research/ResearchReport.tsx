@@ -103,8 +103,6 @@ interface ResearchReportProps {
   onTrackInsight?: (headline: string, detail: string) => void;
   /** When user clicks "Run this investigation" on a further-investigation suggestion. */
   onRunFurtherInvestigation?: (question: string) => void;
-  /** When set, uses parent SaveToWorkbench modal (e.g. unified chat shell). */
-  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
 }
 
 type ViewMode = "brief" | "full";
@@ -1025,12 +1023,8 @@ export function ResearchReport({
   onToggleTrack,
   onTrackInsight,
   onRunFurtherInvestigation,
-  onSaveToWorkbench: onSaveToWorkbenchProp,
 }: ResearchReportProps) {
   const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
-  const handleSaveToWorkbench =
-    onSaveToWorkbenchProp ?? ((payload: SaveToWorkbenchPayload) => setSaveToWorkbenchPayload(payload));
-  const useEmbeddedWorkbenchModal = onSaveToWorkbenchProp == null;
 
   const handleFindingFeedback = useCallback(
     (id: string, rating: -1 | 1, comment: string) => {
@@ -1151,7 +1145,7 @@ export function ResearchReport({
                 onTrackInsight={onTrackInsight}
                 selectedTenantId={selectedTenantId}
                 defaultEvidenceOpen={insight.rank <= 2}
-                onSaveToWorkbench={handleSaveToWorkbench}
+                onSaveToWorkbench={setSaveToWorkbenchPayload}
                 sessionId={sessionId}
               />
             ))}
@@ -1175,13 +1169,11 @@ export function ResearchReport({
         </p>
       )}
 
-      {useEmbeddedWorkbenchModal && (
-        <SaveToWorkbenchModal
-          open={saveToWorkbenchPayload != null}
-          onClose={() => setSaveToWorkbenchPayload(null)}
-          payload={saveToWorkbenchPayload}
-        />
-      )}
+      <SaveToWorkbenchModal
+        open={saveToWorkbenchPayload != null}
+        onClose={() => setSaveToWorkbenchPayload(null)}
+        payload={saveToWorkbenchPayload}
+      />
     </div>
   );
 }
