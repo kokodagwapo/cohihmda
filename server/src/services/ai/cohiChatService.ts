@@ -63,6 +63,10 @@ export interface ChatContext {
   permissions?: UserPermissions;
   /** Loan-level filter from getLoanAccessContext — applied to composed SQL */
   userAccessFilter?: LoanAccessFilter | null;
+  /** When set, SQL generation uses only user-uploaded dataset tables. */
+  uploadOnlyMode?: boolean;
+  uploadSchemaContext?: string;
+  datasetUploadIds?: string[];
 }
 
 export interface UserPermissions {
@@ -619,10 +623,11 @@ async function generateQuery(
   try {
     const apiKey = await getOpenAIKey(context.tenantId);
 
-    // Get tenant-specific schema context (dynamic introspection with fallback)
-    const schemaContext = context.tenantId
-      ? await getSchemaForTenant(context.tenantId)
-      : getSchemaContext();
+    const schemaContext = context.uploadOnlyMode && context.uploadSchemaContext
+      ? context.uploadSchemaContext
+      : context.tenantId
+        ? await getSchemaForTenant(context.tenantId)
+        : getSchemaContext();
 
     // Get current date context
     const now = new Date();
@@ -663,10 +668,9 @@ async function generateQuery(
 
     const parsed = JSON.parse(response);
 
-    const heuristicFallback = buildHeuristicDataQuery(
-      question,
-      context.userAccessFilter
-    );
+    const heuristicFallback = context.uploadOnlyMode
+      ? null
+      : buildHeuristicDataQuery(question, context.userAccessFilter);
 
     // Check if this was determined to not be a data query
     if (parsed.isDataQuery === false) {
@@ -703,10 +707,9 @@ async function generateQuery(
       chartConfig: parsed.chartConfig || {},
     };
   } catch (error: any) {
-    const heuristicFallback = buildHeuristicDataQuery(
-      question,
-      context.userAccessFilter
-    );
+    const heuristicFallback = context.uploadOnlyMode
+      ? null
+      : buildHeuristicDataQuery(question, context.userAccessFilter);
     if (heuristicFallback) {
       console.warn(
         "[CohiChat] Query generation failed for deterministic data question; using heuristic fallback query."
@@ -1634,11 +1637,13 @@ async function gatherAllContext(
 ): Promise<GatheredContext> {
   console.log(`[CohiChat] Gathering context for: "${question}"`);
 
-  const includeRag = opts?.includeRag !== false;
-  const includeTopTieringContext = isTopTieringQuestion(question);
+  const includeRag =
+    opts?.includeRag !== false && !context.uploadOnlyMode;
+  const includeTopTieringContext =
+    !context.uploadOnlyMode && isTopTieringQuestion(question);
 
   let composerQuery: GeneratedQuery | null = null;
-  if (await isMetricComposerEnabledForSurface("chat")) {
+  if (!context.uploadOnlyMode && (await isMetricComposerEnabledForSurface("chat"))) {
     try {
       const spec = await planMetricSpec(question, {
         tenantId: context.tenantId,
@@ -1686,10 +1691,9 @@ async function gatherAllContext(
       cfg.accessFilterApplied
         ? { ...context, userAccessFilter: null }
         : context;
-    const heuristicFallback = buildHeuristicDataQuery(
-      question,
-      context.userAccessFilter
-    );
+    const heuristicFallback = context.uploadOnlyMode
+      ? null
+      : buildHeuristicDataQuery(question, context.userAccessFilter);
     try {
       const result = await executeQuery(
         effectiveConfig.sql,

@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import {
   isUnifiedChatClientEnabled,
   parseGlobalFromBlocks,
+  parseWorkbenchUnifiedEnvelope,
   type UnifiedChatBlock,
 } from "@/lib/unifiedChatEnvelope";
 import { serializeWidgetCatalog } from "@/utils/widgetCatalogSerializer";
@@ -40,6 +41,8 @@ import { insightBuilderApproveClientMessageId } from "@/lib/insightBuilderApprov
 export interface SendMessageOptions {
   /** Start a new server conversation (e.g. compact shell send). */
   forceNewConversation?: boolean;
+  /** CSV dataset upload IDs (chat, workbench, research). */
+  datasetUploadIds?: string[];
   /** Research: dataset upload IDs for a new investigation only. */
   researchUploadIds?: string[];
   /** Insight builder: pass edited draft and/or approve action. */
@@ -314,20 +317,30 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    */
   const sendMessage = useCallback(
     async (question: string, options?: SendMessageOptions) => {
-      if (!question.trim() || isLoading || sendInFlightRef.current) return;
+      const datasetIds =
+        options?.datasetUploadIds && options.datasetUploadIds.length > 0
+          ? options.datasetUploadIds
+          : undefined;
+      const hasDatasetOnly = !!datasetIds && !question.trim();
+      if ((!question.trim() && !hasDatasetOnly) || isLoading || sendInFlightRef.current)
+        return;
 
       sendInFlightRef.current = true;
       const forceNew = options?.forceNewConversation ?? false;
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
       const priorLegacyRef = forceNew ? null : legacyRef;
+      const effectiveQuestion =
+        question.trim() ||
+        (datasetIds ? "Analyze the attached dataset." : "");
       const researchUploadIds =
         chatType === "research" &&
         (forceNew || (!activeSessionId && !priorLegacyRef)) &&
-        options?.researchUploadIds &&
-        options.researchUploadIds.length > 0
-          ? options.researchUploadIds
+        (options?.researchUploadIds?.length || datasetIds?.length)
+          ? [...new Set([...(options?.researchUploadIds ?? []), ...(datasetIds ?? [])])]
           : undefined;
+      const datasetUploadIdsForSend =
+        chatType === "chat" || chatType === "workbench" ? datasetIds : datasetIds;
 
       const userMessageId = generateMessageId();
       const assistantMessageId = generateMessageId();
@@ -336,11 +349,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       const userMessage: ChatMessage = {
         id: userMessageId,
         role: "user",
-        content: question.trim(),
+        content: effectiveQuestion,
         timestamp: new Date(),
       };
 
-      // Add loading assistant message
       const loadingMessage: ChatMessage = {
         id: assistantMessageId,
         role: "assistant",
@@ -389,11 +401,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
             const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
               client,
-              message: question.trim(),
+              message: effectiveQuestion,
               conversationId: activeSessionId,
               scope: { type: scopeType, id: scopeId },
               context: buildWorkbenchRequestContext(draftScopeId),
               history,
+              datasetUploadIds: datasetUploadIdsForSend,
               onStreamText: (text) => {
                 setMessages((prev) =>
                   prev.map((m) =>
@@ -446,13 +459,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 : undefined;
             const { conversationId, parsed } = await sendUnifiedGlobalStream({
               client,
-              message: question.trim(),
+              message: effectiveQuestion,
               chatType,
               conversationId: activeSessionId,
               clientMessageId: approveClientMessageId,
               history,
               deepAnalysis: researchDeepAnalysis,
               uploadIds: researchUploadIds,
+              datasetUploadIds: datasetUploadIdsForSend,
               context:
                 ibDraft && chatType === "insight_builder"
                   ? { insightBuilderDraft: ibDraft }
@@ -881,7 +895,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    * Load a specific session's messages into the chat
    */
   const loadSession = useCallback(
-    async (targetSessionId: string) => {
+    async (targetSessionId: string): Promise<{ datasetUploadIds: string[] }> => {
       setIsLoadingSession(true);
       try {
         const effectiveTenantId = await getEffectiveTenantId();
@@ -907,6 +921,20 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 };
               }
               const blocks = Array.isArray(m.blocks) ? m.blocks : [];
+              if (chatType === "workbench") {
+                const wb = parseWorkbenchUnifiedEnvelope({
+                  conversationId: targetSessionId,
+                  turn: { id: `loaded-${i}`, blocks },
+                  metadata: m.metadata,
+                });
+                return {
+                  id: `loaded-${i}`,
+                  role: "assistant" as const,
+                  content: wb.message,
+                  timestamp: new Date(m.at ?? Date.now()),
+                  workbenchActions: wb.actions,
+                };
+              }
               const parsed = parseGlobalFromBlocks(blocks, m.metadata);
               return {
                 id: `loaded-${i}`,
@@ -927,7 +955,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           setMessages(loadedMessages);
           setSessionId(targetSessionId);
           setLegacyRef(row.legacy_ref ?? null);
-          return;
+          return {
+            datasetUploadIds: row.dataset_upload_ids ?? [],
+          };
         }
         const qs = effectiveTenantId
           ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
@@ -956,13 +986,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setMessages(loadedMessages);
         setSessionId(targetSessionId);
         setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
+        return { datasetUploadIds: [] };
       } catch (error) {
         console.error("[CohiChat] Failed to load session:", error);
+        return { datasetUploadIds: [] };
       } finally {
         setIsLoadingSession(false);
       }
     },
-    [getEffectiveTenantId, tenantId],
+    [getEffectiveTenantId, tenantId, chatType],
   );
 
   /**

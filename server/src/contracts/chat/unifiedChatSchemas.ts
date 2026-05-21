@@ -109,6 +109,13 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
         maxHistoryTurns: { type: "integer", minimum: 0, maximum: 50 },
         personaHints: { type: "array", items: { type: "string" } },
         qaAgentRunTag: { type: "string" },
+        datasetUploadIds: {
+          type: "array",
+          items: { type: "string", format: "uuid" },
+          maxItems: 10,
+          description:
+            "Research upload IDs (CSV datasets) attached to this conversation turn.",
+        },
         // Deferred — restore with promptComposer + orchestrator planningMode.
         // planningMode: {
         //   type: "string",
@@ -211,6 +218,25 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
         properties: { chat_type: { const: "research" } },
         required: ["chat_type"],
       },
+    },
+    {
+      if: {
+        properties: {
+          chat_type: { const: "insight_builder" },
+          options: {
+            type: "object",
+            properties: {
+              datasetUploadIds: {
+                type: "array",
+                minItems: 1,
+              },
+            },
+            required: ["datasetUploadIds"],
+          },
+        },
+        required: ["options"],
+      },
+      then: false,
     },
   ],
   additionalProperties: false,

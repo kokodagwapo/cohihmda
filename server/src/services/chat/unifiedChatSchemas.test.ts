@@ -60,6 +60,39 @@ describe("unified chat JSON schemas", () => {
     expect(ok).toBe(false);
   });
 
+  it("accepts datasetUploadIds when chat_type is chat", () => {
+    const ok = validateUnifiedChatRequest({
+      message: "Analyze CSV",
+      chat_type: "chat",
+      options: {
+        datasetUploadIds: ["550e8400-e29b-41d4-a716-446655440001"],
+      },
+    });
+    expect(ok).toBe(true);
+  });
+
+  it("accepts datasetUploadIds when chat_type is workbench", () => {
+    const ok = validateUnifiedChatRequest({
+      message: "Build widget",
+      chat_type: "workbench",
+      options: {
+        datasetUploadIds: ["550e8400-e29b-41d4-a716-446655440001"],
+      },
+    });
+    expect(ok).toBe(true);
+  });
+
+  it("rejects datasetUploadIds when chat_type is insight_builder", () => {
+    const ok = validateUnifiedChatRequest({
+      message: "x",
+      chat_type: "insight_builder",
+      options: {
+        datasetUploadIds: ["550e8400-e29b-41d4-a716-446655440001"],
+      },
+    });
+    expect(ok).toBe(false);
+  });
+
   it("accepts valid response envelope", () => {
     const ok = validateUnifiedChatResponse({
       conversationId: "550e8400-e29b-41d4-a716-446655440000",

@@ -16,6 +16,10 @@ import {
   type UnifiedChatBlock,
   type UnifiedChatV1Response,
 } from "@/lib/unifiedChatEnvelope";
+import {
+  repairWorkbenchBlocks,
+  workbenchStreamDisplayText,
+} from "@/lib/workbench/parseWorkbenchLlmJson";
 
 export interface InsightBuilderSendDraft {
   title: string;
@@ -35,6 +39,7 @@ export interface SendUnifiedGlobalParams {
   history?: { role: "user" | "assistant"; content: string }[];
   deepAnalysis?: boolean;
   uploadIds?: string[];
+  datasetUploadIds?: string[];
   context?: Record<string, unknown>;
   insightBuilder?: { action?: "approve" | "revise" };
   onStreamText?: (text: string) => void;
@@ -90,6 +95,9 @@ export async function sendUnifiedGlobalStream(
               },
             }
           : {}),
+        ...(params.datasetUploadIds && params.datasetUploadIds.length > 0
+          ? { datasetUploadIds: params.datasetUploadIds }
+          : {}),
         ...(chatType === "insight_builder" && params.insightBuilder
           ? { insightBuilder: params.insightBuilder }
           : {}),
@@ -139,6 +147,7 @@ export interface SendUnifiedWorkbenchParams {
   scope: { type: "canvas" | "draft"; id?: string };
   context: Record<string, unknown>;
   history?: { role: "user" | "assistant"; content: string }[];
+  datasetUploadIds?: string[];
   onStreamText?: (text: string) => void;
 }
 
@@ -161,32 +170,39 @@ export async function sendUnifiedWorkbenchStream(
       scope: params.scope,
       context: params.context,
       history: params.history ?? [],
-      options: { stream: true },
+      options: {
+        stream: true,
+        ...(params.datasetUploadIds && params.datasetUploadIds.length > 0
+          ? { datasetUploadIds: params.datasetUploadIds }
+          : {}),
+      },
     },
     (ev: ChatStreamEvent) => {
       if (ev.event === "block.delta" && ev.blockIndex === 0 && ev.delta) {
         streamText += ev.delta;
-        params.onStreamText?.(streamText);
+        params.onStreamText?.(workbenchStreamDisplayText(streamText));
       }
     },
   );
 
-  const blocks: UnifiedChatBlock[] =
+  const rawBlocks: UnifiedChatBlock[] =
     result.blocks.length > 0
       ? result.blocks
       : streamText
         ? [{ type: "text", markdown: streamText }]
         : [{ type: "text", markdown: "I processed your request." }];
 
+  const { blocks, suggestedQuestions: repairedSuggestions } =
+    repairWorkbenchBlocks(rawBlocks);
+
   const parsed = parseWorkbenchUnifiedEnvelope(
-    blocksToEnvelope(result.conversationId, blocks, result.metadata),
+    blocksToEnvelope(result.conversationId, blocks, {
+      ...result.metadata,
+      ...(repairedSuggestions?.length
+        ? { suggestedQuestions: repairedSuggestions }
+        : {}),
+    }),
   );
-  if (
-    parsed.message === "I processed your request." &&
-    streamText.trim()
-  ) {
-    parsed.message = streamText.trim();
-  }
 
   return { conversationId: result.conversationId, parsed };
 }

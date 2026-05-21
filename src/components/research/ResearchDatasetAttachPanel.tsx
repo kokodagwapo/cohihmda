@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { UploadDropZone } from "@/components/research/UploadDropZone";
 import { useResearchUploads } from "@/hooks/useResearchUploads";
 
-export interface ResearchDatasetAttachPanelProps {
+export interface DatasetAttachPanelProps {
   tenantId?: string;
   attachedUploadIds: string[];
   onAttachedUploadIdsChange: (ids: string[]) => void;
@@ -16,13 +16,14 @@ export interface ResearchDatasetAttachPanelProps {
   className?: string;
 }
 
-export function ResearchDatasetAttachPanel({
+/** Shared CSV attach UI for chat, workbench, and research modes. */
+export function DatasetAttachPanel({
   tenantId,
   attachedUploadIds,
   onAttachedUploadIdsChange,
   disabled = false,
   className,
-}: ResearchDatasetAttachPanelProps) {
+}: DatasetAttachPanelProps) {
   const {
     uploads: availableUploads,
     listUploads: listAvailableUploads,
@@ -152,3 +153,8 @@ export function ResearchDatasetAttachPanel({
     </div>
   );
 }
+
+/** @deprecated Use DatasetAttachPanel */
+export type ResearchDatasetAttachPanelProps = DatasetAttachPanelProps;
+/** @deprecated Use DatasetAttachPanel */
+export const ResearchDatasetAttachPanel = DatasetAttachPanel;

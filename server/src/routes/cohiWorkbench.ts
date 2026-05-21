@@ -1410,12 +1410,16 @@ export async function runWorkbenchChatTurn(
       canvasState,
       widgetCatalog,
       conversationHistory,
+      uploadSchemaContext,
+      datasetUploadIds,
     } = rawBody as {
       question: string;
       canvasState?: CanvasStateSnapshot;
       widgetCatalog?: string;
       conversationHistory?: { role: string; content: string }[];
       tenantId?: string;
+      uploadSchemaContext?: string;
+      datasetUploadIds?: string[];
     };
 
       if (!question || typeof question !== "string") {
@@ -1427,15 +1431,20 @@ export async function runWorkbenchChatTurn(
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
       const apiKey = await getOpenAIKey(tenantId);
 
-      // Build schema context
-      const schemaContext = tenantId
-        ? await getSchemaForTenant(tenantId)
-        : getFallbackSchemaContext();
+      const hasUploadContext =
+        !!uploadSchemaContext?.trim() &&
+        Array.isArray(datasetUploadIds) &&
+        datasetUploadIds.length > 0;
 
-      // Inject verified metrics SQL so Cohi uses the same formulas as insights
+      const schemaContext = hasUploadContext
+        ? uploadSchemaContext!
+        : tenantId
+          ? await getSchemaForTenant(tenantId)
+          : getFallbackSchemaContext();
+
       let verifiedMetricsBlock = "";
-      let dataMaxDate = ""; // latest date in the tenant's data
-      if (tenantId) {
+      let dataMaxDate = "";
+      if (tenantId && !hasUploadContext) {
         try {
           const tenantPool = await tenantDbManager.getTenantPool(tenantId);
           const revenueExpr = await getTenantRevenueExpression(tenantPool);
@@ -1521,7 +1530,10 @@ export async function runWorkbenchChatTurn(
         }
       }
 
-      // Build full system prompt
+      if (hasUploadContext) {
+        personaSupplement += `\n\n## CSV dataset mode (CRITICAL)\nThe user attached CSV data. Use create_widget with SQL that queries ONLY the upload_* tables listed in the schema context. Do not use the loans table unless the user explicitly asks to compare with portfolio data.`;
+      }
+
       const now = new Date();
       const dataMaxYear = dataMaxDate.split("-")[0];
       const systemPrompt = WORKBENCH_SYSTEM_PROMPT.replace(
@@ -1579,11 +1591,12 @@ export async function runWorkbenchChatTurn(
         jsonMode: true,
       });
 
-      // Parse response
-      let parsed: any;
-      try {
-        parsed = JSON.parse(rawResponse);
-      } catch {
+      // Parse response (handles fences, duplicated JSON objects, etc.)
+      const { parseWorkbenchLlmJson } = await import(
+        "../utils/parseWorkbenchLlmJson.js"
+      );
+      let parsed: any = parseWorkbenchLlmJson(rawResponse);
+      if (!parsed) {
         console.warn(
           "[CohiWorkbench] Failed to parse JSON response, treating as text",
         );

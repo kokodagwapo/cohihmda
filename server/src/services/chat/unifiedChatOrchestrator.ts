@@ -29,6 +29,11 @@ import { createVisualizationArtifactId } from "./artifactService.js";
 import { runInsightBuilderTurn, type InsightBuilderDraft } from "./insightBuilderTurn.js";
 import { runUnifiedResearchTurn } from "./unifiedResearchChat.js";
 import { findUnifiedConversationByLegacyRef } from "./unifiedConversationService.js";
+import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
+import {
+  mergeDatasetUploadIds,
+  resolveUploadSchemaContext,
+} from "../research/uploadConversationService.js";
 
 export type UnifiedChatType = UnifiedConversationChatType;
 
@@ -77,6 +82,7 @@ export interface UnifiedChatRequestBody {
     qaAgentRunTag?: string;
     // Deferred until unified chat merge is complete — restore with promptComposer + OpenAPI + schemas.
     // planningMode?: "auto" | "always" | "never";
+    datasetUploadIds?: string[];
     research?: { deepAnalysis?: boolean; uploadIds?: string[] };
     insightBuilder?: { action?: "approve" | "revise" };
   };
@@ -100,6 +106,24 @@ function buildChatContext(req: AuthRequest): ChatContext {
     tenantId,
     userRole: req.userRole || "user",
     userEmail: req.userEmail,
+  };
+}
+
+async function buildChatContextWithUploads(
+  req: AuthRequest,
+  body: UnifiedChatRequestBody,
+): Promise<ChatContext> {
+  const base = buildChatContext(req);
+  const uploadIds = mergeDatasetUploadIds(body);
+  if (uploadIds.length === 0) return base;
+  const tenantPool = await tenantDbManager.getTenantPool(base.tenantId);
+  const resolved = await resolveUploadSchemaContext(uploadIds, tenantPool);
+  if (!resolved.instructionBlock) return base;
+  return {
+    ...base,
+    uploadOnlyMode: true,
+    uploadSchemaContext: resolved.instructionBlock,
+    datasetUploadIds: uploadIds,
   };
 }
 
@@ -182,6 +206,16 @@ async function executeWorkbenchBranch(
   policy: PolicyDecision,
   bundle: ReturnType<typeof composePromptBundle>,
 ): Promise<{ blocks: UnifiedBlock[]; metadata: Record<string, unknown> }> {
+  const uploadIds = mergeDatasetUploadIds(body);
+  let uploadSchemaContext: string | undefined;
+  if (uploadIds.length > 0) {
+    const tenantId = req.tenantContext?.tenantId || req.tenantId;
+    if (tenantId) {
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const resolved = await resolveUploadSchemaContext(uploadIds, tenantPool);
+      uploadSchemaContext = resolved.instructionBlock || undefined;
+    }
+  }
   const wbBody = {
     question: body.message,
     canvasState: body.context?.canvasState,
@@ -190,6 +224,8 @@ async function executeWorkbenchBranch(
       role: h.role,
       content: h.content,
     })),
+    datasetUploadIds: uploadIds.length > 0 ? uploadIds : undefined,
+    uploadSchemaContext,
   };
   const chatContext = buildChatContext(req);
   const raw = await runSqlThroughRouter(
@@ -226,7 +262,7 @@ async function executeGlobalChatBranch(
   policy: PolicyDecision,
   bundle: ReturnType<typeof composePromptBundle>,
 ): Promise<{ blocks: UnifiedBlock[]; metadata: Record<string, unknown> }> {
-  const chatContext = buildChatContext(req);
+  const chatContext = await buildChatContextWithUploads(req, body);
   const maxH = body.options?.maxHistoryTurns ?? 12;
   const convHistory = mapHistoryToCohiMessages(body.history, maxH);
 
@@ -337,7 +373,7 @@ export async function processUnifiedChatMessage(
       conversationId,
       legacyRef,
       deepAnalysis: body.options?.research?.deepAnalysis,
-      uploadIds: body.options?.research?.uploadIds,
+      uploadIds: mergeDatasetUploadIds(body),
       policy,
     });
     blocks = research.blocks;

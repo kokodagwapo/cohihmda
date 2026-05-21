@@ -7,6 +7,7 @@
 
 import { api } from "@/lib/api";
 import type { WidgetAction } from "@/types/widgetActions";
+import { repairWorkbenchBlocks } from "@/lib/workbench/parseWorkbenchLlmJson";
 
 const FORCE_UNIFIED_KEY = "cohi_force_unified_chat";
 /** Playwright / manual: force legacy `/api/cohi-chat/*` session + ask paths while VITE_UNIFIED_CHAT is true */
@@ -310,7 +311,8 @@ export interface ParsedWorkbenchUnifiedFields {
 export function parseWorkbenchUnifiedEnvelope(
   env: UnifiedChatV1Response,
 ): ParsedWorkbenchUnifiedFields {
-  const blocks = env.turn.blocks;
+  const repaired = repairWorkbenchBlocks(env.turn.blocks);
+  const blocks = repaired.blocks;
   let message = "";
   let actions: WidgetAction[] | undefined;
   let teachingNotes: string | undefined;
@@ -332,7 +334,9 @@ export function parseWorkbenchUnifiedEnvelope(
     message: message.trim() || "I processed your request.",
     actions,
     teachingNotes,
-    suggestedQuestions: meta.suggestedQuestions as string[] | undefined,
+    suggestedQuestions:
+      repaired.suggestedQuestions ??
+      (meta.suggestedQuestions as string[] | undefined),
     error,
   };
 }

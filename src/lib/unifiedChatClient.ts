@@ -68,6 +68,7 @@ export interface UnifiedChatMessageRequest {
     includeRag?: boolean;
     includeLiveCanvasData?: boolean;
     maxHistoryTurns?: number;
+    datasetUploadIds?: string[];
     research?: { deepAnalysis?: boolean; uploadIds?: string[] };
     insightBuilder?: { action?: "approve" | "revise" };
   };
@@ -206,9 +207,43 @@ export class UnifiedChatClient {
     chat_type: UnifiedChatType;
     messages: unknown[];
     legacy_ref?: string | null;
+    dataset_upload_ids?: string[];
+    datasets?: {
+      id: string;
+      originalFileName: string;
+      rowCount: number;
+      columnCount: number;
+      tableName?: string;
+    }[];
   }> {
     const path = withTenant(`/api/chat/v1/conversations/${id}`, await this.tid());
     return api.request(path);
+  }
+
+  async linkConversationDatasets(
+    conversationId: string,
+    uploadIds: string[],
+    chatType: UnifiedChatType,
+  ): Promise<{ dataset_upload_ids: string[] }> {
+    const path = withTenant(
+      `/api/chat/v1/conversations/${conversationId}/datasets`,
+      await this.tid(),
+    );
+    return api.request(path, {
+      method: "POST",
+      body: JSON.stringify({ uploadIds, chat_type: chatType }),
+    });
+  }
+
+  async unlinkConversationDataset(
+    conversationId: string,
+    uploadId: string,
+  ): Promise<void> {
+    const path = withTenant(
+      `/api/chat/v1/conversations/${conversationId}/datasets/${uploadId}`,
+      await this.tid(),
+    );
+    await api.request(path, { method: "DELETE" });
   }
 
   async openSharedResearch(researchSessionId: string): Promise<{

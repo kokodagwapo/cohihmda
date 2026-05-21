@@ -48,6 +48,14 @@ import {
 import { emitValidatedStreamWithDeltas } from "../services/chat/unifiedChatStream.js";
 import { runUnifiedResearchStream } from "../services/chat/unifiedResearchStream.js";
 import { runUnifiedInsightBuilderStream } from "../services/chat/unifiedChatInsightBuilderStream.js";
+import {
+  linkUploadsToConversation,
+  unlinkUploadFromConversation,
+  getUploadMetaForConversation,
+  mergeDatasetUploadIds,
+  type UploadConversationChatType,
+} from "../services/research/uploadConversationService.js";
+import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { randomUUID } from "crypto";
 import { findUnifiedConversationByLegacyRef } from "../services/chat/unifiedConversationService.js";
 
@@ -58,6 +66,28 @@ const UUID_RE =
 
 function isUuid(s: string): boolean {
   return UUID_RE.test(s);
+}
+
+async function persistDatasetUploadLinks(
+  req: AuthRequest,
+  conversationId: string,
+  body: UnifiedChatRequestBody,
+  chatType: UploadConversationChatType,
+): Promise<void> {
+  const uploadIds = mergeDatasetUploadIds(body);
+  if (uploadIds.length === 0) return;
+  const tenantId = req.tenantContext?.tenantId || req.tenantId;
+  const userId = req.userId;
+  if (!tenantId || !userId) return;
+  const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+  await linkUploadsToConversation({
+    tenantPool,
+    tenantId,
+    userId,
+    conversationId,
+    chatType,
+    uploadIds,
+  });
 }
 
 function unifiedChatGuard(_req: AuthRequest, res: Response, next: () => void) {
@@ -399,6 +429,8 @@ router.get(
       if (!row) {
         return res.status(404).json({ error: "not_found", message: "Conversation not found" });
       }
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const datasets = await getUploadMetaForConversation(tenantPool, id);
       res.json({
         id: row.id,
         title: row.title,
@@ -410,6 +442,8 @@ router.get(
         messages: row.messages,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        dataset_upload_ids: datasets.map((d) => d.id),
+        datasets,
       });
     } catch (err: any) {
       console.error("[chat/v1/conversations/:id GET] Error:", err);
@@ -453,6 +487,95 @@ router.delete(
         error: "internal_error",
         message: err.message || "Failed to delete conversation",
       });
+    }
+  },
+);
+
+router.post(
+  "/conversations/:id/datasets",
+  unifiedChatGuard,
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const idParam = req.params.id;
+      const id = Array.isArray(idParam) ? idParam[0] : idParam;
+      if (!id || !isUuid(id)) {
+        return res.status(400).json({ error: "validation_error", message: "Invalid conversation id" });
+      }
+      const { uploadIds, chat_type: chatTypeBody } = req.body as {
+        uploadIds?: string[];
+        chat_type?: UploadConversationChatType;
+      };
+      if (!Array.isArray(uploadIds) || uploadIds.length === 0) {
+        return res.status(400).json({ error: "uploadIds array is required" });
+      }
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (!tenantId || !userId) {
+        return res.status(400).json({ error: "bad_request", message: "Tenant and user context required" });
+      }
+      const row = await getUnifiedConversation({ tenantId, userId, conversationId: id });
+      if (!row) {
+        return res.status(404).json({ error: "not_found", message: "Conversation not found" });
+      }
+      const chatType = (chatTypeBody ?? row.chat_type ?? "chat") as UploadConversationChatType;
+      if (chatType === "insight_builder") {
+        return res.status(400).json({ error: "CSV uploads are not supported in insight builder mode" });
+      }
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      await linkUploadsToConversation({
+        tenantPool,
+        tenantId,
+        userId,
+        conversationId: id,
+        chatType,
+        uploadIds,
+      });
+      const datasets = await getUploadMetaForConversation(tenantPool, id);
+      res.json({ dataset_upload_ids: datasets.map((d) => d.id), datasets });
+    } catch (err: any) {
+      console.error("[chat/v1/conversations/:id/datasets POST] Error:", err);
+      res.status(500).json({ error: "internal_error", message: err.message || "Failed to link datasets" });
+    }
+  },
+);
+
+router.delete(
+  "/conversations/:id/datasets/:uploadId",
+  unifiedChatGuard,
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const idParam = req.params.id;
+      const conversationId = Array.isArray(idParam) ? idParam[0] : idParam;
+      const uploadParam = req.params.uploadId;
+      const uploadId = Array.isArray(uploadParam) ? uploadParam[0] : uploadParam;
+      if (!conversationId || !isUuid(conversationId) || !uploadId || !isUuid(uploadId)) {
+        return res.status(400).json({ error: "validation_error", message: "Invalid id" });
+      }
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (!tenantId || !userId) {
+        return res.status(400).json({ error: "bad_request", message: "Tenant and user context required" });
+      }
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const removed = await unlinkUploadFromConversation({
+        tenantPool,
+        conversationId,
+        uploadId,
+        userId,
+      });
+      if (!removed) {
+        return res.status(404).json({ error: "not_found", message: "Link not found" });
+      }
+      res.status(204).send();
+    } catch (err: any) {
+      console.error("[chat/v1/conversations/:id/datasets DELETE] Error:", err);
+      res.status(500).json({ error: "internal_error", message: err.message || "Failed to unlink dataset" });
     }
   },
 );
@@ -864,7 +987,7 @@ async function handleResearchStream(
       message: body.message,
       legacyRef,
       deepAnalysis: body.options?.research?.deepAnalysis,
-      uploadIds: body.options?.research?.uploadIds,
+      uploadIds: mergeDatasetUploadIds(body),
       policy,
     });
   } catch (err: any) {
@@ -905,6 +1028,7 @@ async function handleResearchStream(
         legacyRef,
         legacySource: "research_lab",
       });
+      await persistDatasetUploadLinks(req, conversationId, body, "research");
     } catch (persistErr: any) {
       console.warn("[chat/v1 research stream] Persist skipped:", persistErr?.message);
     }
@@ -981,6 +1105,7 @@ async function handlePostMessage(
         policy,
         includeRag: body.options?.includeRag,
         streamMetadata: { chatType: policy.chatType },
+        requestBody: body,
       });
       res.end();
       if (process.env.UNIFIED_CHAT_PERSIST !== "false") {
@@ -999,6 +1124,7 @@ async function handlePostMessage(
                 : body.scope?.id ?? null,
             chatType: policy.chatType,
           });
+          await persistDatasetUploadLinks(req, conversationId, body, policy.chatType);
         } catch (persistErr: any) {
           console.warn("[chat/v1 global stream] Persist skipped:", persistErr?.message);
         }
@@ -1041,6 +1167,7 @@ async function handlePostMessage(
           legacyRef: result.legacyRef ?? null,
           legacySource: result.legacySource ?? null,
         });
+        await persistDatasetUploadLinks(req, result.conversationId, body, chatType);
       } catch (persistErr: any) {
         console.warn("[chat/v1] Persist skipped:", persistErr?.message);
       }

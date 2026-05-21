@@ -35,13 +35,11 @@ import {
   BarChart3,
   PieChart,
   Activity,
-  Paperclip,
+  FileSpreadsheet,
+  Image,
   Expand,
   Shrink,
   MoreHorizontal,
-  FileSpreadsheet,
-  Image,
-  File,
   Share2,
   Download,
   Presentation,
@@ -75,7 +73,10 @@ import { UnifiedChatRebindBanner } from "@/components/cohi/UnifiedChatRebindBann
 import { useUnifiedChatPermissions } from "@/hooks/useUnifiedChatPermissions";
 import { InsightBuilderPreviewCard } from "@/components/cohi/InsightBuilderPreviewCard";
 import { UnifiedChatResearchWorkspace } from "@/components/cohi/UnifiedChatResearchWorkspace";
-import { ResearchDatasetAttachPanel } from "@/components/research/ResearchDatasetAttachPanel";
+import { DatasetAttachPanel } from "@/components/research/ResearchDatasetAttachPanel";
+import { ChatFilesBar } from "@/components/cohi/ChatFilesBar";
+import { useResearchUploads } from "@/hooks/useResearchUploads";
+import { createUnifiedChatClient } from "@/lib/unifiedChatClient";
 import {
   isUnifiedChatClientEnabled,
   workbenchArtifactHandoffPath,
@@ -438,11 +439,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const [voiceProvider, setVoiceProvider] = useState<"openai" | "gemini">(
     "gemini"
   );
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [researchAttachedUploadIds, setResearchAttachedUploadIds] = useState<
-    string[]
-  >([]);
+  const [attachedUploadIds, setAttachedUploadIds] = useState<string[]>([]);
   const [researchViewOnly, setResearchViewOnly] = useState(false);
   const [vizTypeOverrides, setVizTypeOverrides] = useState<
     Record<string, VisualizationConfig["type"]>
@@ -483,7 +480,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     el.style.overflowY =
       el.scrollHeight > CHAT_INPUT_MAX_HEIGHT_PX ? "auto" : "hidden";
   }, []);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -518,7 +514,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     legacyRef,
     suggestedQuestions,
     sendMessage,
-    addConversationTurn,
     clearMessages,
     newSession,
     chatSessions,
@@ -532,6 +527,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
   const startNewChatSession = useCallback(async () => {
     setResearchViewOnly(false);
+    setAttachedUploadIds([]);
     await newSession();
   }, [newSession]);
 
@@ -541,6 +537,50 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     unifiedSession?.researchDeepAnalysis ?? researchDeepAnalysis;
   const setActiveResearchDeepAnalysis =
     unifiedSession?.setResearchDeepAnalysis ?? setResearchDeepAnalysis;
+
+  const { uploads: availableUploads, listUploads: listAvailableUploads } =
+    useResearchUploads(tenantId);
+
+  const showDatasetAttach =
+    isUnifiedChatClientEnabled() &&
+    activeChatType !== "insight_builder";
+
+  const linkUploadsToCurrentConversation = useCallback(
+    async (uploadIds: string[]) => {
+      if (!currentSessionId || uploadIds.length === 0 || !isUnifiedChatClientEnabled())
+        return;
+      try {
+        const client = createUnifiedChatClient(tenantId);
+        await client.linkConversationDatasets(
+          currentSessionId,
+          uploadIds,
+          activeChatType,
+        );
+      } catch (err) {
+        console.warn("[CohiChat] Failed to link datasets to conversation:", err);
+      }
+    },
+    [currentSessionId, tenantId, activeChatType],
+  );
+
+  const handleDetachUpload = useCallback(
+    async (uploadId: string) => {
+      setAttachedUploadIds((prev) => prev.filter((id) => id !== uploadId));
+      if (currentSessionId && isUnifiedChatClientEnabled()) {
+        try {
+          const client = createUnifiedChatClient(tenantId);
+          await client.unlinkConversationDataset(currentSessionId, uploadId);
+        } catch (err) {
+          console.warn("[CohiChat] Failed to unlink dataset:", err);
+        }
+      }
+    },
+    [currentSessionId, tenantId],
+  );
+
+  useEffect(() => {
+    if (showDatasetAttach) void listAvailableUploads();
+  }, [showDatasetAttach, listAvailableUploads]);
 
   /** Only the latest assistant draft preview may be edited; older drafts stay read-only. */
   const lastInsightBuilderDraftIdx = useMemo(() => {
@@ -616,23 +656,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       docEl.removeAttribute("data-cohi-chat-open");
     };
   }, [isOpen, isFullscreen, isMobile, layout]);
-
-  useEffect(() => {
-    const onResume = (e: Event) => {
-      const detail = (e as CustomEvent<{
-        conversationId: string;
-        chatType: import("@/lib/unifiedChatClient").UnifiedChatType;
-      }>).detail;
-      if (!detail?.conversationId) return;
-      if (layout === "shell") {
-        setShellExpandMode("full");
-      }
-      setActiveChatType(detail.chatType ?? "chat");
-      void loadSession(detail.conversationId);
-    };
-    window.addEventListener("cohi-chat-resume", onResume);
-    return () => window.removeEventListener("cohi-chat-resume", onResume);
-  }, [loadSession, setActiveChatType, layout, setShellExpandMode]);
 
   const [showHistory, setShowHistory] = useState(false);
   const [preferredExportFormat, setPreferredExportFormat] =
@@ -966,12 +989,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     const isResearchMode =
       isUnifiedChatClientEnabled() && activeChatType === "research";
     if (isResearchMode && researchViewOnly) return;
-    const hasResearchAttach =
-      isResearchMode && researchAttachedUploadIds.length > 0;
-    if (
-      (!input.trim() && !uploadedFile && !hasResearchAttach) ||
-      isLoading
-    ) {
+    const hasDatasetAttach = attachedUploadIds.length > 0;
+    if ((!input.trim() && !hasDatasetAttach) || isLoading) {
       return;
     }
 
@@ -981,136 +1000,65 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       setResearchViewOnly(false);
     }
 
-    if (!uploadedFile || isResearchMode) {
-      navigateWorkbenchOnSubmit(forceNewConversation);
+    navigateWorkbenchOnSubmit(forceNewConversation);
+
+    const idsForSend = [...attachedUploadIds];
+    const researchIdsForNewSession =
+      isResearchMode &&
+      idsForSend.length > 0 &&
+      (forceNewConversation || (!currentSessionId && !legacyRef))
+        ? idsForSend
+        : undefined;
+
+    await sendMessage(input.trim() || "Analyze the attached dataset.", {
+      forceNewConversation,
+      datasetUploadIds: idsForSend.length > 0 ? idsForSend : undefined,
+      researchUploadIds: researchIdsForNewSession,
+    });
+
+    if (researchIdsForNewSession) {
+      setAttachedUploadIds([]);
     }
 
-    if (uploadedFile && !isResearchMode) {
-      if (forceNewConversation) {
-        await newSession();
-      }
-      setIsUploading(true);
-      try {
-        const formData = new FormData();
-        formData.append("file", uploadedFile);
-        formData.append(
-          "question",
-          input.trim() || `Analyze this ${uploadedFile.name}`
-        );
-
-        const response = await fetch("/api/cohi-chat/analyze-file", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to analyze file");
-        }
-
-        const result = await response.json();
-        const analysisText =
-          result.analysis || result.summary || "File processed successfully.";
-        const userPrompt = input.trim() || `Analyze this ${uploadedFile.name}`;
-        if (result.visualization) {
-          addConversationTurn(
-            `[File: ${uploadedFile.name}] ${userPrompt}`,
-            analysisText,
-            result.visualization,
-            [
-              "Show as pie chart",
-              "Compare with another file",
-              "Export this data",
-            ]
-          );
-        } else {
-          addConversationTurn(
-            `[File: ${uploadedFile.name}] ${userPrompt}`,
-            analysisText
-          );
-        }
-        setUploadedFile(null);
-        setInput("");
-      } catch (error: any) {
-        toast({
-          title: "Upload Error",
-          description: error.message || "Failed to analyze file",
-          variant: "destructive",
-        });
-      } finally {
-        setIsUploading(false);
-      }
-    } else {
-      const uploadIdsForSend =
-        isResearchMode &&
-        researchAttachedUploadIds.length > 0 &&
-        (forceNewConversation || (!currentSessionId && !legacyRef))
-          ? researchAttachedUploadIds
-          : undefined;
-      sendMessage(input.trim() || "Analyze the attached dataset.", {
-        forceNewConversation,
-        researchUploadIds: uploadIdsForSend,
-      });
-      if (uploadIdsForSend) {
-        setResearchAttachedUploadIds([]);
-      }
-      setInput("");
-    }
+    setInput("");
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const allowedTypes = [
-        "text/csv",
-        "application/pdf",
-        "image/png",
-        "image/jpeg",
-        "image/gif",
-        "image/webp",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/vnd.ms-powerpoint",
-      ];
-
-      const maxSize = 10 * 1024 * 1024;
-
-      if (!allowedTypes.includes(file.type) && !file.name.endsWith(".csv")) {
-        toast({
-          title: "Invalid file type",
-          description:
-            "Please upload CSV, PDF, Excel, PowerPoint, or image files.",
-          variant: "destructive",
-        });
-        return;
+  const handleAttachedUploadIdsChange = useCallback(
+    (ids: string[]) => {
+      setAttachedUploadIds(ids);
+      const added = ids.filter((id) => !attachedUploadIds.includes(id));
+      if (added.length > 0 && currentSessionId) {
+        void linkUploadsToCurrentConversation(added);
       }
+    },
+    [attachedUploadIds, currentSessionId, linkUploadsToCurrentConversation],
+  );
 
-      if (file.size > maxSize) {
-        toast({
-          title: "File too large",
-          description: "Maximum file size is 10MB.",
-          variant: "destructive",
-        });
-        return;
+  const handleLoadSession = useCallback(
+    async (sessionId: string) => {
+      const result = await loadSession(sessionId);
+      setAttachedUploadIds(result.datasetUploadIds);
+      void listAvailableUploads();
+    },
+    [loadSession, listAvailableUploads],
+  );
+
+  useEffect(() => {
+    const onResume = (e: Event) => {
+      const detail = (e as CustomEvent<{
+        conversationId: string;
+        chatType: import("@/lib/unifiedChatClient").UnifiedChatType;
+      }>).detail;
+      if (!detail?.conversationId) return;
+      if (layout === "shell") {
+        setShellExpandMode("full");
       }
-
-      setUploadedFile(file);
-      toast({
-        title: "File attached",
-        description: `${file.name} ready to analyze. Add a question and send.`,
-      });
-    }
-  };
-
-  const getFileIcon = (filename: string) => {
-    const ext = filename.split(".").pop()?.toLowerCase();
-    if (ext === "csv" || ext === "xlsx" || ext === "xls")
-      return <FileSpreadsheet className="w-4 h-4" />;
-    if (ext === "pdf") return <FileText className="w-4 h-4" />;
-    if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext || ""))
-      return <Image className="w-4 h-4" />;
-    return <File className="w-4 h-4" />;
-  };
+      setActiveChatType(detail.chatType ?? "chat");
+      void handleLoadSession(detail.conversationId);
+    };
+    window.addEventListener("cohi-chat-resume", onResume);
+    return () => window.removeEventListener("cohi-chat-resume", onResume);
+  }, [handleLoadSession, setActiveChatType, layout, setShellExpandMode]);
 
   /**
    * Handle key press (Enter to send)
@@ -1227,21 +1175,16 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const handleChatTypeChange = useCallback(
     (next: UnifiedChatType) => {
       setExpandedPromptCard(next);
+      if (next === "insight_builder") {
+        setAttachedUploadIds([]);
+      }
       if (next !== "research") {
-        setResearchAttachedUploadIds([]);
-        setUploadedFile(null);
         setResearchViewOnly(false);
       }
       setActiveChatType(next);
     },
     [setActiveChatType],
   );
-
-  useEffect(() => {
-    if (activeChatType !== "research") {
-      setResearchAttachedUploadIds([]);
-    }
-  }, [activeChatType]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -2154,22 +2097,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             : "border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/50 dark:bg-slate-900/50",
       )}
     >
-      {uploadedFile && (
-        <div className="flex items-center gap-2 mb-3 p-2.5 bg-blue-50/80 dark:bg-blue-900/25 rounded-xl text-sm border border-blue-200/50 dark:border-blue-800/50">
-          {getFileIcon(uploadedFile.name)}
-          <span className="flex-1 truncate text-blue-700 dark:text-blue-300 font-medium">
-            {uploadedFile.name}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 rounded-lg"
-            onClick={() => setUploadedFile(null)}
-          >
-            <X className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-      )}
       {isUnifiedChatClientEnabled() && (
         <UnifiedChatRebindBanner
           tenantId={tenantId}
@@ -2198,27 +2125,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Mic className="w-4 h-4" />
           )}
         </Button>
-        {!(isUnifiedChatClientEnabled() && activeChatType === "research") && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.pptx,.ppt"
-              onChange={handleFileSelect}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || isUploading}
-              className="shrink-0"
-              title="Upload file (CSV, PDF, Excel, PowerPoint, Image)"
-            >
-              <Paperclip className="w-4 h-4" />
-            </Button>
-          </>
-        )}
         <Textarea
           ref={inputRef}
           value={input}
@@ -2229,13 +2135,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           }}
           onKeyDown={handleInputKeyDown}
           placeholder={
-            uploadedFile
-              ? "Ask about this file..."
+            attachedUploadIds.length > 0
+              ? "Ask about this dataset..."
               : "What important info do I need to know today?"
           }
           disabled={
             isLoading ||
-            isUploading ||
             (isUnifiedChatClientEnabled() &&
               activeChatType === "research" &&
               researchViewOnly)
@@ -2249,9 +2154,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         <Button
           onClick={handleSend}
           disabled={
-            (!input.trim() && !uploadedFile) ||
+            (!input.trim() && attachedUploadIds.length === 0) ||
             isLoading ||
-            isUploading ||
             (isUnifiedChatClientEnabled() &&
               activeChatType === "research" &&
               researchViewOnly)
@@ -2259,30 +2163,30 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           size="icon"
           className="rounded-xl bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/25"
         >
-          {isLoading || isUploading ? (
+          {isLoading ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
             <Send className="w-4 h-4" />
           )}
         </Button>
       </div>
+      {showDatasetAttach && !researchViewOnly && (
+        <DatasetAttachPanel
+          className="mt-2.5"
+          tenantId={tenantId}
+          attachedUploadIds={attachedUploadIds}
+          onAttachedUploadIdsChange={handleAttachedUploadIdsChange}
+          disabled={isLoading}
+        />
+      )}
       {isUnifiedChatClientEnabled() &&
         activeChatType === "research" &&
         !researchViewOnly && (
-          <>
-            <ResearchDatasetAttachPanel
-              className="mt-2.5"
-              tenantId={tenantId}
-              attachedUploadIds={researchAttachedUploadIds}
-              onAttachedUploadIdsChange={setResearchAttachedUploadIds}
-              disabled={isLoading}
-            />
-            <ResearchDeepAnalysisToggle
-              className="mt-2.5"
-              checked={activeResearchDeepAnalysis}
-              onCheckedChange={setActiveResearchDeepAnalysis}
-            />
-          </>
+          <ResearchDeepAnalysisToggle
+            className="mt-2.5"
+            checked={activeResearchDeepAnalysis}
+            onCheckedChange={setActiveResearchDeepAnalysis}
+          />
         )}
     </motion.div>
   );
@@ -2475,6 +2379,15 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           </div>
         </div>
 
+        {showDatasetAttach && (
+          <ChatFilesBar
+            uploads={availableUploads}
+            attachedUploadIds={attachedUploadIds}
+            onDetach={handleDetachUpload}
+            disabled={isLoading}
+          />
+        )}
+
         {!hideInPanelHistory && (
         <ChatHistorySidebar
           isOpen={showHistory}
@@ -2484,7 +2397,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           isLoading={isLoadingSessions}
           isLoadingSession={isLoadingSession}
           onFetchSessions={fetchSessions}
-          onLoadSession={loadSession}
+          onLoadSession={handleLoadSession}
           onDeleteSession={deleteSession}
           onRenameSession={renameSession}
           onNewSession={startNewChatSession}

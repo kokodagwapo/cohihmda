@@ -10,6 +10,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { api } from "@/lib/api";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantStore } from "@/stores/tenantStore";
@@ -20,7 +21,6 @@ import { UploadPreviewTable } from "@/components/research/UploadPreviewTable";
 import { ColumnSchemaEditor } from "@/components/research/ColumnSchemaEditor";
 import { QuickInsightsGrid } from "@/components/research/QuickInsightsGrid";
 import { DatasetAttachmentBadge } from "@/components/research/DatasetAttachmentBadge";
-import { api } from "@/lib/api";
 import {
   Database,
   Trash2,
@@ -39,6 +39,7 @@ import {
   SlidersHorizontal,
   Table2,
   BarChart2,
+  MessagesSquare,
   X,
   Check,
 } from "lucide-react";
@@ -152,7 +153,14 @@ function StatsBar({ upload }: { upload: ResearchUpload }) {
 // Main Page
 // ============================================================================
 
-type ActiveTab = "preview" | "schema" | "insights";
+type ActiveTab = "preview" | "schema" | "insights" | "chats";
+
+interface LinkedConversation {
+  conversationId: string;
+  title: string;
+  chatType: string;
+  updatedAt: string;
+}
 
 export default function DataExplorer() {
   const { user } = useAuth();
@@ -180,6 +188,8 @@ export default function DataExplorer() {
   const [searchFilter, setSearchFilter] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [launchSuccess, setLaunchSuccess] = useState(false);
+  const [linkedConversations, setLinkedConversations] = useState<LinkedConversation[]>([]);
+  const [isLoadingChats, setIsLoadingChats] = useState(false);
 
   useEffect(() => {
     listUploads();
@@ -232,6 +242,48 @@ export default function DataExplorer() {
       setError(err.message);
     }
   }, [tenantId, navigate, setError]);
+
+  const fetchLinkedConversations = useCallback(
+    async (uploadId: string) => {
+      setIsLoadingChats(true);
+      try {
+        const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
+        const res = await api.fetchWithAuth(
+          `/api/research/uploads/${uploadId}/conversations${tenantParam}`,
+        );
+        if (!res.ok) throw new Error("Failed to load linked chats");
+        const data = (await res.json()) as { conversations: LinkedConversation[] };
+        setLinkedConversations(data.conversations ?? []);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to load chats");
+        setLinkedConversations([]);
+      } finally {
+        setIsLoadingChats(false);
+      }
+    },
+    [tenantId, setError],
+  );
+
+  useEffect(() => {
+    if (activeTab === "chats" && activeUpload?.id) {
+      void fetchLinkedConversations(activeUpload.id);
+    }
+  }, [activeTab, activeUpload?.id, fetchLinkedConversations]);
+
+  const openLinkedChat = useCallback(
+    (conv: LinkedConversation) => {
+      window.dispatchEvent(
+        new CustomEvent("cohi-chat-resume", {
+          detail: {
+            conversationId: conv.conversationId,
+            chatType: conv.chatType,
+          },
+        }),
+      );
+      navigate("/");
+    },
+    [navigate],
+  );
 
   const handleQuickAnalysis = useCallback(async (upload: ResearchUpload) => {
     try {
@@ -425,6 +477,7 @@ export default function DataExplorer() {
                   { id: "preview" as const, label: "Data Preview", icon: Table2 },
                   { id: "schema" as const, label: "Column Schema", icon: SlidersHorizontal },
                   { id: "insights" as const, label: "Quick Insights", icon: BarChart2 },
+                  { id: "chats" as const, label: "Chats", icon: MessagesSquare },
                 ] as const).map(({ id, label, icon: Icon }) => (
                   <button
                     key={id}
@@ -470,6 +523,46 @@ export default function DataExplorer() {
                     </p>
                   </div>
                 )
+              )}
+
+              {activeTab === "chats" && (
+                <div className="space-y-3">
+                  {isLoadingChats ? (
+                    <div className="flex justify-center py-12">
+                      <RefreshCw className="w-6 h-6 text-slate-400 animate-spin" />
+                    </div>
+                  ) : linkedConversations.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                      <MessagesSquare className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        This dataset has not been used in a chat yet.
+                      </p>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-slate-200 dark:divide-slate-700 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900">
+                      {linkedConversations.map((conv) => (
+                        <li key={conv.conversationId}>
+                          <button
+                            type="button"
+                            onClick={() => openLinkedChat(conv)}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
+                          >
+                            <MessagesSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
+                                {conv.title}
+                              </p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                {conv.chatType} · {formatDate(conv.updatedAt)}
+                              </p>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
 
               {/* Error display */}

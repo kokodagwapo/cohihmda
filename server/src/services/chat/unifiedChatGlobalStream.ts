@@ -20,6 +20,12 @@ import {
   emitValidatedStreamWithDeltas,
 } from "./unifiedChatStream.js";
 import { runSqlThroughRouter } from "./sqlAndMetricsRouter.js";
+import type { UnifiedChatRequestBody } from "./unifiedChatOrchestrator.js";
+import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
+import {
+  mergeDatasetUploadIds,
+  resolveUploadSchemaContext,
+} from "../research/uploadConversationService.js";
 
 export interface GlobalStreamArgs {
   req: AuthRequest;
@@ -31,6 +37,7 @@ export interface GlobalStreamArgs {
   policy: PolicyDecision;
   includeRag?: boolean;
   streamMetadata?: Record<string, unknown>;
+  requestBody?: UnifiedChatRequestBody;
 }
 
 export interface GlobalStreamResult {
@@ -38,14 +45,29 @@ export interface GlobalStreamResult {
   metadata: Record<string, unknown>;
 }
 
-function buildChatContext(req: AuthRequest): ChatContext {
+async function buildChatContextForStream(
+  req: AuthRequest,
+  requestBody?: UnifiedChatRequestBody,
+): Promise<ChatContext> {
   const tenantId = req.tenantContext?.tenantId || req.tenantId;
   if (!tenantId) throw new Error("No tenant context available");
-  return {
+  const base: ChatContext = {
     userId: req.userId!,
     tenantId,
     userRole: req.userRole || "user",
     userEmail: req.userEmail,
+  };
+  if (!requestBody) return base;
+  const uploadIds = mergeDatasetUploadIds(requestBody);
+  if (uploadIds.length === 0) return base;
+  const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+  const resolved = await resolveUploadSchemaContext(uploadIds, tenantPool);
+  if (!resolved.instructionBlock) return base;
+  return {
+    ...base,
+    uploadOnlyMode: true,
+    uploadSchemaContext: resolved.instructionBlock,
+    datasetUploadIds: uploadIds,
   };
 }
 
@@ -72,9 +94,10 @@ export function setupGlobalStreamHeaders(res: Response): void {
 export async function runUnifiedGlobalStream(
   args: GlobalStreamArgs,
 ): Promise<GlobalStreamResult> {
-  const chatContext = buildChatContext(args.req);
+  const chatContext = await buildChatContextForStream(args.req, args.requestBody);
   const convHistory = mapHistory(args.history);
-  const retrievalAllowed = args.policy.retrieval !== "deny";
+  const retrievalAllowed =
+    args.policy.retrieval !== "deny" && !chatContext.uploadOnlyMode;
   const includeRag = args.includeRag !== false && retrievalAllowed;
 
   setupGlobalStreamHeaders(args.res);
