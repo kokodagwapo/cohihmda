@@ -12,7 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { useHelpArticles } from '@/hooks/useHelpArticles';
 import { helpCategories, type HelpCategory } from '@/data/helpArticles';
-import { tourHasSteps, type TourId } from '@/data/tourSteps';
+import { type TourId } from '@/data/tourSteps';
 import { LearningPathView } from '@/components/tutorial/LearningPathView';
 import {
   Search,
@@ -479,7 +479,7 @@ function ArticlePage() {
 
       <Card>
         <CardContent className="p-6 md:p-8">
-          {article.relatedTour && tourHasSteps(article.relatedTour as TourId) && (
+          {article.relatedTour && (
             <div className="mb-6 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800 flex items-center justify-between">
               <span className="text-sm text-blue-700 dark:text-blue-300">
                 Want a hands-on walkthrough? Take the interactive tour.
@@ -488,20 +488,12 @@ function ArticlePage() {
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  const tourId = article.relatedTour as TourId;
-                  const path =
-                    tourId === 'workbench'
-                      ? '/my-dashboard'
-                      : tourId === 'research'
-                        ? '/research'
-                        : tourId === 'admin'
-                          ? '/admin'
-                          : tourId === 'cohi-chat'
-                            ? '/insights'
-                            : '/insights';
-                  navigate(path);
+                  navigate(article.relatedTour === 'workbench' ? '/my-dashboard' :
+                    article.relatedTour === 'research' ? '/research' :
+                    article.relatedTour === 'admin' ? '/admin' :
+                    '/insights');
                   // Delay so the target page mounts and tour targets exist in the DOM
-                  setTimeout(() => startTour(tourId), 800);
+                  setTimeout(() => startTour(article.relatedTour as TourId), 800);
                 }}
                 className="gap-1"
               >

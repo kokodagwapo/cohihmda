@@ -9,8 +9,6 @@ import {
   unifiedChatRequestSchema,
   unifiedChatResponseSchema,
   unifiedChatStreamEventSchema,
-  unifiedChatConversationCreateBodySchema,
-  unifiedChatConversationRebindBodySchema,
 } from "../../contracts/chat/unifiedChatSchemas.js";
 
 function forAjvCompile(schema: Record<string, unknown>): Record<string, unknown> {
@@ -33,12 +31,6 @@ export const validateUnifiedChatResponse: ValidateFunction = ajv.compile(
 );
 export const validateUnifiedStreamEvent: ValidateFunction = ajv.compile(
   forAjvCompile(unifiedChatStreamEventSchema),
-);
-export const validateUnifiedConversationCreate: ValidateFunction = ajv.compile(
-  forAjvCompile(unifiedChatConversationCreateBodySchema),
-);
-export const validateUnifiedConversationRebind: ValidateFunction = ajv.compile(
-  forAjvCompile(unifiedChatConversationRebindBodySchema),
 );
 
 export function formatAjvErrors(errors: ErrorObject[] | null | undefined): {

@@ -108,14 +108,4 @@ test.describe("Workbench", () => {
       }
     });
   }
-
-  test("hides embedded workbench cohi panel when unified chat is forced on", async ({
-    userPage,
-  }) => {
-    await userPage.addInitScript(() => {
-      sessionStorage.setItem("cohi_force_unified_chat", "1");
-    });
-    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByTestId("workbench-cohi-panel")).toHaveCount(0);
-  });
 });

@@ -1,8 +1,5 @@
 import { FinancialModelingSandboxView } from '@/components/views/FinancialModelingSandboxView';
-import { DASHBOARD_MAIN_CLASSNAME } from '@/components/cohi/pageContentStyles';
-import { DashboardPageContent } from '@/components/layout/DashboardPageContent';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
-import { TopTieringPageFrame } from '@/components/layout/TopTieringPageFrame';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { useTenantStore } from '@/stores/tenantStore';
 
@@ -11,13 +8,14 @@ const FinancialModelingSandbox = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Financial Modeling" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
-          <DashboardPageContent>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="Financial Modeling" />
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
+          <div className="max-w-[1800px] mx-auto">
             <FinancialModelingSandboxView selectedTenantId={selectedTenantId ?? undefined} />
-          </DashboardPageContent>
+          </div>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 };

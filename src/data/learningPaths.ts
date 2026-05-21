@@ -53,7 +53,7 @@ export const missions: Mission[] = [
     title: "Ask Cohi a question",
     description: "Use Cohi Chat to ask a question about your data.",
     icon: "MessageSquare",
-    action: "Open the chat band below the top navigation and type any data question.",
+    action: "Open Cohi Chat and type any data question.",
   },
   {
     id: "mission-export-report",
@@ -66,10 +66,10 @@ export const missions: Mission[] = [
   {
     id: "mission-run-research",
     title: "Run a research session",
-    description: "Submit a question using Research chat type.",
+    description: "Submit a question to the AI Research Analyst.",
     icon: "FlaskConical",
-    action: "Open Cohi Chat, select Research, and type a research question.",
-    verifyRoute: "/insights",
+    action: "Go to Research Lab and type a research question.",
+    verifyRoute: "/research",
   },
 ];
 
@@ -194,13 +194,13 @@ export const learningPaths: LearningPath[] = [
       {
         week: 4,
         title: "Advanced Features",
-        focus: "Research and Cohi Chat",
+        focus: "Research Lab, Cohi Chat",
         steps: [
           {
             id: "exec-w4-1",
-            title: "Read: What You Can Ask Cohi",
+            title: "Read: Starting a Research Session",
             type: "article",
-            link: "/help/cohi-chat/what-you-can-ask",
+            link: "/help/research-lab/starting-research",
           },
           {
             id: "exec-w4-2",
@@ -210,9 +210,9 @@ export const learningPaths: LearningPath[] = [
           },
           {
             id: "exec-w4-3",
-            title: "Read: Example Queries",
+            title: "Read: What You Can Ask Cohi",
             type: "article",
-            link: "/help/cohi-chat/example-queries",
+            link: "/help/cohi-chat/what-you-can-ask",
           },
           {
             id: "exec-w4-4",

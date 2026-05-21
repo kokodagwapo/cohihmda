@@ -3,7 +3,6 @@ import { openUserMenu } from "./helpers";
 import { AuthPage } from "./page-objects/auth.po";
 import { readProvisionedState } from "./provision-state";
 import { generateTotpCode } from "./totp";
-import { isPostLoginUrl } from "./helpers/postLoginUrl";
 
 test.describe("Authentication", () => {
   test("@smoke logs in with valid credentials", async ({ page }) => {
@@ -14,7 +13,7 @@ test.describe("Authentication", () => {
     const authPage = new AuthPage(page);
     await authPage.login(state.users.tenantUser.email, state.users.tenantUser.password);
     const authedWithoutMfa = await page
-      .waitForURL(isPostLoginUrl, { timeout: 12_000 })
+      .waitForURL(/\/(insights|my-dashboard)/, { timeout: 12_000 })
       .then(() => true)
       .catch(() => false);
     if (authedWithoutMfa) {
@@ -58,14 +57,14 @@ test.describe("Authentication", () => {
       await page.keyboard.press("Backspace");
       await page.keyboard.type(code, { delay: 40 });
       try {
-            await expect(page).toHaveURL(isPostLoginUrl, { timeout: 8_000 });
+        await expect(page).toHaveURL(/\/(insights|my-dashboard)/, { timeout: 8_000 });
         authed = true;
         break;
       } catch {
         if (await verifyButton.isEnabled()) {
           await verifyButton.click();
           try {
-            await expect(page).toHaveURL(isPostLoginUrl, { timeout: 6_000 });
+            await expect(page).toHaveURL(/\/(insights|my-dashboard)/, { timeout: 6_000 });
             authed = true;
             break;
           } catch {
@@ -90,12 +89,6 @@ test.describe("Authentication", () => {
   test("@smoke redirects unauthenticated users from protected route", async ({ page }) => {
     await page.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/login\?returnTo=%2Finsights/);
-  });
-
-  test("@smoke redirects unauthenticated users from chat home", async ({ page }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(/\/login(\?|$)/);
-    expect(page.url()).toMatch(/returnTo=%2F|returnTo=\//);
   });
 
   test("@smoke logs out from the user menu", async ({ userPage }) => {

@@ -754,7 +754,7 @@ export function WorkflowConversionView({
   }, [pendingInsightWidgetId, loading, milestonesLoading]);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="space-y-4">
       {/* Toolbar – compact style when embedded in workbench to match other widget filter bars */}
       <div
         className={

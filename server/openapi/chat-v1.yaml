@@ -3,146 +3,13 @@ info:
   title: Cohi Unified Chat API
   version: "1.0.0"
   description: |
-    OpenAPI for `/api/chat/v1/*`. Canonical JSON Schemas (AJV + docs sync) live in
-    `server/src/contracts/chat/unifiedChatSchemas.ts` and `docs/planning/schemas/cohi-chat-unified/`.
-
-servers:
-  - url: /api/chat/v1
-    description: Relative to API host
+    Draft OpenAPI. Canonical JSON Schemas (machine-readable) live at
+    `docs/planning/schemas/cohi-chat-unified/` in the repo root.
 
 paths:
-  /permissions:
-    get:
-      summary: Effective chat permissions (stub)
-      operationId: getUnifiedChatPermissions
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: cohi_chat gate + flat chatTypes when allowed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnifiedChatPermissions"
-        "400":
-          description: Missing tenant/user context
-        "403":
-          description: Access denied
-        "404":
-          description: Unified API disabled
-
-  /conversations:
-    get:
-      summary: List conversations for current user
-      operationId: listUnifiedChatConversations
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: scope_type
-          in: query
-          schema: { type: string }
-        - name: scope_key
-          in: query
-          schema: { type: string }
-        - name: chat_type
-          in: query
-          schema:
-            type: string
-            enum: [chat, research, insight_builder, workbench]
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
-        - name: offset
-          in: query
-          schema: { type: integer, minimum: 0, default: 0 }
-      responses:
-        "200":
-          description: Conversation list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnifiedConversationListResponse"
-    post:
-      summary: Create empty conversation
-      operationId: createUnifiedChatConversation
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UnifiedConversationCreateBody"
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [conversationId]
-                properties:
-                  conversationId:
-                    type: string
-                    format: uuid
-        "400":
-          description: Validation error
-
-  /conversations/{id}:
-    parameters:
-      - $ref: "#/components/parameters/conversationId"
-    get:
-      summary: Fetch transcript
-      operationId: getUnifiedChatConversation
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Conversation detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnifiedConversationDetail"
-        "404":
-          description: Not found
-    delete:
-      summary: Hard-delete conversation
-      operationId: deleteUnifiedChatConversation
-      security:
-        - bearerAuth: []
-      responses:
-        "204":
-          description: Deleted
-        "404":
-          description: Not found
-
-  /conversations/{id}/rebind:
-    parameters:
-      - $ref: "#/components/parameters/conversationId"
-    post:
-      summary: Rebind scope (preserve messages)
-      operationId: rebindUnifiedChatConversation
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UnifiedConversationRebindBody"
-      responses:
-        "200":
-          description: Updated conversation
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnifiedConversationDetail"
-        "404":
-          description: Not found
-
   /messages:
     post:
-      summary: Send a chat message (non-streaming)
+      summary: Send a chat message
       operationId: postUnifiedChatMessage
       security:
         - bearerAuth: []
@@ -164,48 +31,7 @@ paths:
         "403":
           description: Access denied
         "404":
-          description: Unified API disabled
-        "409":
-          description: Duplicate clientMessageId
-
-  "/messages:stream":
-    post:
-      summary: Send message; response is SSE
-      description: |
-        Server emits schema-valid `ChatStreamEvent` lines (`data: {...}`) per
-        `docs/planning/schemas/cohi-chat-unified/chat-event-stream.schema.json`.
-
-        - For `chat_type=chat` (global / data-chat): **true LLM token**
-          `block.delta` events during completion (COHI-388 Option C), then
-          `block.completed` → `turn.completed`.
-        - For `chat_type` in {`insight_builder`, `workbench`}: server completes
-          the turn, then streams blocks with `block.delta` chunking where
-          applicable.
-        - For `chat_type=research`: Research Lab pipeline runs live; timeline
-          events map to `block.delta` on the primary text block, then
-          `artifacts` + `turn.completed`. Legacy
-          `GET /api/research/sessions/:id/stream` is not required on the happy
-          path.
-      operationId: postUnifiedChatMessageStream
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UnifiedChatRequest"
-      responses:
-        "200":
-          description: text/event-stream
-          content:
-            text/event-stream:
-              schema:
-                type: string
-        "400":
-          description: Validation error
-        "403":
-          description: Access denied (policy gate)
+          description: Unified API disabled (UNIFIED_CHAT_ENABLED=false)
         "409":
           description: Duplicate clientMessageId
 
@@ -216,128 +42,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
 
-  parameters:
-    conversationId:
-      name: id
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
-
   schemas:
-    UnifiedChatPermissions:
-      type: object
-      required: [cohiChat, chatTypes]
-      properties:
-        cohiChat:
-          type: boolean
-        chatTypes:
-          type: array
-          items:
-            type: string
-            enum: [chat, research, insight_builder, workbench]
-
-    UnifiedConversationCreateBody:
-      type: object
-      required: [scope]
-      properties:
-        scope:
-          $ref: "#/components/schemas/UnifiedScope"
-        chat_type:
-          type: string
-          enum: [chat, research, insight_builder, workbench]
-          default: chat
-        title:
-          type: string
-          maxLength: 200
-        legacy_ref:
-          type: string
-          maxLength: 500
-
-    UnifiedConversationRebindBody:
-      type: object
-      required: [scope]
-      properties:
-        scope:
-          $ref: "#/components/schemas/UnifiedScope"
-        chat_type:
-          type: string
-          enum: [chat, research, insight_builder, workbench]
-
-    UnifiedScope:
-      type: object
-      required: [type]
-      properties:
-        type:
-          type: string
-          enum:
-            - global_session
-            - canvas
-            - draft
-            - insight
-            - widget_edit
-            - workbench_hub
-        id:
-          type: string
-
-    UnifiedConversationListResponse:
-      type: object
-      required: [conversations]
-      properties:
-        conversations:
-          type: array
-          items:
-            $ref: "#/components/schemas/UnifiedConversationSummary"
-
-    UnifiedConversationSummary:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        title: { type: string }
-        scope:
-          $ref: "#/components/schemas/UnifiedScope"
-        chat_type:
-          type: string
-          enum: [chat, research, insight_builder, workbench]
-        legacy_ref:
-          type: string
-          nullable: true
-          description: |
-            Opaque identifier from the legacy backing system (Research Lab
-            session id, etc.). No FK to `research_sessions` (COHI-395 §11.2).
-        legacy_source:
-          type: string
-          nullable: true
-          enum: [cohi_chat, research_lab]
-          description: |
-            Origin of the legacy_ref. Populated by the unified write path when
-            mode-specific persistence is involved (COHI-395 §11).
-        folder_id:
-          type: string
-          format: uuid
-          nullable: true
-          description: |
-            Optional folder assignment. FK to `chat_folders` is deferred until
-            COHI-403 ships folders DDL (see migration 130 comment).
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-        phase:
-          type: string
-          nullable: true
-          description: |
-            Research Lab session phase when present (dual-read list from
-            legacy research_sessions). Omitted for non-research rows.
-
-    UnifiedConversationDetail:
-      allOf:
-        - $ref: "#/components/schemas/UnifiedConversationSummary"
-        - type: object
-          properties:
-            messages:
-              type: array
-              items: {}
-
     UnifiedChatRequest:
       type: object
       required: [message]
@@ -345,10 +50,6 @@ components:
         message:
           type: string
           minLength: 1
-        chat_type:
-          type: string
-          enum: [chat, research, insight_builder, workbench]
-          default: chat
         conversationId:
           type: string
           format: uuid
@@ -356,7 +57,19 @@ components:
           type: string
           format: uuid
         scope:
-          $ref: "#/components/schemas/UnifiedScope"
+          type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - global_session
+                - canvas
+                - draft
+                - insight
+                - widget_edit
+                - workbench_hub
+            id:
+              type: string
         location:
           type: object
           properties:
@@ -368,18 +81,10 @@ components:
                 - workbench_hub
                 - insight_modal
                 - data_chat_page
-            route: { type: string }
+            route:
+              type: string
         context:
           type: object
-          properties:
-            legacyResearchSessionId:
-              type: string
-              description: |
-                Optional Research Lab session id used to bind a unified
-                `chat_type=research` thread to an existing pipeline. When set
-                and `conversationId` is absent the server reuses the unified
-                row whose `legacy_ref` matches (COHI-402 resume).
-          additionalProperties: true
         history:
           type: array
           items:
@@ -393,23 +98,6 @@ components:
                 type: string
         options:
           type: object
-          properties:
-            stream: { type: boolean }
-            includeRag: { type: boolean }
-            includeLiveCanvasData: { type: boolean }
-            maxHistoryTurns: { type: integer }
-            personaHints:
-              type: array
-              items: { type: string }
-            qaAgentRunTag: { type: string }
-            # planningMode deferred — see unifiedChatSchemas.ts
-            # planningMode:
-            #   type: string
-            #   enum: [auto, always, never]
-            research:
-              type: object
-              properties:
-                deepAnalysis: { type: boolean }
 
     UnifiedChatResponse:
       type: object
@@ -431,10 +119,3 @@ components:
                 type: object
         metadata:
           type: object
-          properties:
-            chatType:
-              type: string
-              enum: [chat, research, insight_builder, workbench]
-            suggestedQuestions:
-              type: array
-              items: { type: string }

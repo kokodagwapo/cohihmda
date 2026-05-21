@@ -8,7 +8,6 @@
 
 import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
-import { dispatchUnifiedChatHistorySync } from "@/lib/unifiedChatFolderUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { serializeResearchWidgetCatalog } from "@/utils/researchWidgetCatalog";
 import type { PeriodPreset } from "@/components/ui/DatePeriodPicker";
@@ -184,9 +183,6 @@ export function useResearchSession(tenantId?: string | null) {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [sessionVisibility, setSessionVisibility] = useState<string>("private");
   const [sessionSharedWithUserIds, setSessionSharedWithUserIds] = useState<string[]>([]);
-  const [sessionIsOwner, setSessionIsOwner] = useState(true);
-  const [sessionOwnerEmail, setSessionOwnerEmail] = useState<string>("");
-  const [sessionOwnerName, setSessionOwnerName] = useState<string>("");
 
   const abortRef = useRef<AbortController | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -420,50 +416,6 @@ export function useResearchSession(tenantId?: string | null) {
   );
 
   // ── Load a saved session (view only, no stream) ──
-  const applySessionPayload = useCallback((data: any) => {
-    const loadedPhase =
-      data.phase === "created" ? "idle" : (data.phase as SessionPhase);
-    const isActivePhase = ACTIVE_SESSION_PHASES.has(data.phase);
-
-    setSessionId(data.id);
-    sessionIdRef.current = data.id;
-    setPhase(loadedPhase);
-    setPlan(data.plan || null);
-    setFindings(Array.isArray(data.findings) ? data.findings : []);
-    setReport(data.report || null);
-    setEvents(Array.isArray(data.events) ? data.events : []);
-    setError(data.error || null);
-    setIsRunning(isActivePhase);
-    setIsPaused(false);
-    setSessionVisibility(data.visibility ?? "private");
-    setSessionSharedWithUserIds(
-      Array.isArray(data.sharedWithUserIds) ? data.sharedWithUserIds : [],
-    );
-    setSessionIsOwner(data.isOwner !== false);
-    setSessionOwnerEmail(
-      typeof data.ownerEmail === "string" ? data.ownerEmail : "",
-    );
-    setSessionOwnerName(
-      typeof data.ownerName === "string" ? data.ownerName : "",
-    );
-
-    return isActivePhase;
-  }, []);
-
-  const refreshSession = useCallback(
-    async (id: string) => {
-      try {
-        const data = await api.request<any>(
-          `/api/research/sessions/${id}${tenantParam}`,
-        );
-        applySessionPayload(data);
-      } catch (err: any) {
-        console.error("[Research] Failed to refresh session:", err);
-      }
-    },
-    [applySessionPayload, tenantParam],
-  );
-
   const loadSession = useCallback(
     async (id: string) => {
       if (abortRef.current) {
@@ -472,10 +424,22 @@ export function useResearchSession(tenantId?: string | null) {
       }
 
       try {
-        const data = await api.request<any>(
-          `/api/research/sessions/${id}${tenantParam}`,
-        );
-        const isActivePhase = applySessionPayload(data);
+        const data = await api.request<any>(`/api/research/sessions/${id}${tenantParam}`);
+        const loadedPhase = data.phase === "created" ? "idle" : (data.phase as SessionPhase);
+        const isActivePhase = ACTIVE_SESSION_PHASES.has(data.phase);
+
+        setSessionId(data.id);
+        sessionIdRef.current = data.id;
+        setPhase(loadedPhase);
+        setPlan(data.plan || null);
+        setFindings(data.findings || []);
+        setReport(data.report || null);
+        setEvents(data.events || []);
+        setError(data.error || null);
+        setIsRunning(isActivePhase);
+        setIsPaused(false);
+        setSessionVisibility(data.visibility ?? "private");
+        setSessionSharedWithUserIds(Array.isArray(data.sharedWithUserIds) ? data.sharedWithUserIds : []);
 
         if (isActivePhase) {
           readSSEStream(`/api/research/sessions/${id}/stream${tenantParam}`);
@@ -485,7 +449,7 @@ export function useResearchSession(tenantId?: string | null) {
         setError(err.message);
       }
     },
-    [applySessionPayload, readSSEStream, tenantParam],
+    [readSSEStream, tenantParam]
   );
 
   // ── Run an existing session (start the SSE stream for a pre-created session) ──
@@ -570,8 +534,6 @@ export function useResearchSession(tenantId?: string | null) {
         });
         setSessionVisibility(["shared", "global"].includes(visibility) ? visibility : "private");
         setSessionSharedWithUserIds(sharedWithUserIds);
-        api.invalidateCacheFor("/api/chat/v1/conversations");
-        dispatchUnifiedChatHistorySync();
         return true;
       } catch (err: any) {
         console.error("[Research] Failed to update sharing:", err);
@@ -599,9 +561,6 @@ export function useResearchSession(tenantId?: string | null) {
     setIsPaused(false);
     setSessionVisibility("private");
     setSessionSharedWithUserIds([]);
-    setSessionIsOwner(true);
-    setSessionOwnerEmail("");
-    setSessionOwnerName("");
   }, []);
 
   return {
@@ -617,9 +576,6 @@ export function useResearchSession(tenantId?: string | null) {
     sessions,
     sessionVisibility,
     sessionSharedWithUserIds,
-    sessionIsOwner,
-    sessionOwnerEmail,
-    sessionOwnerName,
     updateSessionSharing,
     startSession,
     runSession,
@@ -628,7 +584,6 @@ export function useResearchSession(tenantId?: string | null) {
     resume,
     askFollowUp,
     loadSession,
-    refreshSession,
     fetchSessions,
     deleteSession: deleteSessionById,
     submitFeedback,

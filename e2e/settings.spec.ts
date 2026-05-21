@@ -1,5 +1,4 @@
 import { test, expect } from "./fixtures";
-import { dismissBlockingOverlays } from "./helpers/unifiedChat";
 
 test.describe("Settings", () => {
   test("@smoke settings page loads and sections are available", async ({ userPage }) => {
@@ -13,7 +12,6 @@ test.describe("Settings", () => {
 
   test("@critical appearance and account security controls are interactive", async ({ userPage }) => {
     await userPage.goto("/settings", { waitUntil: "domcontentloaded" });
-    await dismissBlockingOverlays(userPage);
     await userPage.getByRole("button", { name: /Appearance/i }).click();
     await expect(userPage.getByText(/Theme/i).first()).toBeVisible();
 

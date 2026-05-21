@@ -12,10 +12,7 @@ import { Button } from '@/components/ui/button';
 import { useSalesTrendsData, type LoanOfficer as APILoanOfficer, type DrilldownData as APIDrilldownData, type DateRangeOption } from '@/hooks/useSalesTrendsData';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
-import { DASHBOARD_MAIN_CLASSNAME } from '@/components/cohi/pageContentStyles';
-import { DashboardPageContent } from '@/components/layout/DashboardPageContent';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
-import { TopTieringPageFrame } from '@/components/layout/TopTieringPageFrame';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { DatePeriodPicker, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
 import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
@@ -330,9 +327,9 @@ const SalesTrends = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Sales Trends" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
-          <DashboardPageContent>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="Sales Trends" />
+        <main className="relative flex-1 overflow-y-auto px-6 py-4 max-w-[1800px] mx-auto">
         {/* Loading State */}
         {loading && (
           <div className="flex flex-col items-center justify-center min-h-[400px]">
@@ -644,9 +641,8 @@ const SalesTrends = () => {
           </div>
         </div>
         )}
-          </DashboardPageContent>
         </main>
-      </TopTieringPageFrame>
+      </div>
 
       {/* Drilldown Modal */}
       <Dialog open={isDrilldownOpen} onOpenChange={setIsDrilldownOpen}>

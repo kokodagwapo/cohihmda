@@ -53,7 +53,7 @@ export const helpCategories: HelpCategory[] = [
     slug: "cohi-chat",
     label: "Cohi Chat",
     icon: "MessageSquare",
-    description: "Unified chat, modes, history, and example queries",
+    description: "AI assistant and natural language queries",
   },
   {
     slug: "settings",
@@ -1532,49 +1532,36 @@ Use the export button to download rankings as an Excel file. Multiple export for
     title: "What You Can Ask Cohi",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
-    summary: "Cohi Chat in one place—modes, layout, and what you can ask.",
-    relatedTour: "cohi-chat",
+    summary: "Understand the AI assistant capabilities.",
     content: `# What You Can Ask Cohi
 
-## One chat, same capabilities
-Cohi Chat is still your AI assistant for loan data, analytics, and navigation. What changed is **where** you use it: one chat band **below the top navigation** on every page, instead of a separate panel on the right or scattered entry points.
+## Overview
+Cohi Chat is an AI assistant available on every page. It understands your loan data schema and can answer questions, generate reports, and help you navigate the platform.
 
-Your past conversations, Research sessions, and Workbench chats are part of the **same history**—see Chat History, Folders, and Full History in this Help category.
-
-## Where to find it
-- Open any page (Insights, dashboards, Workbench)—the chat band appears under the top bar.
-- Use **layout controls** to stay compact, go taller, fill the page, or split the screen with page content.
-- **Research** opens in full-page layout when you start an investigation (same Timeline / Findings / Report workflow as the former Research Lab).
-
-## Chat types
-Pick a type before you send—the assistant routes your request the same way as the old dedicated screens:
-
-- **Chat** — Quick metrics, definitions, navigation (same as general Cohi Chat / data questions). Default for new conversations.
-- **Research** — Deep investigations, reports, timeline (same as Research Lab).
-- **Insight builder** — Author custom insight prompts in conversation.
-- **Workbench** — Create widgets, canvases, SQL, exports (same as Workbench AI assistant).
-
-## What you can ask (Chat mode)
-### Data questions
+## Data Questions
 - "How many loans are in our current pipeline?"
 - "What's the average loan amount for FHA loans?"
 - "Which branch has the highest pull-through rate?"
+- "Show me all loans closing this week"
 
-### Analytical questions
+## Analytical Questions
 - "Why did our volume drop last month?"
 - "Compare Retail vs Wholesale performance"
+- "What's trending in our turn times?"
 
-### Help and navigation
+## Help & Navigation
 - "How do I create a dashboard?"
 - "Where can I find the Loan Funnel?"
+- "What does pull-through rate mean?"
 
-### Reports
+## Report Generation
 - "Generate a pipeline summary report"
 - "Create a PowerPoint for the executive meeting"
 
 ## Tips
-- Be specific with time periods and metrics.
-- Switch chat type when you need Research, insight prompts, or dashboard building—no need to leave the page.`,
+- Be specific with time periods: "last 30 days", "Q4 2025", "this month"
+- Mention the metric: "funded volume" vs just "volume"
+- Specify filters: "for Retail channel" or "in the West region"`,
   },
   {
     id: "cc-examples",
@@ -1582,46 +1569,38 @@ Pick a type before you send—the assistant routes your request the same way as 
     title: "Example Queries",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
-    summary: "Starter questions for each chat type.",
+    summary: "Sample questions to try with Cohi Chat.",
     content: `# Example Queries for Cohi Chat
 
-Examples below match the **suggested prompts** shown when you pick each chat type. Capabilities are the same as before—only the entry point is centralized.
-
-## Chat (general)
-- "What's important to know today?"
-- "Show me loan volume by month"
-- "What are the FHA requirements?"
-- "Top loan officers by revenue"
-
-## Pipeline and performance (Chat)
+## Pipeline Overview
 - "How many active loans do we have?"
+- "What's our current pipeline value?"
+- "Show me the pipeline breakdown by status"
+
+## Performance Metrics
 - "What's our pull-through rate this quarter?"
+- "Average cycle time from application to closing?"
 - "Top 5 loan officers by funded volume this month"
+
+## Branch & Channel Analysis
 - "Compare all branches by revenue"
+- "Which channel has the fastest turn times?"
+- "Show me Wholesale pipeline health"
 
-## Research
-- "Overall pipeline health and conversion performance"
-- "LO scorecard: compute TTS scores, tier distribution, and performance outliers"
-- "Risk patterns and credit exposure: FICO, LTV, DTI distribution"
-- "Turn time trends and operational efficiency by role"
-- "Product mix and channel analysis: loan type, purpose, and program breakdown"
+## Risk & Compliance
+- "How many loans have LTV over 80%?"
+- "What's our average FICO score?"
+- "Show me the DTI distribution"
 
-Enable **Deep analysis** (Research type only) for longer investigations.
+## Trends
+- "How has our monthly volume changed over the past year?"
+- "Is our pull-through rate improving?"
+- "Show revenue trends by quarter"
 
-## Insight builder
-- "Create a weekly batch insight for Branch 204: pull-through and cycle time vs last month"
-- "Create an insight about FHA denial patterns—top reasons and LO denial rates"
-- "Create an on-demand insight to triage suspended loans—aging and top suspend reasons"
-
-Review the preview card, edit fields, then **Approve** to save to your prompt list on Insights.
-
-## Workbench
-- "Prepare a board-ready overview of this month's performance"
-- "Add a bar chart of monthly funded volume"
-- "Build an executive dashboard with key KPIs"
-- "Generate a PowerPoint from this canvas"
-
-When you are on a canvas, Workbench mode is **context-aware**—it knows which widgets you are editing.`,
+## Data Queries
+- "List all loans assigned to John Smith"
+- "Show me loans in 'Clear to Close' status"
+- "Find all jumbo loans over $1M"`,
   },
   {
     id: "cc-workbench",
@@ -1629,76 +1608,64 @@ When you are on a canvas, Workbench mode is **context-aware**—it knows which w
     title: "Using Cohi Chat in the Workbench",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
-    summary: "AI-powered dashboard building in Workbench chat type.",
+    summary: "AI-powered dashboard building.",
     content: `# Using Cohi Chat in the Workbench
 
-## Same assistant, Workbench mode
-Workbench still has AI-powered dashboard building. Select **Workbench** in the chat type menu on the unified chat band (on the Workbench page or anywhere else).
+## Workbench-Specific Capabilities
+When using Cohi Chat within the Workbench, it gains additional capabilities:
 
-You no longer need a separate right-side chat drawer—the **same conversation** can include general questions and Workbench actions when the type is set to Workbench.
-
-## What you can do
-### Widget creation
+## Widget Creation
 - "Add a bar chart of monthly funded volume"
 - "Create a KPI card for average loan amount"
+- "Build a pie chart of loan types"
 
-### Widget modification
+## Widget Modification
 - "Change this chart to a line chart"
+- "Update the colors to use a blue palette"
 - "Add a filter for Conventional loans only"
 
-### Canvas and layout
+## Dashboard Building
 - "Create a new canvas called 'Monthly Review'"
 - "Arrange the widgets in a 2x2 grid"
 
-### SQL and reports
+## SQL Generation
 - "Write a SQL query to find all loans with rate > 7%"
+- "Show me the SQL behind this widget"
+
+## Report Building
 - "Generate a PowerPoint from this canvas"
+- "Create a PDF report with all widgets"
 
-## Context-aware behavior
-On a Workbench canvas, Cohi receives your **canvas and widget context** automatically—the same as the former Workbench AI panel.
-
-## My Dashboards
-Pin canvases from the sidebar **My Dashboards** section (with pinned TopTiering dashboards). Pins sync across devices with no per-user cap.`,
+The Workbench AI assistant is context-aware — it knows which canvas and widgets you're working with.`,
   },
   {
     id: "cc-data-chat",
     slug: "data-chat-page",
-    title: "Chat History, Folders, and Full History",
+    title: "Using the Data Chat Page",
     category: "Cohi Chat",
     categorySlug: "cohi-chat",
     summary:
-      "Find, organize, and resume every Cohi conversation in one place.",
-    content: `# Chat History, Folders, and Full History
+      "Use Data Chat for focused, standalone AI analysis conversations.",
+    content: `# Using the Data Chat Page
 
-## One timeline for everything
-General chat, **Research** sessions, **Insight builder** threads, and **Workbench** conversations all appear in the **same history**. Legacy Research Lab sessions were merged in—you will not lose past work.
+## What Is Data Chat?
+Data Chat is a dedicated page for conversational analysis when you want a focused chat workflow outside full dashboard context.
 
-## Sidebar: History
-The **History** section lists your most recent chats. Click a row to resume on the page where you left off. Each row shows a **chat type** label (Chat, Research, Insight builder, Workbench).
+## When to Use It
+- Quick investigative questions without switching between multiple dashboards
+- Iterative follow-up questions on a single analysis thread
+- Fast ad-hoc checks before sharing findings with your team
 
-## Sidebar: Folders
-Use **Folders** to organize conversations:
-- Create folders and nest up to **five** levels
-- **Drag** a chat from **History** onto a folder, or use the **Move to folder** button on a conversation row (in History or Full History) and choose a folder from the menu
-- Rename or delete folders—deleting moves chats to the parent folder or **unsorted**
-- Folders are private to you (no sharing in v1)
+## Example Questions
+- "What changed in pull-through this month by branch?"
+- "Show top contributors to current fallout risk."
+- "Compare this month to last month for funded volume and margin."
+- "Which segments show worsening turn time trend?"
 
-A chat can live in **at most one folder** at a time.
-
-## Full History page
-Open **Full History** from the sidebar to:
-- **Search** across all conversations
-- **Filter by chat type**
-- Browse with **pagination** when you have more than 50 results
-
-Route: /chat/history
-
-## Standalone Data Chat page
-If you bookmarked the old Data Chat or /cohi-chat route, you land on the same **unified chat** experience. Use **Chat** type for focused analysis threads; use folders and Full History to pick up later.
-
-## Tips
-- Start broad, then narrow with follow-ups in the same thread
-- Move important Research or Workbench outputs into dashboards or reports when you are ready to share`,
+## Workflow Tips
+- Start broad, then narrow with filters and follow-ups
+- Ask for period-over-period comparisons
+- Move high-value outputs into Workbench or reports for distribution`,
   },
 
   // ─── Settings ──────────────────────────────────────────────────────
