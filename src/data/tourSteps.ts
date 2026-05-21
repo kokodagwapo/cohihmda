@@ -1,27 +1,6 @@
 import type { Step } from "react-joyride";
-import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
-import {
-  desktopSidebarTourTarget,
-  prepareDesktopSidebarTourStep,
-  type CohiTourSidebarAnchor,
-} from "@/lib/tourTargets";
 
-const sidebarTourStep = (
-  anchor: CohiTourSidebarAnchor,
-  step: Omit<Step, "target" | "before">,
-): Step => {
-  const target = desktopSidebarTourTarget(anchor);
-  return {
-    ...step,
-    target,
-    placement: step.placement ?? "right",
-    disableScrolling: true,
-    spotlightPadding: 0,
-    before: () => prepareDesktopSidebarTourStep(target),
-  };
-};
-
-const welcomeTourStepsLegacy: Step[] = [
+export const welcomeTourSteps: Step[] = [
   {
     target: "body",
     content:
@@ -72,147 +51,6 @@ const welcomeTourStepsLegacy: Step[] = [
     title: "You're All Set!",
   },
 ];
-
-/** Welcome tour when unified Cohi Chat IA is enabled. */
-export const welcomeTourStepsUnified: Step[] = [
-  {
-    target: "body",
-    content:
-      "Welcome to Cohi! This quick tour will show you the key areas of the platform. You can replay this tour anytime from Settings.",
-    placement: "center",
-    disableBeacon: true,
-    title: "Welcome to Cohi",
-  },
-  {
-    target: '[aria-label="Main navigation"]',
-    content:
-      "This is your main navigation bar. From here you can access Insights, TopTiering analytics, your Workbench, and Communications Center. Deep research lives inside Cohi Chat.",
-    placement: "bottom",
-    title: "Navigation",
-  },
-  {
-    target: '[aria-label="Insights menu"]',
-    content:
-      "The Insights page is your home base. It shows AI-generated Daily Briefings, industry news, performance leaderboards, and KPI overviews.",
-    placement: "bottom",
-    title: "Insights Dashboard",
-  },
-  sidebarTourStep("insights", {
-    content:
-      "Insights in the sidebar is a single button that opens the full Insights page. Cohi Insights and Cohi Mortgage News are still on that page—only duplicate sidebar shortcuts were removed.",
-    title: "Insights",
-  }),
-  sidebarTourStep("myDashboards", {
-    content:
-      "My Dashboards lists your pinned TopTiering dashboards and pinned workbench canvases together, collapsed by default. Pin from any dashboard or canvas the same way you always have.",
-    title: "My Dashboards",
-  }),
-  {
-    target: '[data-track="nav_communications_center"]',
-    content:
-      "Communications Center is in the top navigation now (where Research Lab used to be). Same distributions, templates, and permissions—just a clearer home while Research runs in Cohi Chat.",
-    placement: "bottom",
-    title: "Communications Center",
-  },
-  {
-    target: "body",
-    content:
-      'That\'s the basics! Cohi Chat is centralized under the top bar on every page. Explore Help Center for guides, or take the **Cohi Chat Tour** from "What You Can Ask Cohi" for a hands-on walkthrough.',
-    placement: "center",
-    title: "You're All Set!",
-  },
-];
-
-export const welcomeTourSteps = isUnifiedChatClientEnabled()
-  ? welcomeTourStepsUnified
-  : welcomeTourStepsLegacy;
-
-export const cohiChatTourSteps: Step[] = isUnifiedChatClientEnabled()
-  ? [
-      {
-        target: "body",
-        content:
-          "Welcome back—nothing you relied on went away. Cohi Chat now lives in one band directly under the top navigation, on every page. General questions, Research, custom insights, and Workbench building all start here instead of separate chat panels.",
-        placement: "center",
-        disableBeacon: true,
-        title: "One place to talk to Cohi",
-      },
-      {
-        target: '[data-tour="unified-chat-shell"]',
-        content:
-          "This is Cohi Chat. Ask a question from Insights, a dashboard, or the Workbench—the assistant and your conversation stay with you.",
-        placement: "bottom",
-        title: "Your chat, front and center",
-      },
-      {
-        target: '[data-tour="unified-chat-type"]',
-        content:
-          "Use the chat type menu to pick the mode. Chat (default) is for quick data and navigation questions. Research, formerly Research Lab, runs the full analyst workflow. Insight builder drafts custom insight prompts that feed My Insights. Workbench helps you build dashboards and widgets. Same engines as before—one unified chat.",
-        placement: "bottom",
-        title: "Choose how Cohi helps",
-      },
-      {
-        target: '[data-tour="unified-chat-suggestions"]',
-        content:
-          "Not sure what to ask? Suggested prompts change with the chat type you selected. Click one to start, or type your own question in the box below.",
-        placement: "top",
-        title: "Try an example",
-      },
-      {
-        target: '[data-tour="unified-chat-composer"]',
-        content:
-          "Type here and press Send. Cohi still understands your loan data, can generate charts and reports, and can point you to pages in the app. Be specific with dates, metrics, and channels—just like before.",
-        placement: "top",
-        title: "Ask anything",
-      },
-      {
-        target: '[data-tour="unified-chat-layout"]',
-        content:
-          "Need more space? Expand to Taller, Full page, or Split screen (page on the left, chat on the right). Research automatically opens full page when you start an investigation—same experience, less clutter.",
-        placement: "bottom",
-        title: "Resize when you need room",
-      },
-      sidebarTourStep("insights", {
-        content:
-          "Insights in the sidebar now takes you straight to the insights page. Cohi Insights and Cohi Mortgage News are still on that page—only the extra sidebar shortcuts were removed so navigation stays simple.",
-        title: "Insights — same page, simpler sidebar",
-      }),
-      sidebarTourStep("myDashboards", {
-        content:
-          "My Dashboards still lists your pinned dashboards and pinned workbenches—together, collapsed by default. Pin from any canvas the same way you always have; open them from here.",
-        title: "My Dashboards",
-      }),
-      sidebarTourStep("folders", {
-        content:
-          "Folders let you group past conversations—like projects in other chat apps. Create folders, nest up to five levels, then add chats two ways: drag a conversation from History onto a folder, or click the Move to folder button on any chat row and pick a destination from the menu. Your old Research sessions appear here too.",
-        title: "Organize with folders",
-      }),
-      sidebarTourStep("history", {
-        content:
-          "History shows your latest chats across all chat types. Click any row to resume. Research no longer keeps a separate session column inside the workspace—everything is in this one timeline.",
-        title: "Recent conversations",
-      }),
-      sidebarTourStep("fullHistory", {
-        content:
-          "Open Full History to search every thread, filter by chat type, and browse older sessions with pagination.",
-        title: "Full History",
-      }),
-      {
-        target: '[data-track="nav_communications_center"]',
-        content:
-          "Communications Center moved to the top navigation (where Research Lab used to be). The feature is unchanged—same distributions, templates, and permissions—just easier to find while Research lives in chat.",
-        placement: "bottom",
-        title: "Communications Center",
-      },
-      {
-        target: "body",
-        content:
-          "That's the new layout. Explore Help Center articles for example queries per mode, or replay this tour anytime from What You Can Ask Cohi.",
-        placement: "center",
-        title: "You're set",
-      },
-    ]
-  : [];
 
 export const workbenchTourSteps: Step[] = [
   {
@@ -481,7 +319,6 @@ export const financialModelingTourSteps: Step[] = [
 
 export type TourId =
   | "welcome"
-  | "cohi-chat"
   | "workbench"
   | "research"
   | "toptiering"
@@ -490,7 +327,6 @@ export type TourId =
 
 export const tourRegistry: Record<TourId, { steps: Step[]; label: string }> = {
   welcome: { steps: welcomeTourSteps, label: "Welcome Tour" },
-  "cohi-chat": { steps: cohiChatTourSteps, label: "Cohi Chat Tour" },
   workbench: { steps: workbenchTourSteps, label: "Workbench Tour" },
   research: { steps: researchLabTourSteps, label: "Research Lab Tour" },
   toptiering: { steps: topTieringTourSteps, label: "TopTiering Tour" },
@@ -500,7 +336,3 @@ export const tourRegistry: Record<TourId, { steps: Step[]; label: string }> = {
     label: "Financial Modeling Tour",
   },
 };
-
-export function tourHasSteps(tourId: TourId): boolean {
-  return (tourRegistry[tourId]?.steps.length ?? 0) > 0;
-}

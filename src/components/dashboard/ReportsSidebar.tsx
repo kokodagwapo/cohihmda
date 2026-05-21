@@ -615,7 +615,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { state, isMobile, setOpen: setSidebarOpen } = useSidebar();
+  const { state, isMobile } = useSidebar();
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
   const isExpanded = state !== 'collapsed';
@@ -633,15 +633,6 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const [insightsExpanded, setInsightsExpanded] = useState(true);
   const unifiedChatIa = isUnifiedChatClientEnabled();
   const [dashboardsExpanded, setDashboardsExpanded] = useState(() => !unifiedChatIa);
-
-  useEffect(() => {
-    const onTourOpenSidebar = () => {
-      setSidebarOpen(true);
-    };
-    window.addEventListener("cohi-tour-open-app-sidebar", onTourOpenSidebar);
-    return () =>
-      window.removeEventListener("cohi-tour-open-app-sidebar", onTourOpenSidebar);
-  }, [setSidebarOpen]);
   const [researchExpanded, setResearchExpanded] = useState(true);
   const [toptieringExpanded, setToptieringExpanded] = useState(false);
   const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(true);
@@ -1081,7 +1072,6 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     tenantId={selectedTenantId ?? undefined}
                     isDarkMode={isDarkMode}
                     isExpanded
-                    includeTourAnchors={false}
                   />
                 )}
 
@@ -1295,10 +1285,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
           )}
         </SidebarHeader>
 
-        <SidebarContent
-          data-tour-root="desktop-sidebar-nav"
-          className={cn("pb-3 overflow-y-auto flex-1 min-h-0")}
-        >
+        <SidebarContent className={cn("pb-3 overflow-y-auto flex-1 min-h-0")}>
         <div className={cn("py-2", isExpanded ? "pl-1 pr-2" : "px-1")}>
           {/* Search moved to top nav - sidebar no longer shows search bar */}
           {/* Insights â€” Â§6.1 single control when unified */}
@@ -1584,21 +1571,14 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             <div className={cn("mb-2")}>
               <button
                 type="button"
-                id="cohi-tour-sidebar-my-dashboards"
                 onClick={() => setDashboardsExpanded(!dashboardsExpanded)}
                 style={{ width: '100%', padding: '12px 10px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, transition: 'all 0.2s ease' }}
-                className="rounded-lg"
                 onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
-                <span
-                  className={cn(
-                    "inline-flex shrink-0 w-9 h-9 rounded-lg items-center justify-center pointer-events-none",
-                    MY_DASHBOARDS_ACCENT.iconTile,
-                  )}
-                >
+                <div className={cn("flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}>
                   <TrendingUp className={cn("w-[18px] h-[18px]", MY_DASHBOARDS_ACCENT.icon)} />
-                </span>
+                </div>
                 <p className={cn("text-sm font-semibold flex-1 m-0", MY_DASHBOARDS_ACCENT.label)}>My Dashboards</p>
                 <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: dashboardsExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
               </button>
@@ -1674,15 +1654,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 >
                   <button
                     type="button"
-                    id="cohi-tour-sidebar-my-dashboards"
                     className={cn("w-9 h-9 rounded-lg flex items-center justify-center", MY_DASHBOARDS_ACCENT.iconTile)}
                     aria-label="My Dashboards"
                   >
-                    <span
-                      className="inline-flex h-9 w-9 items-center justify-center pointer-events-none"
-                    >
-                      <TrendingUp className={cn("w-4 h-4", MY_DASHBOARDS_ACCENT.icon)} />
-                    </span>
+                    <TrendingUp className={cn("w-4 h-4", MY_DASHBOARDS_ACCENT.icon)} />
                   </button>
                 </div>
               </PopoverTrigger>

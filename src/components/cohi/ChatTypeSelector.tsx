@@ -72,8 +72,6 @@ export function ChatTypeSelect({
 
         aria-label="Chat type"
 
-        data-tour="unified-chat-type"
-
       >
 
         <SelectValue />

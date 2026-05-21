@@ -46,7 +46,6 @@ export function UnifiedChatShell({ tenantId, className }: UnifiedChatShellProps)
   return (
     <motion.section
       data-testid="unified-chat-shell"
-      data-tour="unified-chat-shell"
       data-stacked-inset={isStackedInsetLayout ? "" : undefined}
       animate={
         usesAnimatedHeight

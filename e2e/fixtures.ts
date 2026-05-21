@@ -1,4 +1,4 @@
-import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import path from "node:path";
 
 type AppFixtures = {
@@ -16,37 +16,21 @@ const canvasOnlyStatePath = path.join(
   "canvas-only.json",
 );
 
-async function addE2EBrowserInitScripts(context: BrowserContext) {
-  await context.addInitScript(() => {
-    try {
-      localStorage.setItem(
-        "cohi-welcome-tour-last-shown",
-        new Date().toISOString(),
-      );
-    } catch {
-      /* ignore */
-    }
-  });
-}
-
 export const test = base.extend<AppFixtures>({
   userPage: async ({ browser }, use) => {
     const context = await browser.newContext({ storageState: userStatePath });
-    await addE2EBrowserInitScripts(context);
     const page = await context.newPage();
     await use(page);
     await context.close();
   },
   adminPage: async ({ browser }, use) => {
     const context = await browser.newContext({ storageState: adminStatePath });
-    await addE2EBrowserInitScripts(context);
     const page = await context.newPage();
     await use(page);
     await context.close();
   },
   canvasOnlyPage: async ({ browser }, use) => {
     const context = await browser.newContext({ storageState: canvasOnlyStatePath });
-    await addE2EBrowserInitScripts(context);
     const page = await context.newPage();
     await use(page);
     await context.close();

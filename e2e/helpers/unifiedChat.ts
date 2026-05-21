@@ -77,87 +77,29 @@ export async function forceUnifiedChat(page: Page): Promise<void> {
   });
 }
 
-function shellReadyTimeout(options?: { timeout?: number }): number {
-  const base = options?.timeout ?? 30_000;
-  return process.env.CI ? Math.max(base, 45_000) : base;
-}
-
-/** Navigate and wait for the horizontal unified shell (45s on CI for slow deploys). */
+/** Navigate and wait for the horizontal unified shell (30s for slow CI deploys). */
 export async function gotoWithUnifiedChatShell(
   page: Page,
   path: string,
   options?: { timeout?: number },
 ): Promise<void> {
-  const timeout = shellReadyTimeout(options);
+  const timeout = options?.timeout ?? 30_000;
   await page.goto(path, { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
   await expect(page.getByTestId("unified-chat-shell")).toBeVisible({ timeout });
-  await expect(unifiedChatMessageInput(page)).toBeVisible({ timeout });
-  await resetUnifiedChatShellToCompact(page);
 }
 
-/** Workbench hub pages (favorites, shared-with-me) with unified shell + v1 hub query. */
-export async function gotoWorkbenchHubWithUnifiedShell(
-  page: Page,
-  path: "/workbench/favorites" | "/workbench/shared-with-me" | "/workbench/team-folders",
-  options?: { timeout?: number },
-): Promise<void> {
-  await gotoWithUnifiedChatShell(page, path, options);
-}
-
-const WORKBENCH_HUB_ASK_PLACEHOLDER = "Ask Cohi anything...";
-
-/** Hub top bar ask → POST /api/chat/v1/messages (not shell stream). */
-export async function submitWorkbenchHubAsk(
-  page: Page,
-  prompt: string,
-): Promise<void> {
-  const input = page.getByPlaceholder(WORKBENCH_HUB_ASK_PLACEHOLDER);
-  await expect(input).toBeVisible({ timeout: 15_000 });
-  await input.fill(prompt);
-  await input.press("Enter");
-}
-
-/** When chat is in full-page mode, dashboard widgets are in a hidden column — restore compact band. */
-export async function resetUnifiedChatShellToCompact(page: Page): Promise<void> {
+/** When chat is in full-page mode, insights widgets sit in a hidden column — restore compact band. */
+export async function ensureDashboardPageContentVisible(page: Page): Promise<void> {
   const shell = page.getByTestId("unified-chat-shell");
-  const shellVisible = await shell.isVisible({ timeout: 3_000 }).catch(() => false);
+  const shellVisible = await shell.isVisible({ timeout: 5_000 }).catch(() => false);
   if (!shellVisible) return;
-
-  const exitFull = page.getByRole("button", { name: "Exit full page" });
-  if (await exitFull.isVisible({ timeout: 1_500 }).catch(() => false)) {
-    await exitFull.click({ force: true });
-    await page.waitForTimeout(300);
-  }
 
   const compact = page.getByRole("button", { name: "Compact" });
   if (await compact.isVisible({ timeout: 2_000 }).catch(() => false)) {
     await compact.click({ force: true });
     await page.waitForTimeout(300);
   }
-}
-
-/** @deprecated Use resetUnifiedChatShellToCompact */
-export async function ensureDashboardPageContentVisible(page: Page): Promise<void> {
-  await resetUnifiedChatShellToCompact(page);
-}
-
-/** Dashboard route goto with overlay dismissal and compact unified shell (CI-safe). */
-export async function gotoDashboardPage(
-  page: Page,
-  path: string,
-  options?: { timeout?: number },
-): Promise<void> {
-  await page.goto(path, { waitUntil: "domcontentloaded" });
-  await dismissBlockingOverlays(page);
-  await expect(
-    page
-      .getByRole("navigation", { name: /main navigation/i })
-      .or(page.locator("#CohiInsights"))
-      .or(page.getByRole("heading", { level: 1 }).first())
-      .first(),
-  ).toBeVisible({ timeout: options?.timeout ?? (process.env.CI ? 45_000 : 30_000) });
-  await resetUnifiedChatShellToCompact(page);
 }
 
 export async function forceLegacyChatOnly(page: Page): Promise<void> {
@@ -233,13 +175,9 @@ export type StreamMockOptions = {
   streamMetadata?: Record<string, unknown>;
 };
 
-/** Open consolidated Research mode (COHI-404 / COHI-406). Defaults to Insights. */
-export async function openConsolidatedResearchChat(
-  page: Page,
-  options?: { path?: string },
-): Promise<void> {
-  const path = options?.path ?? "/insights?mode=research";
-  await gotoWithUnifiedChatShell(page, path);
+/** Open consolidated Research mode on Insights (COHI-404 / COHI-406). */
+export async function openConsolidatedResearchChat(page: Page): Promise<void> {
+  await gotoWithUnifiedChatShell(page, "/insights?mode=research");
   await expandChatShellForResearch(page);
   await selectUnifiedChatType(page, "Research");
 }

@@ -22,7 +22,7 @@ export default defineConfig({
     : [["html", { open: "never" }]],
   timeout: 60_000,
   expect: {
-    timeout: isCI ? 15_000 : 10_000,
+    timeout: 10_000,
   },
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",

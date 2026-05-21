@@ -1,11 +1,7 @@
-import { useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import Joyride, { CallBackProps, STATUS, ACTIONS, EVENTS } from 'react-joyride';
 import { useTutorial } from '@/contexts/TutorialContext';
-import { tourHasSteps, tourRegistry, type TourId } from '@/data/tourSteps';
-import {
-  dispatchOpenAppSidebarForTour,
-  isDesktopSidebarTourTarget,
-} from '@/lib/tourTargets';
+import { tourRegistry, type TourId } from '@/data/tourSteps';
 
 interface FeatureTourProps {
   tourId: TourId;
@@ -64,63 +60,63 @@ const joyrideStyles = {
 };
 
 export function FeatureTour({ tourId, autoStart = false }: FeatureTourProps) {
-  const {
-    activeTourId,
-    isTourCompleted,
-    completeTour,
-    tourStepHandlerRef,
-  } = useTutorial();
+  const { activeTourId, isTourCompleted, completeTour, endTour, tourStepHandlerRef } = useTutorial();
+  const [stepIndex, setStepIndex] = useState(0);
+  const [isWaiting, setIsWaiting] = useState(false);
+  const waitingRef = useRef(false);
 
   const tour = tourRegistry[tourId];
-  if (!tour || !tourHasSteps(tourId)) return null;
+  if (!tour) return null;
 
   const isRunning = activeTourId === tourId;
   const shouldAutoStart = autoStart && !isTourCompleted(tourId);
 
-  const handleCallback = useCallback(
-    async (data: CallBackProps) => {
-      const { status, action, type, index, step } = data;
+  const handleCallback = useCallback(async (data: CallBackProps) => {
+    const { status, action, type, index } = data;
 
-      if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
-        completeTour(tourId);
-        return;
-      }
-      if (action === ACTIONS.CLOSE) {
-        completeTour(tourId);
-        return;
-      }
+    if (status === STATUS.FINISHED) {
+      completeTour(tourId);
+      return;
+    }
+    if (status === STATUS.SKIPPED || action === ACTIONS.CLOSE) {
+      completeTour(tourId);
+      return;
+    }
+    if (type === EVENTS.TOUR_END) {
+      endTour(tourId);
+      return;
+    }
 
-      // Internal lifecycle noise while the tour is still active (remount, run toggle).
-      if (type === EVENTS.TOUR_END) {
-        return;
-      }
-
-      if (type === EVENTS.TARGET_NOT_FOUND) {
-        const target =
-          typeof step?.target === 'string' ? step.target : '';
-        if (target && isDesktopSidebarTourTarget(target)) {
-          await dispatchOpenAppSidebarForTour();
-          window.dispatchEvent(new Event('resize'));
-        }
-        return;
-      }
-
-      if (type === EVENTS.STEP_AFTER && action === ACTIONS.NEXT) {
+    if (type === EVENTS.STEP_AFTER) {
+      if (action === ACTIONS.NEXT) {
         const handler = tourStepHandlerRef.current;
-        if (handler) {
-          await handler(tourId, index);
+        if (handler && !waitingRef.current) {
+          const result = handler(tourId, index);
+          if (result && typeof result.then === 'function') {
+            waitingRef.current = true;
+            setIsWaiting(true);
+            try {
+              await result;
+            } finally {
+              waitingRef.current = false;
+              setIsWaiting(false);
+            }
+          }
         }
+        setStepIndex(index + 1);
+      } else if (action === ACTIONS.PREV) {
+        setStepIndex(index - 1);
       }
-    },
-    [tourId, completeTour, tourStepHandlerRef],
-  );
+    }
+  }, [tourId, completeTour, endTour, tourStepHandlerRef]);
 
   if (!isRunning && !shouldAutoStart) return null;
 
   return (
     <Joyride
       steps={tour.steps}
-      run={isRunning || shouldAutoStart}
+      stepIndex={stepIndex}
+      run={(isRunning || shouldAutoStart) && !isWaiting}
       continuous
       showProgress
       showSkipButton

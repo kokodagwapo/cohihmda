@@ -961,7 +961,6 @@ export function Navigation(
             <button
               type="button"
               data-track="nav_communications_center_mobile"
-              data-tour="nav-communications-center"
               onClick={() => {
                 navigate("/workbench/distributions");
                 setMobileMenuOpen(false);
@@ -1715,7 +1714,6 @@ export function Navigation(
                 <button
                   type="button"
                   data-track="nav_communications_center"
-                  data-tour="nav-communications-center"
                   onClick={() => navigate("/workbench/distributions")}
                   className={cn(
                     topNavPillBase,

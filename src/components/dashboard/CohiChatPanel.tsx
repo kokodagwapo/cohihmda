@@ -2177,7 +2177,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           chatType={activeChatType}
         />
       )}
-      <div className="flex gap-2 items-end" data-tour="unified-chat-composer">
+      <div className="flex gap-2 items-end">
         {isUnifiedChatClientEnabled() && (
           <ChatTypeSelect
             value={activeChatType}

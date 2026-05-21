@@ -44,7 +44,6 @@ export function ChatShellExpandControls({
       className={cn("flex items-center gap-0.5", className)}
       role="group"
       aria-label="Chat layout"
-      data-tour="unified-chat-layout"
     >
       {visibleModes.map(({ id, label, icon: Icon }) => (
         <Button

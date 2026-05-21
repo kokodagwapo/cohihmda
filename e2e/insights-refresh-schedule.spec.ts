@@ -1,6 +1,5 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
-import { gotoDashboardPage } from "./helpers/unifiedChat";
 
 const mockInsight = {
   id: 1501,
@@ -73,7 +72,7 @@ test.describe("Insights refresh schedule display", () => {
       syncFrequency: "hourly",
     });
 
-    await gotoDashboardPage(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
 
     const insightsSection = userPage.locator("#CohiInsights");
     await expect(insightsSection).toBeVisible({ timeout: 15_000 });
@@ -91,7 +90,7 @@ test.describe("Insights refresh schedule display", () => {
       syncFrequency: null,
     });
 
-    await gotoDashboardPage(userPage, "/insights");
+    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
 
     const insightsSection = userPage.locator("#CohiInsights");
     await expect(insightsSection).toBeVisible({ timeout: 15_000 });

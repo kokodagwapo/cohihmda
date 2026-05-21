@@ -1,6 +1,5 @@
 import { test, expect } from "./fixtures";
 import type { Page, Route } from "@playwright/test";
-import { resetUnifiedChatShellToCompact } from "./helpers/unifiedChat";
 
 type OverviewPayload = {
   activeLoans: { count: number; volume: number; avgInterestRate: number };
@@ -55,7 +54,6 @@ async function dismissBlockingOverlays(page: Page) {
     await page.keyboard.press("Escape");
     await page.waitForTimeout(350);
   }
-  await resetUnifiedChatShellToCompact(page);
 }
 
 function cloneBaseOverviewPayload(): OverviewPayload {
