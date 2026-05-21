@@ -9,8 +9,7 @@
 
 import express from "express";
 import request from "supertest";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Express } from "express";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   reserveMock,
@@ -83,38 +82,14 @@ vi.mock("../services/chat/unifiedResearchStream.js", () => ({
   runUnifiedResearchStream: researchStreamMock,
 }));
 
-vi.mock("../services/chat/unifiedChatFolderService.js", () => ({
-  listUnifiedChatFolders: vi.fn(async () => []),
-  createUnifiedChatFolder: vi.fn(),
-  renameUnifiedChatFolder: vi.fn(),
-  moveUnifiedChatFolder: vi.fn(),
-  deleteUnifiedChatFolder: vi.fn(),
-}));
-
-vi.mock("../services/chat/unifiedChatGlobalStream.js", () => ({
-  runUnifiedGlobalStream: vi.fn(),
-}));
-
-vi.mock("../services/chat/unifiedChatInsightBuilderStream.js", () => ({
-  runUnifiedInsightBuilderStream: vi.fn(),
-}));
-
-vi.mock("../services/chat/unifiedChatStream.js", () => ({
-  emitValidatedStreamWithDeltas: vi.fn(),
-}));
-
-let chatV1App: Express;
-
-beforeAll(async () => {
-  const mod = await import("./chatV1.js");
-  const app = express();
-  app.use(express.json());
-  app.use("/api/chat/v1", mod.default);
-  chatV1App = app;
-});
-
 function buildApp(): Promise<express.Express> {
-  return Promise.resolve(chatV1App);
+  // import after mocks
+  return import("./chatV1.js").then((mod) => {
+    const app = express();
+    app.use(express.json());
+    app.use("/api/chat/v1", mod.default);
+    return app;
+  });
 }
 
 beforeEach(() => {
