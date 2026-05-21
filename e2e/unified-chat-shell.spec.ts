@@ -14,7 +14,7 @@ test.describe("Unified chat shell (COHI-404)", () => {
     await mockUnifiedChatApis(userPage);
   });
 
-  test("@critical @COHI-386 @COHI-404 AC2 default chat band height near 500px", async ({
+  test("@critical @COHI-404 AC2 default chat band height near 500px", async ({
     userPage,
   }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
@@ -29,7 +29,7 @@ test.describe("Unified chat shell (COHI-404)", () => {
     expect(height).toBeLessThanOrEqual(520);
   });
 
-  test("@critical @COHI-386 @COHI-404 AC3 route navigation resets expand state", async ({
+  test("@critical @COHI-404 AC3 route navigation resets expand state", async ({
     userPage,
   }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
@@ -49,7 +49,7 @@ test.describe("Unified chat shell (COHI-404)", () => {
     expect(stacked).not.toBeNull();
   });
 
-  test("@critical @COHI-386 @COHI-404 @COHI-402 AC4 research submit auto-expands full page", async ({
+  test("@critical @COHI-404 @COHI-402 AC4 research submit auto-expands full page", async ({
     userPage,
   }) => {
     await mockV1MessageStream(userPage, {

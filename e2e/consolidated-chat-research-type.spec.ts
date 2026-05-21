@@ -153,7 +153,7 @@ test.describe("@critical Consolidated chat — Research type", () => {
     await mockV1Permissions(userPage);
   });
 
-  test("@smoke @COHI-386 research mode loads chat input and deep analysis toggle", async ({
+  test("@smoke research mode loads chat input and deep analysis toggle", async ({
     userPage,
   }) => {
     await openConsolidatedResearchChat(userPage);
@@ -163,9 +163,7 @@ test.describe("@critical Consolidated chat — Research type", () => {
     ).toBeVisible();
   });
 
-  test("@smoke @COHI-386 accepts research question in unified chat input", async ({
-    userPage,
-  }) => {
+  test("@smoke accepts research question in unified chat input", async ({ userPage }) => {
     await openConsolidatedResearchChat(userPage);
     const input = unifiedChatMessageInput(userPage);
     await input.fill("What are the top 5 conversion bottlenecks this month?");
@@ -174,7 +172,7 @@ test.describe("@critical Consolidated chat — Research type", () => {
     );
   });
 
-  test("@critical @COHI-386 @COHI-106 research workspace shows timeline after investigation", async ({
+  test("@critical @COHI-106 research workspace shows timeline after investigation", async ({
     userPage,
   }) => {
     test.setTimeout(90_000);
@@ -212,7 +210,7 @@ test.describe("@critical Consolidated chat — Research type", () => {
     await expect(workspace.getByRole("tab", { name: "Timeline" })).toBeVisible();
   });
 
-  test("@critical @COHI-386 @COHI-331 renders finding summaries as readable bullets", async ({
+  test("@critical @COHI-331 renders finding summaries as readable bullets", async ({
     userPage,
   }) => {
     await mockResearchSessionApi(userPage, COHI_331_SESSION, {
@@ -243,7 +241,7 @@ test.describe("@critical Consolidated chat — Research type", () => {
     ).toBeVisible();
   });
 
-  test("@critical @COHI-386 @COHI-363 saves research visualization below existing Workbench content (real backend)", async ({
+  test("@critical @COHI-363 saves research visualization below existing Workbench content (real backend)", async ({
     userPage,
   }) => {
     test.setTimeout(180_000);
