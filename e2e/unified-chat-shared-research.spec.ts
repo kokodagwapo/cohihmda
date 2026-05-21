@@ -14,7 +14,7 @@ test.describe("Unified shared research (COHI-402)", () => {
     await mockUnifiedChatApis(userPage);
   });
 
-  test("@critical shared research shows pill and read-only composer", async ({
+  test("@critical @COHI-386 shared research shows pill and read-only composer", async ({
     userPage,
   }) => {
     const sharedConversationId = "550e8400-e29b-41d4-a716-446655440088";

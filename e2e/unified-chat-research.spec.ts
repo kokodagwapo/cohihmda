@@ -42,7 +42,7 @@ test.describe("Unified research in chat (COHI-402 / COHI-397)", () => {
     });
   });
 
-  test("@critical research stream accepts uploadIds on new session", async ({
+  test("@critical @COHI-386 research stream accepts uploadIds on new session", async ({
     userPage,
   }) => {
     await mockUnifiedChatTenantApi(userPage);
