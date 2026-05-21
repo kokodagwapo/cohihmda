@@ -1960,19 +1960,16 @@ export class EncompassApiService {
   }
 
   /**
-   * Fetch all loan GUIDs that currently exist in the given folders via the v3
-   * Pipeline API. Uses the proven folder-filter approach (same as getLoans) but
-   * requests only Fields.GUID to keep payloads minimal.
-   *
-   * Used by folder reconciliation to determine which loans *should* be in the DB.
+   * Fetch current Encompass folder assignments for all loans in the given folders.
+   * Uses the same pipeline folder filter as sync; requests GUID + Loan.LoanFolder only.
    */
-  public async getLoanGuidsByFolders(
+  public async getLoanFolderAssignmentsBySyncedFolders(
     tenantId: string,
     losConnectionId: string,
     folderNames: string[],
     loanStartDate?: Date,
-  ): Promise<Set<string>> {
-    if (folderNames.length === 0) return new Set();
+  ): Promise<Map<string, string>> {
+    if (folderNames.length === 0) return new Map();
 
     const clientDetails = await getEncompassCredentials(tenantId, losConnectionId);
     const apiServer = clientDetails.ApiServer || "https://api.elliemae.com";
@@ -1980,7 +1977,6 @@ export class EncompassApiService {
       baseURL: `${apiServer}/encompass`,
     });
 
-    // Build folder filter terms
     const folderTerms = folderNames.map((name) => ({
       canonicalName: "Loan.LoanFolder",
       value: name,
@@ -1988,11 +1984,8 @@ export class EncompassApiService {
       include: true,
     }));
 
-    const filterTerms: any[] = [
-      { operator: "or", terms: folderTerms },
-    ];
+    const filterTerms: any[] = [{ operator: "or", terms: folderTerms }];
 
-    // Apply same loan start date filter as normal sync (defaults to 36 months ago)
     const startDate = loanStartDate ?? (() => {
       const d = new Date();
       d.setMonth(d.getMonth() - 36);
@@ -2008,12 +2001,12 @@ export class EncompassApiService {
 
     const body = {
       filter: { operator: "and", terms: filterTerms },
-      fields: ["Fields.GUID"],
+      fields: ["Fields.GUID", "Loan.LoanFolder"],
       sortOrder: [{ canonicalName: "Loan.LastModified", order: "descending" }],
       includeArchivedLoans: true,
     };
 
-    const guids = new Set<string>();
+    const folderByGuid = new Map<string, string>();
     let pageNumber = 0;
     let start = 0;
     const pageLimit = 1000;
@@ -2042,23 +2035,45 @@ export class EncompassApiService {
 
       for (const loan of pageLoans) {
         const rawGuid = loan["Fields.GUID"] || loan["GUID"] || loan.loanGuid || loan.guid;
-        if (rawGuid) {
-          guids.add(rawGuid.replace(/[{}]/g, "").toLowerCase());
-        }
+        if (!rawGuid) continue;
+        const guid = rawGuid.replace(/[{}]/g, "").toLowerCase();
+        const folder = String(
+          loan["Loan.LoanFolder"] ?? loan.loanFolder ?? "",
+        ).trim();
+        folderByGuid.set(guid, folder);
       }
 
       console.log(
-        `[Reconcile] Folder GUID fetch page ${pageNumber}: ${pageLoans.length} loans, running total=${guids.size}`,
+        `[Reconcile] Folder assignment fetch page ${pageNumber}: ${pageLoans.length} loans, running total=${folderByGuid.size}`,
       );
 
-      // Stop only on an empty page — a short (but non-empty) page is NOT a reliable
-      // end-of-results signal for the Encompass Pipeline API and can cause early termination,
-      // leaving the GUID set incomplete and triggering false deletions during reconciliation.
       if (pageLoans.length === 0) break;
       start += pageLoans.length;
     }
 
-    return guids;
+    return folderByGuid;
+  }
+
+  /**
+   * Fetch all loan GUIDs that currently exist in the given folders via the v3
+   * Pipeline API. Uses the proven folder-filter approach (same as getLoans) but
+   * requests only Fields.GUID to keep payloads minimal.
+   *
+   * Used by folder reconciliation to determine which loans *should* be in the DB.
+   */
+  public async getLoanGuidsByFolders(
+    tenantId: string,
+    losConnectionId: string,
+    folderNames: string[],
+    loanStartDate?: Date,
+  ): Promise<Set<string>> {
+    const folderByGuid = await this.getLoanFolderAssignmentsBySyncedFolders(
+      tenantId,
+      losConnectionId,
+      folderNames,
+      loanStartDate,
+    );
+    return new Set(folderByGuid.keys());
   }
 
   /**
