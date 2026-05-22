@@ -269,9 +269,14 @@ export function useResearchSession(tenantId?: string | null) {
         }
         break;
       }
-      case "quick_result":
-        setFindings([event.data as Finding]);
+      case "quick_result": {
+        const finding = event.data as Finding;
+        setFindings((prev) => {
+          if (prev.some((f) => f.questionId === finding.questionId)) return prev;
+          return prev.length === 0 ? [finding] : [...prev, finding];
+        });
         break;
+      }
       case "synthesis":
         setReport(event.data as ResearchReport);
         break;
@@ -403,11 +408,6 @@ export function useResearchSession(tenantId?: string | null) {
           "POST",
           JSON.stringify({ question })
         );
-
-        setEvents((prev) => [
-          ...prev,
-          { type: "user_followup", data: { question }, timestamp: Date.now() },
-        ]);
       } catch (err: any) {
         console.error("[Research] Follow-up failed:", err);
         setPhase("error");

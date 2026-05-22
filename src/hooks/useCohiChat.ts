@@ -17,10 +17,18 @@ import type { WidgetAction, CanvasStateSnapshot } from "@/types/widgetActions";
 import {
   deliverWorkbenchWidgetActions,
   filterExecutableWorkbenchActions,
+  COHI_WORKBENCH_BIND_CANVAS_EVENT,
+  draftScopeIdForCanvasTab,
+  getConnectedWorkbenchCanvasId,
+  getMyDashboardCanvasIdFromPath,
   getOrCreateActiveWorkbenchDraftScope,
+  rememberWorkbenchDraftTab,
+  markWorkbenchCanvasNavBound,
   resetActiveWorkbenchDraftSession,
+  setActiveWorkbenchDraftScope,
 } from "@/lib/workbench/workbenchChatHandoff";
 import {
+  getWorkbenchCanvasBridge,
   getWorkbenchCanvasIdForDraft,
   getWorkbenchCanvasSnapshotForDraft,
 } from "@/lib/workbench/workbenchCanvasBridge";
@@ -191,9 +199,23 @@ function emptyWorkbenchCanvasState(): CanvasStateSnapshot {
   return { groups: [], standaloneWidgets: [], totalItems: 0 };
 }
 
-function buildWorkbenchRequestContext(draftScopeId: string): Record<string, unknown> {
+function resolveWorkbenchDraftScopeId(): string {
+  const bridge = getWorkbenchCanvasBridge();
+  if (bridge?.isActive) return bridge.draftScopeId;
+  return getOrCreateActiveWorkbenchDraftScope();
+}
+
+function buildWorkbenchRequestContext(draftScopeId?: string): Record<string, unknown> {
+  const bridge = getWorkbenchCanvasBridge();
+  if (bridge?.isActive) {
+    return {
+      canvasState: bridge.getCanvasSnapshot(),
+      widgetCatalog: serializeWidgetCatalog(),
+    };
+  }
+  const scopeId = draftScopeId ?? resolveWorkbenchDraftScopeId();
   const canvasState =
-    getWorkbenchCanvasSnapshotForDraft(draftScopeId) ?? emptyWorkbenchCanvasState();
+    getWorkbenchCanvasSnapshotForDraft(scopeId) ?? emptyWorkbenchCanvasState();
   return {
     canvasState,
     widgetCatalog: serializeWidgetCatalog(),
@@ -226,6 +248,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
   const messageIdCounter = useRef(0);
   const sendInFlightRef = useRef(false);
+  const loadSessionGenerationRef = useRef(0);
   const defaultTenantIdRef = useRef<string | null | undefined>(undefined);
 
   const [workbenchSavedCanvasId, setWorkbenchSavedCanvasId] = useState<
@@ -233,13 +256,27 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   >(null);
 
   const resetWorkbenchChatSession = useCallback(() => {
+    const urlCanvasId =
+      typeof window !== "undefined" ? getMyDashboardCanvasIdFromPath() : null;
+    const bridge = getWorkbenchCanvasBridge();
+    const canvasId = bridge?.canvasId ?? urlCanvasId ?? null;
+
+    if (canvasId) {
+      const scopeId = draftScopeIdForCanvasTab(canvasId);
+      setActiveWorkbenchDraftScope(scopeId);
+      rememberWorkbenchDraftTab(scopeId, canvasId);
+      markWorkbenchCanvasNavBound();
+      setWorkbenchSavedCanvasId(canvasId);
+      return;
+    }
+
     resetActiveWorkbenchDraftSession();
     setWorkbenchSavedCanvasId(null);
   }, []);
 
   useEffect(() => {
     if (chatType !== "workbench") return;
-    const handler = (e: Event) => {
+    const onSaved = (e: Event) => {
       const detail = (e as CustomEvent<{ canvasId?: string; draftScopeId?: string }>)
         .detail;
       if (detail?.canvasId && detail.draftScopeId) {
@@ -249,8 +286,16 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         }
       }
     };
-    window.addEventListener("workbench:canvas-saved", handler);
-    return () => window.removeEventListener("workbench:canvas-saved", handler);
+    const onBind = (e: Event) => {
+      const canvasId = (e as CustomEvent<{ canvasId?: string }>).detail?.canvasId;
+      if (canvasId) setWorkbenchSavedCanvasId(canvasId);
+    };
+    window.addEventListener("workbench:canvas-saved", onSaved);
+    window.addEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
+    return () => {
+      window.removeEventListener("workbench:canvas-saved", onSaved);
+      window.removeEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
+    };
   }, [chatType]);
 
   useEffect(() => {
@@ -396,7 +441,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         // Draft scope + canvas nav are owned by navigateForWorkbenchChatSubmit (panel);
         // only clear saved-canvas binding when starting a new conversation.
         if (chatType === "workbench") {
-          setWorkbenchSavedCanvasId(null);
+          const bridge = getWorkbenchCanvasBridge();
+          const onSavedCanvas =
+            typeof window !== "undefined" &&
+            !!(bridge?.canvasId || getMyDashboardCanvasIdFromPath());
+          if (!onSavedCanvas) {
+            setWorkbenchSavedCanvasId(null);
+          }
         }
         setMessages([userMessage, loadingMessage]);
       } else {
@@ -432,10 +483,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           };
 
           if (chatType === "workbench") {
-            const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+            const draftScopeId = resolveWorkbenchDraftScopeId();
 
+            const bridge = getWorkbenchCanvasBridge();
+            const connectedCanvasId = getConnectedWorkbenchCanvasId();
             const savedCanvasId =
               workbenchSavedCanvasId ??
+              connectedCanvasId ??
+              (bridge?.isActive ? bridge.canvasId : null) ??
               getWorkbenchCanvasIdForDraft(draftScopeId);
             if (savedCanvasId && savedCanvasId !== workbenchSavedCanvasId) {
               setWorkbenchSavedCanvasId(savedCanvasId);
@@ -519,9 +574,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               uploadIds: researchUploadIds,
               datasetUploadIds: datasetUploadIdsForSend,
               context:
-                ibDraft && chatType === "insight_builder"
-                  ? { insightBuilderDraft: ibDraft }
-                  : undefined,
+                chatType === "research" && priorLegacyRef
+                  ? { legacyResearchSessionId: priorLegacyRef }
+                  : ibDraft && chatType === "insight_builder"
+                    ? { insightBuilderDraft: ibDraft }
+                    : undefined,
               insightBuilder:
                 chatType === "insight_builder" && ibOpts?.action
                   ? { action: ibOpts.action }
@@ -738,9 +795,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           };
 
           if (chatType === "workbench") {
-            const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+            const draftScopeId = resolveWorkbenchDraftScopeId();
+            const bridge = getWorkbenchCanvasBridge();
+            const connectedCanvasId = getConnectedWorkbenchCanvasId();
             const savedCanvasId =
               workbenchSavedCanvasId ??
+              connectedCanvasId ??
+              (bridge?.isActive ? bridge.canvasId : null) ??
               getWorkbenchCanvasIdForDraft(draftScopeId);
             const scopeId = savedCanvasId ?? draftScopeId;
             const scopeType = savedCanvasId ? ("canvas" as const) : ("draft" as const);
@@ -794,6 +855,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               history,
               deepAnalysis: researchDeepAnalysis,
               uploadIds: composedUploadIds,
+              context:
+                chatType === "research" && legacyRef
+                  ? { legacyResearchSessionId: legacyRef }
+                  : undefined,
               onStreamEvent: applyUnifiedStreamEvent,
               onStreamText,
             });
@@ -949,13 +1014,38 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    * Load a specific session's messages into the chat
    */
   const loadSession = useCallback(
-    async (targetSessionId: string): Promise<{ datasetUploadIds: string[] }> => {
+    async (
+      targetSessionId: string,
+    ): Promise<{
+      datasetUploadIds: string[];
+      chatType?: UnifiedChatType;
+      scope?: { type: string; id?: string };
+    }> => {
+      const generation = ++loadSessionGenerationRef.current;
+      if (sessionId !== targetSessionId) {
+        setMessages([]);
+      }
       setIsLoadingSession(true);
       try {
         const effectiveTenantId = await getEffectiveTenantId();
         if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
           const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
           const row = await client.getConversation(targetSessionId);
+          if (generation !== loadSessionGenerationRef.current) {
+            return { datasetUploadIds: [] };
+          }
+          const loadedChatType = (row.chat_type ?? chatType) as UnifiedChatType;
+          const rowScope = row.scope;
+
+          if (loadedChatType === "workbench" && rowScope?.id) {
+            if (rowScope.type === "canvas") {
+              setWorkbenchSavedCanvasId(rowScope.id);
+            } else if (rowScope.type === "draft") {
+              setActiveWorkbenchDraftScope(rowScope.id);
+              setWorkbenchSavedCanvasId(null);
+            }
+          }
+
           const raw = (row.messages ?? []) as Array<{
             role?: string;
             content?: string;
@@ -975,7 +1065,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 };
               }
               const blocks = Array.isArray(m.blocks) ? m.blocks : [];
-              if (chatType === "workbench") {
+              if (loadedChatType === "workbench") {
                 const wb = parseWorkbenchUnifiedEnvelope({
                   conversationId: targetSessionId,
                   turn: { id: `loaded-${i}`, blocks },
@@ -1006,11 +1096,16 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 visualizationArtifactId: parsed.visualizationArtifactId,
               };
             });
+          if (generation !== loadSessionGenerationRef.current) {
+            return { datasetUploadIds: [] };
+          }
           setMessages(loadedMessages);
           setSessionId(targetSessionId);
           setLegacyRef(row.legacy_ref ?? null);
           return {
             datasetUploadIds: row.dataset_upload_ids ?? [],
+            chatType: loadedChatType,
+            scope: rowScope,
           };
         }
         const qs = effectiveTenantId
@@ -1027,6 +1122,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           }[];
         }>(`/api/cohi-chat/sessions/${targetSessionId}${qs}`);
 
+        if (generation !== loadSessionGenerationRef.current) {
+          return { datasetUploadIds: [] };
+        }
+
         const loadedMessages: ChatMessage[] = response.messages.map((m) => ({
           id: m.id,
           role: m.role,
@@ -1040,15 +1139,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setMessages(loadedMessages);
         setSessionId(targetSessionId);
         setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
-        return { datasetUploadIds: [] };
+        return { datasetUploadIds: [], chatType };
       } catch (error) {
         console.error("[CohiChat] Failed to load session:", error);
         return { datasetUploadIds: [] };
       } finally {
-        setIsLoadingSession(false);
+        if (generation === loadSessionGenerationRef.current) {
+          setIsLoadingSession(false);
+        }
       }
     },
-    [getEffectiveTenantId, tenantId, chatType],
+    [getEffectiveTenantId, tenantId, chatType, sessionId],
   );
 
   /**

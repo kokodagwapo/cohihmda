@@ -19,10 +19,7 @@ import type {
   CanvasStateSnapshot,
 } from '@/types/widgetActions';
 import type { CanvasLayoutItem } from '@/components/workbench/canvas/types';
-import type { GroupWidgetItem } from '@/components/workbench/canvas/types';
-import { useCanvasDataStore } from '@/stores/canvasDataStore';
-import { useWidgetSectionStore } from '@/stores/widgetSectionStore';
-import { getWidgetDefinition } from '@/components/widgets/registry';
+import { buildCanvasStateSnapshot } from '@/lib/workbench/buildCanvasStateSnapshot';
 
 // ---------------------------------------------------------------------------
 // Tenant resolution helper – mirrors logic from useCohiChat
@@ -200,104 +197,11 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
   // Build canvas state snapshot from current items
   // -------------------------------------------------------------------------
 
-  const buildCanvasSnapshot = useCallback((): CanvasStateSnapshot => {
-    const groups: CanvasStateSnapshot['groups'] = [];
-    const standaloneWidgets: CanvasStateSnapshot['standaloneWidgets'] = [];
-
-    // Read filter state for widget groups
-    const sectionState = useWidgetSectionStore.getState().sections;
-
-    for (const item of canvasItems) {
-      if (item.payload.type === 'widget_group') {
-        // Resolve active filters for this group
-        const sectionFilters = sectionState[item.payload.groupId];
-        const filters: CanvasStateSnapshot['groups'][0]['filters'] = sectionFilters
-          ? {
-              dateRange: sectionFilters.periodSelection?.preset
-                || (sectionFilters.dateRange
-                  ? `${sectionFilters.dateRange.start} to ${sectionFilters.dateRange.end}`
-                  : `${sectionFilters.year}`),
-              dateField: sectionFilters.dateField || undefined,
-              branch: sectionFilters.branch !== 'all' ? sectionFilters.branch : undefined,
-              loanOfficer: sectionFilters.loanOfficer !== 'all' ? sectionFilters.loanOfficer : undefined,
-            }
-          : undefined;
-
-        // Build widget list and include grid layouts for agent context
-        const items = item.payload.items ?? item.payload.widgetIds?.map((defId: string) => ({ kind: 'registry' as const, defId })) ?? [];
-        const widgets: CanvasStateSnapshot['groups'][0]['widgets'] = [];
-        function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-          if (groupItem.kind === 'registry') return `${groupItem.defId}__${idx}`;
-          return `cohi__${groupItem.id}__${idx}`;
-        }
-        items.forEach((groupItem: GroupWidgetItem, idx: number) => {
-          const key = itemKey(groupItem, idx);
-          if (groupItem.kind === 'registry') {
-            const def = getWidgetDefinition(groupItem.defId);
-            widgets.push({
-              id: key,
-              kind: 'registry',
-              defId: groupItem.defId,
-              name: def?.name,
-            });
-          } else {
-            widgets.push({
-              id: key,
-              kind: 'cohi',
-              title: groupItem.title,
-              sql: groupItem.sql,
-            });
-          }
-        });
-
-        groups.push({
-          groupId: item.payload.groupId,
-          title: item.payload.title,
-          sectionType: item.payload.sectionType,
-          widgetIds: item.payload.widgetIds,
-          widgets: widgets.length > 0 ? widgets : undefined,
-          widgetLayouts: item.payload.widgetLayouts,
-          filters,
-        });
-      } else {
-        const isCohiWidget = item.payload.type === 'cohi_widget';
-        const cohiPayload = isCohiWidget ? (item.payload as any) : undefined;
-        standaloneWidgets.push({
-          id: item.i,
-          type: item.payload.type,
-          title:
-            'title' in item.payload
-              ? (item.payload as any).title
-              : undefined,
-          sourceType: cohiPayload?.sourceType,
-          sourceSessionId: cohiPayload?.sourceSessionId,
-          sourceArtifactId: cohiPayload?.sourceArtifactId,
-          artifactCapabilities: cohiPayload?.artifactCapabilities,
-          filterConfig: cohiPayload?.filterConfig,
-          savedFilters: cohiPayload?.savedFilters,
-          sql: cohiPayload?.sql,
-          sourceDashboard: cohiPayload?.sourceDashboard,
-          selected: item.i === selectedWidgetId,
-        });
-      }
-    }
-
-    // Collect rendered widget data from the canvas data store
-    const dataSnapshot = useCanvasDataStore.getState().getSnapshot();
-    const widgetData = dataSnapshot.map((entry) => ({
-      itemId: entry.itemId,
-      widgetName: entry.widgetName,
-      category: entry.category,
-      data: entry.data,
-    }));
-
-    return {
-      groups,
-      standaloneWidgets,
-      totalItems: canvasItems.length,
-      widgetData: widgetData.length > 0 ? widgetData : undefined,
-    };
-  }, [canvasItems, selectedWidgetId]);
+  const buildCanvasSnapshot = useCallback(
+    (): CanvasStateSnapshot =>
+      buildCanvasStateSnapshot(canvasItems, selectedWidgetId),
+    [canvasItems, selectedWidgetId],
+  );
 
   // -------------------------------------------------------------------------
   // Send a message

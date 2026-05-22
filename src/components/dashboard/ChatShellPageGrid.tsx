@@ -169,7 +169,16 @@ export function ChatShellPageGrid({
           onMouseEnter={isSplitLayout ? splitWheel.onPagePaneEnter : undefined}
           onMouseLeave={isSplitLayout ? splitWheel.onPagePaneLeave : undefined}
         >
-          {children}
+          {isSplitLayout ? (
+            <div
+              data-dashboard-scroll-root=""
+              className="flex flex-col flex-1 min-h-0 w-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto"
+            >
+              {children}
+            </div>
+          ) : (
+            children
+          )}
           {isSplitLayout && showSplitPaneFooter && <Footer variant="splitPane" />}
         </motion.div>
 

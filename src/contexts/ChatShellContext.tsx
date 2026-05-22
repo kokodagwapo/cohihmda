@@ -19,6 +19,7 @@ import { isChatHomePath } from "@/lib/chatHomeRoute";
 import { RESEARCH_SHELL_EXPAND_EVENT } from "@/lib/unifiedChatEnvelope";
 import {
   consumeWorkbenchChatSplitLayout,
+  getMyDashboardCanvasIdFromPath,
   isMyDashboardCanvasPath,
   WORKBENCH_CHAT_HANDOFF_STATE_KEY,
   type WorkbenchChatHandoffLocationState,
@@ -58,7 +59,12 @@ export function ChatShellProvider({ children }: { children: ReactNode }) {
         setModeState("full");
         return;
       }
-      dispatchWorkbenchFlushDraftLayout();
+      const onDashboard =
+        isMyDashboardCanvasPath(location.pathname) &&
+        getMyDashboardCanvasIdFromPath(location.pathname);
+      if (!(next === "split" && onDashboard)) {
+        dispatchWorkbenchFlushDraftLayout();
+      }
       setModeState(next);
     },
     [isMobile, location.pathname],

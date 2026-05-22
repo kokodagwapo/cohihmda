@@ -28,7 +28,10 @@ import { runSqlThroughRouter } from "./sqlAndMetricsRouter.js";
 import { createVisualizationArtifactId } from "./artifactService.js";
 import { runInsightBuilderTurn, type InsightBuilderDraft } from "./insightBuilderTurn.js";
 import { runUnifiedResearchTurn } from "./unifiedResearchChat.js";
-import { findUnifiedConversationByLegacyRef } from "./unifiedConversationService.js";
+import {
+  findUnifiedConversationByLegacyRef,
+  getUnifiedConversation,
+} from "./unifiedConversationService.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import {
   resolveDatasetUploadIdsForRequest,
@@ -342,6 +345,27 @@ export async function processUnifiedChatMessage(
 
   let conversationId = body.conversationId;
   let legacyRef: string | null = body.context?.legacyResearchSessionId ?? null;
+  // Research resume / follow-up: resolve legacy_ref from the unified row when the
+  // client sends conversationId only (typical follow-up in Cohi Chat).
+  if (!legacyRef && conversationId && chatType === "research") {
+    try {
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const userId = req.userId;
+      if (tenantId && userId) {
+        const row = await getUnifiedConversation({
+          tenantId,
+          userId,
+          conversationId,
+        });
+        if (row?.legacy_ref) legacyRef = row.legacy_ref;
+      }
+    } catch (err: any) {
+      console.warn(
+        "[unifiedChatOrchestrator] legacy_ref from conversation failed:",
+        err?.message ?? err,
+      );
+    }
+  }
   // Research resume: when the client passes a legacy session id but no
   // conversationId, reuse the existing unified row so the thread stays stable.
   if (!conversationId && chatType === "research" && legacyRef) {

@@ -204,6 +204,16 @@ describe("COHI-402 research stream mapping", () => {
     expect(line).toContain("4 findings");
   });
 
+  it("user_followup events map to a follow-up timeline line", () => {
+    const line = mapEventToLine({
+      type: "user_followup",
+      data: { question: "Break down by loan officer" },
+      timestamp: Date.now(),
+    });
+    expect(line).toContain("Follow-up");
+    expect(line).toContain("loan officer");
+  });
+
   it("returns null for unknown event types (no leaked noise)", () => {
     expect(mapEventToLine({ type: "heartbeat", data: {}, timestamp: 0 })).toBeNull();
   });

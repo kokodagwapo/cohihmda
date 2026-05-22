@@ -266,6 +266,8 @@ export interface CanvasStateSnapshot {
   /** All widget groups currently on the canvas */
   groups: {
     groupId: string;
+    /** Freeform layout item id (item.i) — use modify_group.groupId with either this or groupId */
+    layoutId?: string;
     title: string;
     sectionType: string;
     widgetIds: string[];

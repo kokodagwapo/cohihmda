@@ -13,9 +13,14 @@ import { cn } from '@/lib/utils';
 import { useWorkbenchNav } from '@/hooks/useWorkbenchNav';
 import {
   WORKBENCH_CHAT_HANDOFF_STATE_KEY,
+  draftScopeIdForCanvasTab,
+  getMyDashboardCanvasIdFromPath,
   lookupWorkbenchDraftTab,
   rememberWorkbenchDraftTab,
   resetActiveWorkbenchDraftSession,
+  setActiveWorkbenchDraftScope,
+  COHI_WORKBENCH_FOCUS_CANVAS_EVENT,
+  dispatchCohiChatResume,
   type WorkbenchChatHandoffLocationState,
 } from '@/lib/workbench/workbenchChatHandoff';
 
@@ -128,6 +133,21 @@ export default function MyDashboard() {
       navigate(`/my-dashboard/${tabId}${reportBuilderSearch}`, { replace: true });
     }
   }, [navigate, reportBuilderSearch]);
+
+  /** Focus a saved canvas tab when unified chat edits a widget on that canvas. */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const canvasId = (e as CustomEvent<{ canvasId?: string }>).detail?.canvasId;
+      if (!canvasId || canvasId.startsWith('new-')) return;
+      setOpenTabs((prev) => (prev.includes(canvasId) ? prev : [...prev, canvasId]));
+      setActiveTabId(canvasId);
+      setLoadCanvasId(canvasId);
+      updateUrl(canvasId);
+    };
+    window.addEventListener(COHI_WORKBENCH_FOCUS_CANVAS_EVENT, handler);
+    return () =>
+      window.removeEventListener(COHI_WORKBENCH_FOCUS_CANVAS_EVENT, handler);
+  }, [updateUrl]);
 
   const fetchCanvases = useCallback(async (): Promise<CanvasListItem[]> => {
     try {
@@ -269,6 +289,16 @@ export default function MyDashboard() {
     };
 
     if (handoff.openNewTab) {
+      const urlCanvasId = getMyDashboardCanvasIdFromPath(location.pathname);
+      const onSavedCanvas =
+        urlCanvasId &&
+        activeTabId &&
+        !activeTabId.startsWith('new-') &&
+        loadCanvasId === urlCanvasId;
+      if (onSavedCanvas) {
+        clearHandoffState();
+        return;
+      }
       const newTabId = `new-${Date.now()}`;
       setTabDraftScopes((prev) => ({ ...prev, [newTabId]: handoff.draftScopeId }));
       rememberWorkbenchDraftTab(handoff.draftScopeId, newTabId);
@@ -282,6 +312,20 @@ export default function MyDashboard() {
     }
 
     if (handoff.activateDraftScopeId) {
+      const urlCanvasId = getMyDashboardCanvasIdFromPath(location.pathname);
+      const stayingOnSavedCanvas =
+        urlCanvasId &&
+        activeTabId === urlCanvasId &&
+        loadCanvasId === urlCanvasId;
+      if (stayingOnSavedCanvas) {
+        const scopeId = draftScopeIdForCanvasTab(urlCanvasId);
+        setTabDraftScopes((prev) => ({ ...prev, [urlCanvasId]: scopeId }));
+        setActiveWorkbenchDraftScope(scopeId);
+        rememberWorkbenchDraftTab(scopeId, urlCanvasId);
+        clearHandoffState();
+        return;
+      }
+
       const boundTabId = lookupWorkbenchDraftTab(handoff.activateDraftScopeId);
       if (boundTabId) {
         setTabDraftScopes((prev) => ({
@@ -308,6 +352,14 @@ export default function MyDashboard() {
       }
       clearHandoffState();
     }
+
+    if (handoff.resumeConversationId) {
+      dispatchCohiChatResume(handoff.resumeConversationId, "workbench");
+    }
+
+    if (!handoff.openNewTab && !handoff.activateDraftScopeId) {
+      clearHandoffState();
+    }
   }, [
     isHydratingWorkbench,
     location.state,
@@ -316,6 +368,7 @@ export default function MyDashboard() {
     navigate,
     openTabs,
     activeTabId,
+    loadCanvasId,
     updateUrl,
   ]);
 
@@ -569,7 +622,11 @@ export default function MyDashboard() {
                   key={canvasKey}
                   loadCanvasId={loadCanvasId}
                   chatDraftScopeId={
-                    activeTabId ? tabDraftScopes[activeTabId] : undefined
+                    activeTabId && !activeTabId.startsWith("new-")
+                      ? draftScopeIdForCanvasTab(activeTabId)
+                      : activeTabId
+                        ? tabDraftScopes[activeTabId]
+                        : undefined
                   }
                   onLoaded={handleCanvasLoaded}
                   onSaved={handleCanvasSaved}

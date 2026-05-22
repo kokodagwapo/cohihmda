@@ -7,10 +7,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useResearchSession } from "@/hooks/useResearchSession";
 import { AgentTimeline } from "@/components/research/AgentTimeline";
-import { ResearchReport, QuickAnswerView } from "@/components/research/ResearchReport";
+import type { Finding } from "@/hooks/useResearchSession";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
 import { FindingSummaryContent } from "@/components/research/FindingSummaryContent";
-import { ResearchChatTranscript } from "@/components/cohi/ResearchChatTranscript";
+import { ResearchReportTabContent } from "@/components/cohi/ResearchReportTabContent";
 import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import { Badge } from "@/components/ui/badge";
@@ -420,49 +420,28 @@ export function UnifiedChatResearchWorkspace({
           value="report"
           className="flex-1 overflow-y-auto px-4 pb-3 mt-0 min-h-0 data-[state=inactive]:hidden"
         >
-          <div className="space-y-4 py-2">
-            <ResearchChatTranscript
-              messages={messages}
-              isLoading={chatLoading}
-            />
-
-            {report ? (
-              <div
-                ref={reportContainerRef}
-                className="border-t border-slate-200/70 dark:border-slate-700/70 pt-4"
-              >
-                <ResearchReport
-                  report={report}
-                  findings={findings}
-                  sessionId={researchSessionId}
-                  selectedTenantId={tenantId ?? null}
-                  onSubmitFeedback={submitFeedback}
-                  onSaveToWorkbench={setWorkbenchPayload}
-                  isTracked={isTracked}
-                  onToggleTrack={onToggleTrack}
-                  onDrillDown={(f) => {
-                    setSelectedFindingId(String(f.questionId));
-                    setActiveTab("findings");
-                  }}
-                  onRunFurtherInvestigation={
-                    sessionIsOwner ? handleRunFurtherInvestigation : undefined
-                  }
-                />
-              </div>
-            ) : findings.length >= 1 && phase === "complete" ? (
-              <div className="border-t border-slate-200/70 dark:border-slate-700/70 pt-4">
-                <QuickAnswerView
-                  finding={findings[findings.length - 1]}
-                  sessionId={researchSessionId}
-                  onSaveToWorkbench={setWorkbenchPayload}
-                  onDrillDown={(f) => {
-                    setSelectedFindingId(String(f.questionId));
-                    setActiveTab("findings");
-                  }}
-                />
-              </div>
-            ) : null}
-          </div>
+          <ResearchReportTabContent
+            messages={messages}
+            chatLoading={chatLoading}
+            findings={findings}
+            report={report}
+            phase={phase}
+            researchSessionId={researchSessionId}
+            tenantId={tenantId}
+            sessionIsOwner={sessionIsOwner}
+            isTracked={isTracked}
+            onToggleTrack={onToggleTrack}
+            onSubmitFeedback={submitFeedback}
+            onSaveToWorkbench={setWorkbenchPayload}
+            onDrillDown={(f: Finding) => {
+              setSelectedFindingId(String(f.questionId));
+              setActiveTab("findings");
+            }}
+            onRunFurtherInvestigation={
+              sessionIsOwner ? handleRunFurtherInvestigation : undefined
+            }
+            reportContainerRef={reportContainerRef}
+          />
         </TabsContent>
       </Tabs>
 

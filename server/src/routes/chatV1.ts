@@ -967,6 +967,15 @@ async function handleResearchStream(
 
   let conversationId = body.conversationId;
   let legacyRef = body.context?.legacyResearchSessionId ?? null;
+  // Follow-ups send conversationId but not legacyResearchSessionId — load from row.
+  if (!legacyRef && conversationId) {
+    const row = await getUnifiedConversation({
+      tenantId,
+      userId,
+      conversationId,
+    }).catch(() => null);
+    if (row?.legacy_ref) legacyRef = row.legacy_ref;
+  }
   if (!conversationId && legacyRef) {
     const existing = await findUnifiedConversationByLegacyRef({
       tenantId,

@@ -35,6 +35,9 @@ import { useUnifiedChatHistory } from "@/hooks/useUnifiedChatHistory";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
 import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
+import {
+  navigateForWorkbenchConversationResume,
+} from "@/lib/workbench/workbenchChatHandoff";
 import { createUnifiedChatClient } from "@/lib/unifiedChatClient";
 import {
   getFolderNameById,
@@ -858,6 +861,42 @@ export function UnifiedChatSidebarSections({
     } else if (conversation?.is_shared_view && conversation.legacy_ref) {
       resumeId = conversation.legacy_ref;
     }
+
+    if (chatType === "workbench") {
+      const scopeType = conversation?.scope?.type;
+      const scopeId = conversation?.scope?.id;
+      if (
+        scopeId &&
+        (scopeType === "canvas" || scopeType === "draft") &&
+        navigateForWorkbenchConversationResume(navigate, {
+          conversationId: resumeId,
+          scopeType,
+          scopeId,
+        })
+      ) {
+        return;
+      }
+      try {
+        const client = createUnifiedChatClient(tenantId);
+        const row = await client.getConversation(resumeId);
+        const rowScopeType = row.scope?.type;
+        const rowScopeId = row.scope?.id;
+        if (
+          rowScopeId &&
+          (rowScopeType === "canvas" || rowScopeType === "draft") &&
+          navigateForWorkbenchConversationResume(navigate, {
+            conversationId: resumeId,
+            scopeType: rowScopeType,
+            scopeId: rowScopeId,
+          })
+        ) {
+          return;
+        }
+      } catch {
+        /* fall through to chat home resume */
+      }
+    }
+
     navigate(buildUnifiedChatResumePath(resumeId, chatType), {
       state: cohiChatResumeNavigationState(),
     });

@@ -21,6 +21,7 @@ import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import {
   createSession,
   runResearchPipeline,
+  runFollowUp,
   getSession,
   loadSession,
   attachSessionEmitter,
@@ -164,9 +165,14 @@ export async function runUnifiedResearchStream(
       });
     }
 
-    // If already complete on entry, resolve immediately.
-    if (session!.phase === "complete") {
-      resolve({ ok: true });
+    // Another message in the same chat thread — same pipeline rules as the first turn.
+    if (session!.phase === "complete" && !isSessionRunning(sessionId!)) {
+      void runFollowUp(sessionId!, args.message.trim(), tenantPool, {
+        userRole: args.req.userRole,
+        isSuperAdmin: args.req.isSuperAdmin,
+      }, { deepAnalysis: args.deepAnalysis ?? false }).catch((err) => {
+        console.error("[unifiedResearchStream] additional turn error:", err);
+      });
     } else if (session!.phase === "error") {
       resolve({
         ok: false,
@@ -332,6 +338,10 @@ export function mapEventToLine(event: SSEEvent): string | null {
       return summary
         ? `**Plan:** ${summary} (${count} questions)`
         : `**Plan ready** (${count} questions).`;
+    }
+    case "user_followup": {
+      const q = event.data?.question ?? "";
+      return q ? `**Follow-up:** ${q}` : "**Follow-up question**";
     }
     case "agent_start": {
       const topic = event.data?.topic ?? "investigation";
