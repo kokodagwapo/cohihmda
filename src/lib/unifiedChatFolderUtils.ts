@@ -118,9 +118,32 @@ export function dispatchUnifiedChatFoldersSync() {
 /** Bust sidebar / Shared With Me after research session sharing changes. */
 export const UNIFIED_CHAT_HISTORY_SYNC_EVENT = "cohi-unified-chat-history-sync";
 
-export function dispatchUnifiedChatHistorySync() {
+export type UnifiedChatHistorySyncDetail = {
+  /** Prepend to recent history before the server row exists (new chat submit). */
+  conversation?: UnifiedConversationSummary;
+  /** When true, refetch from API. Default: true unless `conversation` is set alone. */
+  refresh?: boolean;
+};
+
+export function dispatchUnifiedChatHistorySync(
+  detail?: UnifiedChatHistorySyncDetail,
+) {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(UNIFIED_CHAT_HISTORY_SYNC_EVENT));
+  window.dispatchEvent(
+    new CustomEvent(UNIFIED_CHAT_HISTORY_SYNC_EVENT, { detail }),
+  );
+}
+
+/** Show a new chat in sidebar recents immediately on submit. */
+export function notifyOptimisticUnifiedChatConversation(
+  conversation: UnifiedConversationSummary,
+) {
+  dispatchUnifiedChatHistorySync({ conversation, refresh: false });
+}
+
+/** Refetch sidebar / full history from the API. */
+export function refreshUnifiedChatHistoryList() {
+  dispatchUnifiedChatHistorySync({ refresh: true });
 }
 
 export function getDirectChildFolders(

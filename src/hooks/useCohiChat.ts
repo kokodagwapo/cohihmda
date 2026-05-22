@@ -27,6 +27,7 @@ import {
 import {
   createUnifiedChatClient,
   type UnifiedChatType,
+  type UnifiedConversationSummary,
 } from "@/lib/unifiedChatClient";
 import {
   CHAT_TYPE_DEFAULT_SUGGESTIONS,
@@ -37,6 +38,10 @@ import {
   sendUnifiedWorkbenchStream,
 } from "@/lib/unifiedChatSend";
 import { insightBuilderApproveClientMessageId } from "@/lib/insightBuilderApproveIdempotency";
+import {
+  notifyOptimisticUnifiedChatConversation,
+  refreshUnifiedChatHistoryList,
+} from "@/lib/unifiedChatFolderUtils";
 
 export interface SendMessageOptions {
   /** Start a new server conversation (e.g. compact shell send). */
@@ -53,7 +58,28 @@ export interface SendMessageOptions {
 }
 
 // ============================================================================
-// Types
+// Helpers
+// ============================================================================
+
+function buildOptimisticUnifiedConversation(args: {
+  id: string;
+  title: string;
+  chatType: UnifiedChatType;
+  scope: UnifiedConversationSummary["scope"];
+}): UnifiedConversationSummary {
+  const now = new Date().toISOString();
+  return {
+    id: args.id,
+    title: args.title.slice(0, 80) || "New conversation",
+    scope: args.scope,
+    chat_type: args.chatType,
+    updated_at: now,
+    created_at: now,
+  };
+}
+
+// ============================================================================
+// Hook
 // ============================================================================
 
 export interface VisualizationConfig {
@@ -341,6 +367,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           : undefined;
       const datasetUploadIdsForSend =
         chatType === "chat" || chatType === "workbench" ? datasetIds : datasetIds;
+      const isNewConversation = forceNew || !activeSessionId;
+      let pendingHistoryRefresh = false;
 
       const userMessageId = generateMessageId();
       const assistantMessageId = generateMessageId();
@@ -386,6 +414,23 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             content: m.content,
           }));
 
+          const registerNewUnifiedConversation = (
+            scope: UnifiedConversationSummary["scope"],
+          ) => {
+            const id = crypto.randomUUID();
+            setSessionId(id);
+            notifyOptimisticUnifiedChatConversation(
+              buildOptimisticUnifiedConversation({
+                id,
+                title: effectiveQuestion,
+                chatType,
+                scope,
+              }),
+            );
+            pendingHistoryRefresh = true;
+            return id;
+          };
+
           if (chatType === "workbench") {
             const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
 
@@ -398,11 +443,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
             const scopeId = savedCanvasId ?? draftScopeId;
             const scopeType = savedCanvasId ? ("canvas" as const) : ("draft" as const);
+            const streamConversationId = isNewConversation
+              ? registerNewUnifiedConversation({ type: scopeType, id: scopeId })
+              : activeSessionId;
 
             const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
               client,
               message: effectiveQuestion,
-              conversationId: activeSessionId,
+              conversationId: streamConversationId,
               scope: { type: scopeType, id: scopeId },
               context: buildWorkbenchRequestContext(draftScopeId),
               history,
@@ -457,11 +505,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               ibOpts.draft
                 ? await insightBuilderApproveClientMessageId(ibOpts.draft)
                 : undefined;
+            const streamConversationId = isNewConversation
+              ? registerNewUnifiedConversation({ type: "global_session" })
+              : activeSessionId;
             const { conversationId, parsed } = await sendUnifiedGlobalStream({
               client,
               message: effectiveQuestion,
               chatType,
-              conversationId: activeSessionId,
+              conversationId: streamConversationId,
               clientMessageId: approveClientMessageId,
               history,
               deepAnalysis: researchDeepAnalysis,
@@ -574,6 +625,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           onError(error);
         }
       } finally {
+        if (pendingHistoryRefresh) {
+          refreshUnifiedChatHistoryList();
+        }
         sendInFlightRef.current = false;
         setIsLoading(false);
       }

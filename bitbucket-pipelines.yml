@@ -265,6 +265,9 @@ definitions:
               apt-get update -qq && apt-get install -y -qq curl
               chmod +x ./scripts/bitbucket/run-migrations.sh
               ./scripts/bitbucket/run-migrations.sh
+              echo ">>> Backfilling unified chat legacy research sessions (dev only)..."
+              chmod +x ./scripts/bitbucket/run-unified-chat-backfill.sh
+              ./scripts/bitbucket/run-unified-chat-backfill.sh
             else
               echo ">>> Skipping Migrations (no backend/infra changes)"
             fi
@@ -545,6 +548,9 @@ definitions:
           - apt-get update && apt-get install -y curl
           - chmod +x ./scripts/bitbucket/run-migrations.sh
           - ./scripts/bitbucket/run-migrations.sh
+          - echo ">>> Backfilling unified chat legacy research sessions"
+          - chmod +x ./scripts/bitbucket/run-unified-chat-backfill.sh
+          - ./scripts/bitbucket/run-unified-chat-backfill.sh
 
     - step: &deploy-all-prod-force
         name: Force Deploy All to Prod

@@ -15,6 +15,7 @@ import {
   dispatchUnifiedChatFoldersSync,
   UNIFIED_CHAT_FOLDERS_SYNC_EVENT,
   UNIFIED_CHAT_HISTORY_SYNC_EVENT,
+  type UnifiedChatHistorySyncDetail,
 } from "@/lib/unifiedChatFolderUtils";
 
 export function useUnifiedChatHistory(
@@ -205,8 +206,21 @@ export function useUnifiedChatHistory(
     const onFoldersSync = () => {
       void refreshFolders();
     };
-    const onHistorySync = () => {
-      void refreshAll();
+    const onHistorySync = (event: Event) => {
+      const detail = (event as CustomEvent<UnifiedChatHistorySyncDetail>)
+        .detail;
+      if (detail?.conversation) {
+        setConversations((prev) => {
+          const without = prev.filter((c) => c.id !== detail.conversation!.id);
+          return [detail.conversation!, ...without];
+        });
+      }
+      const shouldRefresh =
+        detail?.refresh === true ||
+        (detail?.refresh === undefined && !detail?.conversation);
+      if (shouldRefresh) {
+        void refreshAll();
+      }
     };
     window.addEventListener(UNIFIED_CHAT_FOLDERS_SYNC_EVENT, onFoldersSync);
     window.addEventListener(UNIFIED_CHAT_HISTORY_SYNC_EVENT, onHistorySync);

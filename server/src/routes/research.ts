@@ -463,6 +463,7 @@ router.get(
       return;
     }
 
+    const isOwner = session.userId === userId;
     res.json({
       id: session.id,
       tenantId: session.tenantId,
@@ -477,6 +478,9 @@ router.get(
       createdAt: session.createdAt,
       visibility: session.visibility ?? "private",
       sharedWithUserIds: session.sharedWithUserIds ?? [],
+      isOwner,
+      ownerEmail: isOwner ? "" : session.userEmail,
+      ownerName: "",
     });
   }
 );

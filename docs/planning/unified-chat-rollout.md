@@ -32,6 +32,23 @@
 - **Idempotency:** In-memory dedupe for `clientMessageId` is single-instance only; replace with Redis or Postgres for multi-node deployments.
 - **Sessions:** With `VITE_UNIFIED_CHAT=true`, legacy chat session sidebar uses empty list until unified session APIs are wired.
 
+## Legacy research backfill (dev deploy)
+
+After tenant migrations, the **dev** Bitbucket pipeline runs an idempotent backfill that links `research_sessions` → `unified_chat_conversations` for every active tenant:
+
+- **Pipeline:** `scripts/bitbucket/run-unified-chat-backfill.sh` (after `run-migrations.sh`)
+- **CLI (local or ECS):** `node dist/migrations/backfillUnifiedChatCli.js --all`
+- **Opt-out:** set `UNIFIED_CHAT_LEGACY_BACKFILL_ENABLED=false` on the Bitbucket dev deployment
+
+Manual single-tenant run from repo:
+
+```bash
+cd server
+npm run backfill:unified-chat-legacy -- --tenant=<tenant-slug>
+```
+
+Production deploy does **not** run this automatically.
+
 ## Golden replay
 
 See `scripts/replay/unified-chat-golden-prompts.json` for staging replay prompts.

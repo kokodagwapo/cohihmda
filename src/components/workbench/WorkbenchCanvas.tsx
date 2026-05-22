@@ -127,13 +127,26 @@ import type {
   DashboardGroupSpec,
   StandaloneWidgetSpec,
   ConvertToSqlWidgetAction,
+  CanvasStateSnapshot,
 } from "@/types/widgetActions";
+import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
+import { registerWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
+import {
+  consumePendingWorkbenchActions,
+  filterExecutableWorkbenchActions,
+  getOrCreateActiveWorkbenchDraftScope,
+  WORKBENCH_APPLY_ACTIONS_EVENT,
+} from "@/lib/workbench/workbenchChatHandoff";
 import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
 import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardDialog";
 import { Camera } from "lucide-react";
+import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
+import { COHI_WORKBENCH_EDIT_WIDGET_EVENT } from "@/lib/workbench/workbenchChatHandoff";
 
-/** Set to true to hide Cohi chat/panel in workbench (panel + toggle + empty-state entry points). */
-const WORKBENCH_COHI_HIDDEN = false;
+/** Hide legacy embedded panel when unified Cohi chat shell is active. */
+function isWorkbenchEmbeddedCohiHidden(): boolean {
+  return isUnifiedChatClientEnabled();
+}
 
 function generateDraftScopeId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -1010,6 +1023,8 @@ export interface WorkbenchCanvasProps {
   isOwner?: boolean;
   /** When true, auto-open the Report Builder after the canvas has loaded items. */
   autoOpenReportBuilder?: boolean;
+  /** Draft scope id from unified workbench chat (must match session storage for widget handoff). */
+  chatDraftScopeId?: string;
 }
 
 export function WorkbenchCanvas({
@@ -1020,7 +1035,9 @@ export function WorkbenchCanvas({
   onDirtyChange,
   isOwner: isOwnerProp,
   autoOpenReportBuilder = false,
+  chatDraftScopeId,
 }: WorkbenchCanvasProps) {
+  const embeddedCohiHidden = isWorkbenchEmbeddedCohiHidden();
   const {
     items,
     annotations,
@@ -1039,7 +1056,10 @@ export function WorkbenchCanvas({
     useState<CanvasBackground>(DEFAULT_BACKGROUND);
   const [canvasId, setCanvasId] = useState<string | null>(null);
   const [draftScopeId, setDraftScopeId] = useState<string>(() =>
-    generateDraftScopeId(),
+    chatDraftScopeId ??
+      (loadCanvasId
+        ? generateDraftScopeId()
+        : getOrCreateActiveWorkbenchDraftScope()),
   );
   const [canvasLoading, setCanvasLoading] = useState(!!loadCanvasId);
   // Bumped when an external save (e.g. SaveToWorkbenchModal) updates this
@@ -1116,7 +1136,8 @@ export function WorkbenchCanvas({
   const [sourceInsight, setSourceInsight] =
     useState<SourceInsightContext | null>(null);
   const [showCohiPanel, setShowCohiPanel] = useState(() => {
-    // Auto-open Cohi panel on first visit
+    if (isUnifiedChatClientEnabled()) return false;
+    // Auto-open Cohi panel on first visit (legacy embedded assistant only)
     const visited = localStorage.getItem("cohi-workbench-visited");
     if (!visited) {
       localStorage.setItem("cohi-workbench-visited", "1");
@@ -1299,7 +1320,12 @@ export function WorkbenchCanvas({
     const nextLoadCanvasId = loadCanvasId ?? null;
     if (previousLoadCanvasId !== nextLoadCanvasId && nextLoadCanvasId === null) {
       // Switching to a fresh unsaved canvas gets a new draft scope key.
-      setDraftScopeId(generateDraftScopeId());
+      setDraftScopeId(
+        chatDraftScopeId ??
+          (loadCanvasId
+            ? generateDraftScopeId()
+            : getOrCreateActiveWorkbenchDraftScope()),
+      );
     }
     if (
       previousLoadCanvasId !== null &&
@@ -1311,7 +1337,11 @@ export function WorkbenchCanvas({
       void persistExistingCanvas();
     }
     previousLoadCanvasIdRef.current = nextLoadCanvasId;
-  }, [canvasId, isDirty, isOwner, loadCanvasId, persistExistingCanvas]);
+  }, [canvasId, chatDraftScopeId, isDirty, isOwner, loadCanvasId, persistExistingCanvas]);
+
+  useEffect(() => {
+    if (chatDraftScopeId) setDraftScopeId(chatDraftScopeId);
+  }, [chatDraftScopeId]);
 
   useEffect(() => {
     if (!canvasId || !isOwner || !isDirty) return;
@@ -2422,6 +2452,87 @@ export function WorkbenchCanvas({
 
   // Keep the ref in sync so auto-execute callback always uses latest handler
   cohiActionRef.current = handleCohiAction;
+
+  /** Apply widget actions from unified Cohi chat (side panel handoff). */
+  const applyUnifiedChatActions = useCallback(
+    (actions: WidgetAction[]) => {
+      const executable = filterExecutableWorkbenchActions(actions);
+      if (!executable.length) return;
+      const canvasWidthForLayout = Math.max(width - 32, 480);
+      applyWorkbenchWidgetActions({
+        actions: executable,
+        executeAction: (action) => cohiActionRef.current(action),
+        setItemsWithHistory,
+        canvasWidth: canvasWidthForLayout,
+        defaultGroupWidth: Math.max(canvasWidthForLayout, 600),
+        onWidgetsAdded: (count, titles) => {
+          if (count <= 0) return;
+          if (count === 1) {
+            toast({
+              title: "Widget added",
+              description: titles[0] ?? "Added to canvas",
+            });
+            return;
+          }
+          toast({
+            title: `${count} widgets added`,
+            description: titles.filter(Boolean).join(", "),
+          });
+        },
+      });
+    },
+    [setItemsWithHistory, toast, width],
+  );
+
+  const getCanvasSnapshotForBridge = useCallback((): CanvasStateSnapshot => {
+    return {
+      groups: [],
+      standaloneWidgets: [],
+      totalItems: items.length,
+    };
+  }, [items.length]);
+
+  useEffect(() => {
+    registerWorkbenchCanvasBridge({
+      draftScopeId,
+      canvasId,
+      getCanvasSnapshot: getCanvasSnapshotForBridge,
+      isActive: !canvasLoading,
+    });
+    return () => registerWorkbenchCanvasBridge(null);
+  }, [
+    draftScopeId,
+    canvasId,
+    canvasLoading,
+    getCanvasSnapshotForBridge,
+  ]);
+
+  useEffect(() => {
+    if (canvasLoading) return;
+
+    const applyForScope = (incoming: WidgetAction[], scopeId?: string) => {
+      if (scopeId && scopeId !== draftScopeId) return;
+      applyUnifiedChatActions(incoming);
+    };
+
+    const pending = consumePendingWorkbenchActions(draftScopeId);
+    if (pending.length) applyForScope(pending);
+
+    const handler = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{
+          actions?: WidgetAction[];
+          draftScopeId?: string;
+        }>
+      ).detail;
+      if (detail?.actions?.length) {
+        applyForScope(detail.actions, detail.draftScopeId);
+      }
+    };
+    window.addEventListener(WORKBENCH_APPLY_ACTIONS_EVENT, handler);
+    return () =>
+      window.removeEventListener(WORKBENCH_APPLY_ACTIONS_EVENT, handler);
+  }, [draftScopeId, applyUnifiedChatActions, canvasLoading]);
 
   // ---- Image-to-Dashboard: handle generated groups ----
   const handleDashboardGenerated = useCallback(
@@ -4697,7 +4808,7 @@ export function WorkbenchCanvas({
               )}
               {/* --- End canvas-only tools --- */}
 
-              {!WORKBENCH_COHI_HIDDEN && !showCohiPanel && (
+              {!embeddedCohiHidden && !showCohiPanel && (
                 <CohiChatDockChip
                   data-testid="workbench-cohi-toggle"
                   onClick={() => setShowCohiPanel(true)}
@@ -5033,8 +5144,23 @@ export function WorkbenchCanvas({
                         onWrapInGroup={canEdit ? handleWrapInGroup : undefined}
                         onExportExcel={() => handleExportWidgetExcel(item.i)}
                         onEditWithCohi={
-                          WORKBENCH_COHI_HIDDEN
-                            ? undefined
+                          embeddedCohiHidden
+                            ? () => {
+                                setEditingWidgetId(item.i);
+                                setSelectedWidgetId(item.i);
+                                const widgetTitle =
+                                  (payload as any).title ||
+                                  (payload as any).sectionId ||
+                                  item.type;
+                                const widgetType = item.type;
+                                window.dispatchEvent(
+                                  new CustomEvent(COHI_WORKBENCH_EDIT_WIDGET_EVENT, {
+                                    detail: {
+                                      message: `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`,
+                                    },
+                                  }),
+                                );
+                              }
                             : () => {
                                 setEditingWidgetId(item.i);
                                 setSelectedWidgetId(item.i);
@@ -5150,7 +5276,7 @@ export function WorkbenchCanvas({
               ) : (
                 <div className="flex items-center justify-center p-8 min-h-[400px]">
                   <div className="text-center max-w-2xl w-full">
-                    {!WORKBENCH_COHI_HIDDEN ? (
+                    {!embeddedCohiHidden ? (
                       <>
                         <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
                           <Sparkles className="w-7 h-7 text-white" />
@@ -5413,8 +5539,8 @@ export function WorkbenchCanvas({
           </div>
         </div>
 
-        {/* Cohi Assistant Panel (docks right) – hidden when WORKBENCH_COHI_HIDDEN */}
-        {!WORKBENCH_COHI_HIDDEN && (
+        {/* Cohi Assistant Panel (docks right) – hidden when unified chat is active */}
+        {!embeddedCohiHidden && (
           <WorkbenchCohiPanel
             open={showCohiPanel}
             onClose={() => {
