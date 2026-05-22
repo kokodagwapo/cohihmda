@@ -5,7 +5,13 @@
  * manually via browser console.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Policy unit tests must not hit tenant DB (CI test:run has no Postgres).
+vi.mock("../ai/queryBuilderService.js", () => ({
+  checkSectionAccess: vi.fn().mockResolvedValue(true),
+}));
+
 import { composePromptBundle } from "./promptComposer.js";
 import {
   evaluateUnifiedChatPolicy,

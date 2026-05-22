@@ -1,4 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("../ai/queryBuilderService.js", () => ({
+  checkSectionAccess: vi.fn().mockResolvedValue(true),
+}));
+
 import { composePromptBundle, hashPromptModules } from "./promptComposer.js";
 import { assertSqlAllowedByPolicy } from "./sqlAndMetricsRouter.js";
 import { evaluateUnifiedChatPolicy } from "./unifiedChatPolicy.js";
