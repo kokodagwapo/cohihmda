@@ -131,17 +131,29 @@ import type {
 } from "@/types/widgetActions";
 import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
 import { registerWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
+import { buildCanvasStateSnapshot } from "@/lib/workbench/buildCanvasStateSnapshot";
+import { resolveWidgetGroupIndex } from "@/lib/workbench/resolveWidgetGroupIndex";
+import {
+  loadWorkbenchDraftLayout,
+  saveWorkbenchDraftLayout,
+  WORKBENCH_FLUSH_DRAFT_LAYOUT_EVENT,
+} from "@/lib/workbench/workbenchDraftLayoutCache";
 import {
   consumePendingWorkbenchActions,
+  COHI_WORKBENCH_EDIT_WIDGET_EVENT,
+  COHI_WORKBENCH_STOP_EDITING_EVENT,
+  dispatchWorkbenchEditingWidgetState,
+  draftScopeIdForCanvasTab,
   filterExecutableWorkbenchActions,
   getOrCreateActiveWorkbenchDraftScope,
+  rememberWorkbenchDraftTab,
+  setActiveWorkbenchDraftScope,
   WORKBENCH_APPLY_ACTIONS_EVENT,
 } from "@/lib/workbench/workbenchChatHandoff";
 import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
 import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardDialog";
 import { Camera } from "lucide-react";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
-import { COHI_WORKBENCH_EDIT_WIDGET_EVENT } from "@/lib/workbench/workbenchChatHandoff";
 
 /** Hide legacy embedded panel when unified Cohi chat shell is active. */
 function isWorkbenchEmbeddedCohiHidden(): boolean {
@@ -1027,6 +1039,24 @@ export interface WorkbenchCanvasProps {
   chatDraftScopeId?: string;
 }
 
+function resolveDraftScopeForCanvas(
+  loadCanvasId: string | null | undefined,
+  chatDraftScopeId?: string,
+): string | null {
+  if (chatDraftScopeId) return chatDraftScopeId;
+  if (loadCanvasId) return draftScopeIdForCanvasTab(loadCanvasId);
+  return null;
+}
+
+function restoreLayoutFromDraftCache(
+  loadCanvasId: string | null | undefined,
+  chatDraftScopeId?: string,
+): CanvasLayoutItem[] {
+  const scope = resolveDraftScopeForCanvas(loadCanvasId, chatDraftScopeId);
+  if (!scope) return [];
+  return loadWorkbenchDraftLayout(scope)?.items ?? [];
+}
+
 export function WorkbenchCanvas({
   loadCanvasId,
   onLoaded,
@@ -1050,15 +1080,22 @@ export function WorkbenchCanvas({
     redo,
     canUndo,
     canRedo,
-  } = useCanvasHistory<CanvasLayoutItem, CanvasAnnotation>([], []);
+  } = useCanvasHistory<CanvasLayoutItem, CanvasAnnotation>(
+    restoreLayoutFromDraftCache(loadCanvasId, chatDraftScopeId),
+    [],
+  );
   const [uploads, setUploads] = useState<CanvasUpload[]>([]);
-  const [canvasBackground, setCanvasBackground] =
-    useState<CanvasBackground>(DEFAULT_BACKGROUND);
+  const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>(
+    () =>
+      loadWorkbenchDraftLayout(
+        resolveDraftScopeForCanvas(loadCanvasId, chatDraftScopeId) ?? "",
+      )?.background ?? DEFAULT_BACKGROUND,
+  );
   const [canvasId, setCanvasId] = useState<string | null>(null);
   const [draftScopeId, setDraftScopeId] = useState<string>(() =>
     chatDraftScopeId ??
       (loadCanvasId
-        ? generateDraftScopeId()
+        ? draftScopeIdForCanvasTab(loadCanvasId)
         : getOrCreateActiveWorkbenchDraftScope()),
   );
   const [canvasLoading, setCanvasLoading] = useState(!!loadCanvasId);
@@ -1323,7 +1360,7 @@ export function WorkbenchCanvas({
       setDraftScopeId(
         chatDraftScopeId ??
           (loadCanvasId
-            ? generateDraftScopeId()
+            ? draftScopeIdForCanvasTab(loadCanvasId)
             : getOrCreateActiveWorkbenchDraftScope()),
       );
     }
@@ -1342,6 +1379,11 @@ export function WorkbenchCanvas({
   useEffect(() => {
     if (chatDraftScopeId) setDraftScopeId(chatDraftScopeId);
   }, [chatDraftScopeId]);
+
+  useEffect(() => {
+    if (!loadCanvasId || chatDraftScopeId) return;
+    setDraftScopeId(draftScopeIdForCanvasTab(loadCanvasId));
+  }, [loadCanvasId, chatDraftScopeId]);
 
   useEffect(() => {
     if (!canvasId || !isOwner || !isDirty) return;
@@ -1651,12 +1693,7 @@ export function WorkbenchCanvas({
         }
         case "modify_group": {
           const groupAction = action as ModifyGroupAction;
-          const groupIdx = items.findIndex(
-            (it) =>
-              it.payload.type === "widget_group" &&
-              (it.payload as { groupId: string }).groupId ===
-                groupAction.groupId,
-          );
+          const groupIdx = resolveWidgetGroupIndex(items, groupAction.groupId);
           if (groupIdx < 0) {
             toast({
               title: "Group not found",
@@ -1798,11 +1835,7 @@ export function WorkbenchCanvas({
         }
         case "modify_registry_widget": {
           const regAction = action as ModifyRegistryWidgetAction;
-          const groupIdx = items.findIndex(
-            (it) =>
-              it.payload.type === "widget_group" &&
-              (it.payload as { groupId: string }).groupId === regAction.groupId,
-          );
+          const groupIdx = resolveWidgetGroupIndex(items, regAction.groupId);
           if (groupIdx < 0) {
             toast({
               title: "Group not found",
@@ -1889,12 +1922,7 @@ export function WorkbenchCanvas({
         }
         case "convert_to_sql_widget": {
           const convAction = action as ConvertToSqlWidgetAction;
-          const groupIdx = items.findIndex(
-            (it) =>
-              it.payload.type === "widget_group" &&
-              (it.payload as { groupId: string }).groupId ===
-                convAction.groupId,
-          );
+          const groupIdx = resolveWidgetGroupIndex(items, convAction.groupId);
           if (groupIdx < 0) {
             toast({
               title: "Group not found",
@@ -2484,34 +2512,97 @@ export function WorkbenchCanvas({
     [setItemsWithHistory, toast, width],
   );
 
-  const getCanvasSnapshotForBridge = useCallback((): CanvasStateSnapshot => {
-    return {
-      groups: [],
-      standaloneWidgets: [],
-      totalItems: items.length,
+  const getCanvasSnapshotForBridge = useCallback(
+    (): CanvasStateSnapshot =>
+      buildCanvasStateSnapshot(items, editingWidgetId),
+    [items, editingWidgetId],
+  );
+
+  const layoutCacheTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (items.length === 0) return;
+    if (layoutCacheTimerRef.current) clearTimeout(layoutCacheTimerRef.current);
+    layoutCacheTimerRef.current = setTimeout(() => {
+      saveWorkbenchDraftLayout(draftScopeId, {
+        items,
+        annotations,
+        uploads,
+        background: canvasBackground,
+      });
+    }, 400);
+    return () => {
+      if (layoutCacheTimerRef.current) {
+        clearTimeout(layoutCacheTimerRef.current);
+        layoutCacheTimerRef.current = null;
+      }
     };
-  }, [items.length]);
+  }, [
+    items,
+    annotations,
+    uploads,
+    canvasBackground,
+    draftScopeId,
+    loadCanvasId,
+  ]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (items.length === 0) return;
+      saveWorkbenchDraftLayout(draftScopeId, {
+        items,
+        annotations,
+        uploads,
+        background: canvasBackground,
+      });
+    };
+    window.addEventListener(WORKBENCH_FLUSH_DRAFT_LAYOUT_EVENT, flush);
+    return () =>
+      window.removeEventListener(WORKBENCH_FLUSH_DRAFT_LAYOUT_EVENT, flush);
+  }, [items, annotations, uploads, canvasBackground, draftScopeId, loadCanvasId]);
 
   useEffect(() => {
     registerWorkbenchCanvasBridge({
       draftScopeId,
       canvasId,
       getCanvasSnapshot: getCanvasSnapshotForBridge,
-      isActive: !canvasLoading,
+      isActive: !canvasLoading || items.length > 0,
     });
+    if (!canvasLoading) {
+      setActiveWorkbenchDraftScope(draftScopeId);
+      const tabId = canvasId ?? loadCanvasId;
+      if (tabId && !tabId.startsWith("new-")) {
+        rememberWorkbenchDraftTab(draftScopeId, tabId);
+      }
+    }
     return () => registerWorkbenchCanvasBridge(null);
   }, [
     draftScopeId,
     canvasId,
+    loadCanvasId,
     canvasLoading,
     getCanvasSnapshotForBridge,
   ]);
 
   useEffect(() => {
-    if (canvasLoading) return;
+    if (!embeddedCohiHidden) return;
+    dispatchWorkbenchEditingWidgetState({
+      widgetId: editingWidgetId,
+      widgetTitle: editingWidget?.title ?? null,
+    });
+  }, [embeddedCohiHidden, editingWidgetId, editingWidget?.title]);
 
+  useEffect(() => {
+    if (!embeddedCohiHidden) return;
+    const onStop = () => setEditingWidgetId(null);
+    window.addEventListener(COHI_WORKBENCH_STOP_EDITING_EVENT, onStop);
+    return () =>
+      window.removeEventListener(COHI_WORKBENCH_STOP_EDITING_EVENT, onStop);
+  }, [embeddedCohiHidden]);
+
+  useEffect(() => {
     const applyForScope = (incoming: WidgetAction[], scopeId?: string) => {
       if (scopeId && scopeId !== draftScopeId) return;
+      if (canvasLoading && items.length === 0) return;
       applyUnifiedChatActions(incoming);
     };
 
@@ -2532,7 +2623,7 @@ export function WorkbenchCanvas({
     window.addEventListener(WORKBENCH_APPLY_ACTIONS_EVENT, handler);
     return () =>
       window.removeEventListener(WORKBENCH_APPLY_ACTIONS_EVENT, handler);
-  }, [draftScopeId, applyUnifiedChatActions, canvasLoading]);
+  }, [draftScopeId, applyUnifiedChatActions, canvasLoading, items.length]);
 
   // ---- Image-to-Dashboard: handle generated groups ----
   const handleDashboardGenerated = useCallback(
@@ -2669,18 +2760,40 @@ export function WorkbenchCanvas({
     return merged;
   }, [items, canvasDataVersion, sectionFilters]);
   useEffect(() => {
-    clearCanvasData();
-    setItems([]);
-    setAnnotations([]);
-    setUploads([]);
-    setSourceInsight(null);
-    setShowReportBuilder(false);
-  }, [loadCanvasId, clearCanvasData]);
+    const next = loadCanvasId ?? null;
+    const prev = previousLoadCanvasIdRef.current;
+    if (prev === next) return;
+
+    const shouldReset =
+      next === null || (prev !== null && prev !== next);
+    if (shouldReset) {
+      fetchedCanvasIdRef.current = null;
+      clearCanvasData();
+      setItems([]);
+      setAnnotations([]);
+      setUploads([]);
+      setSourceInsight(null);
+      setShowReportBuilder(false);
+    }
+
+    previousLoadCanvasIdRef.current = next;
+  }, [loadCanvasId, clearCanvasData, setItems, setAnnotations]);
+
+  const fetchedCanvasIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!loadCanvasId) return;
+    if (
+      fetchedCanvasIdRef.current === loadCanvasId &&
+      items.length > 0 &&
+      canvasId === loadCanvasId
+    ) {
+      return;
+    }
     let cancelled = false;
-    setCanvasLoading(true);
+    if (items.length === 0) {
+      setCanvasLoading(true);
+    }
     (async () => {
       try {
         // In dev, load demo canvas via unauthenticated endpoint so export can be tested without login
@@ -2745,6 +2858,7 @@ export function WorkbenchCanvas({
           setIsRecordOwner(false);
         }
         setCanvasId(data.id);
+        fetchedCanvasIdRef.current = data.id;
         // Snapshot baseline for dirty-state tracking.
         // Use double-RAF to ensure React has flushed all state updates from the
         // setItems / setAnnotations / etc. calls above before we capture the baseline.
@@ -4865,7 +4979,7 @@ export function WorkbenchCanvas({
               showReportBuilder && "hidden",
             )}
           >
-            {canvasLoading && (
+            {canvasLoading && items.length === 0 && (
               <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm">
                 <div className="flex flex-col items-center gap-3">
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600 dark:border-slate-600 dark:border-t-indigo-400" />
@@ -5153,10 +5267,25 @@ export function WorkbenchCanvas({
                                   (payload as any).sectionId ||
                                   item.type;
                                 const widgetType = item.type;
+                                const targetId =
+                                  item.type === "widget_group" &&
+                                  payload.type === "widget_group"
+                                    ? payload.groupId
+                                    : item.i;
+                                const message = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, groupId: ${targetId}, layoutId: ${item.i}). What changes can I make?`;
+                                const resolvedCanvasId = canvasId ?? loadCanvasId;
+                                const resolvedDraftScope = resolvedCanvasId
+                                  ? draftScopeIdForCanvasTab(resolvedCanvasId)
+                                  : draftScopeId;
                                 window.dispatchEvent(
                                   new CustomEvent(COHI_WORKBENCH_EDIT_WIDGET_EVENT, {
                                     detail: {
-                                      message: `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`,
+                                      message,
+                                      widgetId: targetId,
+                                      widgetTitle: String(widgetTitle),
+                                      widgetType,
+                                      draftScopeId: resolvedDraftScope,
+                                      canvasId: resolvedCanvasId,
                                     },
                                   }),
                                 );

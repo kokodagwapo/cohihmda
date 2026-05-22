@@ -1055,12 +1055,19 @@ export async function runResearchPipeline(
 // Follow-up Investigation
 // ============================================================================
 
+export interface RunFollowUpOptions {
+  /** When false, run a quick-style investigation only (no synthesis report). Default true for Research Lab. */
+  deepAnalysis?: boolean;
+}
+
 export async function runFollowUp(
   sessionId: string,
   question: string,
   tenantPool: pg.Pool,
-  principal?: ResearchAccessPrincipal
+  principal?: ResearchAccessPrincipal,
+  options?: RunFollowUpOptions,
 ): Promise<void> {
+  const deepAnalysis = options?.deepAnalysis !== false;
   const session = sessions.get(sessionId);
   if (!session) {
     return;
@@ -1077,11 +1084,22 @@ export async function runFollowUp(
   session._isRunning = true;
   const emit: SSEEmitter = (event) => emitSessionEvent(session, event);
 
-  session.phase = "followup" as SessionPhase;
+  session.phase = (deepAnalysis ? "followup" : "investigating") as SessionPhase;
+
+  emit({
+    type: "user_followup",
+    data: { question },
+    timestamp: Date.now(),
+  });
 
   emit({
     type: "phase",
-    data: { phase: "followup", message: `Investigating follow-up: "${question.substring(0, 80)}"...` },
+    data: {
+      phase: deepAnalysis ? "followup" : "investigating",
+      message: deepAnalysis
+        ? `Investigating follow-up: "${question.substring(0, 80)}"...`
+        : `Investigating: "${question.substring(0, 80)}"...`,
+    },
     timestamp: Date.now(),
   });
 
@@ -1200,8 +1218,12 @@ export async function runFollowUp(
       timestamp: Date.now(),
     });
 
-    // Re-synthesize the report with all findings (original + follow-ups)
-    if (session.plan && session.findings.length > 0) {
+    if (!deepAnalysis) {
+      emit({ type: "quick_result", data: finding, timestamp: Date.now() });
+    }
+
+    // Deep analysis only: re-synthesize the report with all findings (original + follow-ups)
+    if (deepAnalysis && session.plan && session.findings.length > 0) {
       session.phase = "synthesizing" as SessionPhase;
       emit({
         type: "phase",
@@ -1223,7 +1245,13 @@ export async function runFollowUp(
     session.phase = "complete";
     emit({
       type: "complete",
-      data: { message: "Follow-up investigation complete.", findingCount: session.findings.length },
+      data: {
+        message: deepAnalysis
+          ? "Follow-up investigation complete."
+          : "Research complete.",
+        findingCount: session.findings.length,
+        quickMode: !deepAnalysis,
+      },
       timestamp: Date.now(),
     });
 

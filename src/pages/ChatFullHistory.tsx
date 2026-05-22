@@ -28,6 +28,8 @@ import {
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { cohiChatResumeNavigationState } from "@/contexts/ChatShellContext";
 import { buildUnifiedChatResumePath } from "@/lib/chatHomeRoute";
+import { navigateForWorkbenchConversationResume } from "@/lib/workbench/workbenchChatHandoff";
+import { createUnifiedChatClient } from "@/lib/unifiedChatClient";
 import {
   buildFolderBreadcrumb,
   conversationMatchesFolderFilter,
@@ -38,7 +40,6 @@ import {
   UNIFIED_CHAT_HISTORY_SYNC_EVENT,
 } from "@/lib/unifiedChatFolderUtils";
 import { formatUserDisplayName } from "@/lib/userDisplayName";
-import { createUnifiedChatClient } from "@/lib/unifiedChatClient";
 import type { UnifiedChatFolder } from "@/lib/unifiedChatClient";
 import {
   ConversationMoveMenu,
@@ -311,6 +312,41 @@ export default function ChatFullHistory() {
         resumeId = row.legacy_ref;
       }
     }
+    if (rowChatType === "workbench") {
+      const scopeType = row?.scope?.type;
+      const scopeId = row?.scope?.id;
+      if (
+        scopeId &&
+        (scopeType === "canvas" || scopeType === "draft") &&
+        navigateForWorkbenchConversationResume(navigate, {
+          conversationId: resumeId,
+          scopeType,
+          scopeId,
+        })
+      ) {
+        return;
+      }
+      try {
+        const client = createUnifiedChatClient(tenantId);
+        const full = await client.getConversation(resumeId);
+        const rowScopeType = full.scope?.type;
+        const rowScopeId = full.scope?.id;
+        if (
+          rowScopeId &&
+          (rowScopeType === "canvas" || rowScopeType === "draft") &&
+          navigateForWorkbenchConversationResume(navigate, {
+            conversationId: resumeId,
+            scopeType: rowScopeType,
+            scopeId: rowScopeId,
+          })
+        ) {
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+
     navigate(buildUnifiedChatResumePath(resumeId, rowChatType), {
       state: cohiChatResumeNavigationState(),
     });

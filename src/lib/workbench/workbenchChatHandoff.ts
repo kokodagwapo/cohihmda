@@ -4,6 +4,7 @@
 
 import type { NavigateFunction } from "react-router-dom";
 import type { WidgetAction } from "@/types/widgetActions";
+import type { UnifiedChatType } from "@/lib/unifiedChatClient";
 import { getWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
 
 export const WORKBENCH_CHAT_HANDOFF_STATE_KEY = "workbenchChatHandoff";
@@ -12,6 +13,39 @@ export const WORKBENCH_APPLY_ACTIONS_EVENT = "workbench:apply-cohi-actions";
 
 /** Open unified shell and send an edit prompt for a canvas widget. */
 export const COHI_WORKBENCH_EDIT_WIDGET_EVENT = "cohi-workbench-edit-widget";
+
+/** Clear widget edit mode on the active canvas (from unified chat "Stop editing"). */
+export const COHI_WORKBENCH_STOP_EDITING_EVENT = "cohi-workbench-stop-editing";
+
+/** Active canvas reports which widget is being edited (for unified chat banner). */
+export const COHI_WORKBENCH_EDITING_WIDGET_STATE_EVENT =
+  "cohi-workbench-editing-widget-state";
+
+/** My Dashboard must focus this saved canvas tab before unified chat sends (avoids empty "New Canvas"). */
+export const COHI_WORKBENCH_FOCUS_CANVAS_EVENT = "cohi-workbench-focus-canvas";
+
+/** useCohiChat binds workbench stream scope to a saved canvas id. */
+export const COHI_WORKBENCH_BIND_CANVAS_EVENT = "cohi-workbench-bind-canvas";
+
+export interface WorkbenchEditWidgetEventDetail {
+  message: string;
+  widgetId: string;
+  widgetTitle: string;
+  widgetType: string;
+  draftScopeId: string;
+  canvasId: string | null;
+}
+
+export interface WorkbenchEditingWidgetStateDetail {
+  widgetId: string | null;
+  widgetTitle: string | null;
+}
+
+export interface WorkbenchConversationResumeDetail {
+  conversationId: string;
+  scopeType: "canvas" | "draft";
+  scopeId: string;
+}
 
 /** Executable workbench action types (parity with useWorkbenchCohi). */
 export const EXECUTABLE_WORKBENCH_ACTION_TYPES = new Set<string>([
@@ -36,6 +70,8 @@ export interface WorkbenchChatHandoff {
   activateDraftScopeId?: string;
   /** Actions that arrived before the canvas listener mounted. */
   pendingActions?: WidgetAction[];
+  /** Resume historical workbench chat on the linked canvas (no new tab). */
+  resumeConversationId?: string;
 }
 
 export type WorkbenchChatHandoffLocationState = {
@@ -61,6 +97,82 @@ export function isMyDashboardCanvasPath(pathname: string): boolean {
   return (
     normalized === "/my-dashboard" || normalized.startsWith("/my-dashboard/")
   );
+}
+
+/** Saved canvas id from `/my-dashboard/:id` (not `new`). */
+export function getMyDashboardCanvasIdFromPath(pathname?: string): string | null {
+  if (typeof window === "undefined" && pathname == null) return null;
+  const path = (pathname ?? window.location.pathname).replace(/\/+$/, "") || "/";
+  const match = path.match(/^\/my-dashboard\/([^/]+)$/);
+  if (!match || match[1] === "new") return null;
+  return match[1];
+}
+
+/** Stable draft scope for a saved canvas tab (survives remounts and chat handoff). */
+export function draftScopeIdForCanvasTab(canvasId: string): string {
+  return `canvas-tab:${canvasId}`;
+}
+
+/** Normalize draft scope from an Edit-with-Cohi event (always canvas-tab when canvasId known). */
+export function resolveWorkbenchEditDraftScope(
+  detail: Pick<WorkbenchEditWidgetEventDetail, "draftScopeId" | "canvasId">,
+): string {
+  if (detail.canvasId) return draftScopeIdForCanvasTab(detail.canvasId);
+  return detail.draftScopeId;
+}
+
+/** Bind session + tab map for edit-with-Cohi without changing dashboard route/tabs. */
+export function bindWorkbenchEditDraftScope(
+  detail: Pick<WorkbenchEditWidgetEventDetail, "draftScopeId" | "canvasId">,
+): string {
+  const draftScopeId = resolveWorkbenchEditDraftScope(detail);
+  if (detail.canvasId) {
+    dispatchWorkbenchFocusCanvas(detail.canvasId);
+    dispatchWorkbenchBindCanvas(detail.canvasId);
+  }
+  setActiveWorkbenchDraftScope(draftScopeId);
+  markWorkbenchCanvasNavBound();
+  if (detail.canvasId) {
+    rememberWorkbenchDraftTab(draftScopeId, detail.canvasId);
+  }
+  return draftScopeId;
+}
+
+/** Saved canvas id from URL or the mounted WorkbenchCanvas bridge (not "new" route). */
+export function getConnectedWorkbenchCanvasId(): string | null {
+  if (typeof window === "undefined") return null;
+  const fromUrl = getMyDashboardCanvasIdFromPath();
+  if (fromUrl) return fromUrl;
+  const bridge = getWorkbenchCanvasBridge();
+  return bridge?.canvasId ?? null;
+}
+
+export function dispatchWorkbenchFocusCanvas(canvasId: string): void {
+  if (typeof window === "undefined" || !canvasId) return;
+  window.dispatchEvent(
+    new CustomEvent(COHI_WORKBENCH_FOCUS_CANVAS_EVENT, {
+      detail: { canvasId },
+    }),
+  );
+}
+
+export function dispatchWorkbenchBindCanvas(canvasId: string): void {
+  if (typeof window === "undefined" || !canvasId) return;
+  window.dispatchEvent(
+    new CustomEvent(COHI_WORKBENCH_BIND_CANVAS_EVENT, {
+      detail: { canvasId },
+    }),
+  );
+}
+
+function syncWorkbenchDraftScopeFromActiveCanvas(): string | null {
+  const bridge = getWorkbenchCanvasBridge();
+  if (!bridge?.draftScopeId) return null;
+  setActiveWorkbenchDraftScope(bridge.draftScopeId);
+  markWorkbenchCanvasNavBound();
+  const tabId = bridge.canvasId ?? getMyDashboardCanvasIdFromPath();
+  if (tabId) rememberWorkbenchDraftTab(bridge.draftScopeId, tabId);
+  return bridge.draftScopeId;
 }
 
 export function markWorkbenchChatSplitLayout(): void {
@@ -107,6 +219,26 @@ export function resetActiveWorkbenchDraftSession(): void {
   }
 }
 
+/** Bind unified chat to a specific canvas/draft scope (e.g. Edit with Cohi). */
+export function setActiveWorkbenchDraftScope(draftScopeId: string): void {
+  if (typeof window === "undefined" || !draftScopeId) return;
+  try {
+    window.sessionStorage.setItem(ACTIVE_DRAFT_SCOPE_KEY, draftScopeId);
+    markWorkbenchCanvasNavBound();
+  } catch {
+    /* ignore */
+  }
+}
+
+export function dispatchWorkbenchEditingWidgetState(
+  detail: WorkbenchEditingWidgetStateDetail,
+): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(COHI_WORKBENCH_EDITING_WIDGET_STATE_EVENT, { detail }),
+  );
+}
+
 export function isWorkbenchCanvasNavBound(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -133,18 +265,56 @@ export function navigateForWorkbenchChatSubmit(
   navigate: NavigateFunction,
   options?: { forceNewConversation?: boolean },
 ): string {
+  const onDashboard =
+    typeof window !== "undefined" &&
+    isMyDashboardCanvasPath(window.location.pathname);
+  const connectedCanvasId = getConnectedWorkbenchCanvasId();
+
   if (options?.forceNewConversation) {
-    resetActiveWorkbenchDraftSession();
+    const preserved = syncWorkbenchDraftScopeFromActiveCanvas();
+    if (!preserved && !connectedCanvasId) {
+      resetActiveWorkbenchDraftSession();
+    }
   }
-  const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+
   markWorkbenchChatSplitLayout();
+
+  const syncedFromBridge = syncWorkbenchDraftScopeFromActiveCanvas();
+  if (syncedFromBridge) {
+    return syncedFromBridge;
+  }
+
+  if (onDashboard) {
+    const draftScopeId = connectedCanvasId
+      ? draftScopeIdForCanvasTab(connectedCanvasId)
+      : getOrCreateActiveWorkbenchDraftScope();
+    setActiveWorkbenchDraftScope(draftScopeId);
+    markWorkbenchCanvasNavBound();
+    if (connectedCanvasId) {
+      rememberWorkbenchDraftTab(draftScopeId, connectedCanvasId);
+      dispatchWorkbenchFocusCanvas(connectedCanvasId);
+    }
+    return draftScopeId;
+  }
+
+  const draftScopeId = connectedCanvasId
+    ? draftScopeIdForCanvasTab(connectedCanvasId)
+    : getOrCreateActiveWorkbenchDraftScope();
+  setActiveWorkbenchDraftScope(draftScopeId);
+
   const firstNav = !isWorkbenchCanvasNavBound();
   if (firstNav) {
     markWorkbenchCanvasNavBound();
-    navigateToWorkbenchHandoff(navigate, {
-      draftScopeId,
-      openNewTab: true,
-    });
+    if (connectedCanvasId) {
+      navigate(`/my-dashboard/${connectedCanvasId}`);
+    } else {
+      navigateToWorkbenchHandoff(navigate, {
+        draftScopeId,
+        openNewTab: true,
+      });
+    }
+  } else if (connectedCanvasId) {
+    navigate(`/my-dashboard/${connectedCanvasId}`);
   } else {
     navigateToWorkbenchHandoff(navigate, {
       draftScopeId,
@@ -152,6 +322,97 @@ export function navigateForWorkbenchChatSubmit(
     });
   }
   return draftScopeId;
+}
+
+/**
+ * Canvas-first handoff for "Edit with Cohi" — never opens a blank new tab.
+ */
+export function navigateForWorkbenchWidgetEdit(
+  navigate: NavigateFunction,
+  detail: WorkbenchEditWidgetEventDetail,
+): void {
+  const draftScopeId = bindWorkbenchEditDraftScope(detail);
+  markWorkbenchChatSplitLayout();
+
+  const onDashboard =
+    typeof window !== "undefined" &&
+    isMyDashboardCanvasPath(window.location.pathname);
+
+  if (onDashboard) {
+    return;
+  }
+
+  if (detail.canvasId) {
+    navigate(`/my-dashboard/${detail.canvasId}`);
+    return;
+  }
+
+  navigateToWorkbenchHandoff(navigate, {
+    draftScopeId,
+    activateDraftScopeId: draftScopeId,
+  });
+}
+
+/** Load a conversation into the unified chat shell (listened to by CohiChatPanel). */
+export function dispatchCohiChatResume(
+  conversationId: string,
+  chatType: UnifiedChatType = "workbench",
+): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("cohi-chat-resume", {
+      detail: { conversationId, chatType },
+    }),
+  );
+}
+
+/**
+ * After dashboard navigation, load the resumed conversation even when the URL
+ * does not change (e.g. another chat is already open on the same canvas).
+ */
+export function scheduleWorkbenchConversationResume(conversationId: string): void {
+  if (typeof window === "undefined") return;
+  queueMicrotask(() => dispatchCohiChatResume(conversationId, "workbench"));
+}
+
+/**
+ * Resume a historical workbench conversation on its linked canvas with split chat.
+ */
+export function navigateForWorkbenchConversationResume(
+  navigate: NavigateFunction,
+  args: WorkbenchConversationResumeDetail,
+): boolean {
+  const { conversationId, scopeType, scopeId } = args;
+  if (!scopeId) return false;
+
+  markWorkbenchChatSplitLayout();
+  markWorkbenchCanvasNavBound();
+
+  if (scopeType === "canvas") {
+    navigate(`/my-dashboard/${scopeId}`, {
+      state: {
+        [WORKBENCH_CHAT_HANDOFF_STATE_KEY]: {
+          draftScopeId: scopeId,
+          resumeConversationId: conversationId,
+        },
+      },
+    });
+    scheduleWorkbenchConversationResume(conversationId);
+    return true;
+  }
+
+  if (scopeType === "draft") {
+    setActiveWorkbenchDraftScope(scopeId);
+    navigateToWorkbenchHandoff(navigate, {
+      draftScopeId: scopeId,
+      activateDraftScopeId: scopeId,
+      resumeConversationId: conversationId,
+    });
+    scheduleWorkbenchConversationResume(conversationId);
+    return true;
+  }
+
+  return false;
 }
 
 export function stashPendingWorkbenchActions(
@@ -210,9 +471,14 @@ export function deliverWorkbenchWidgetActions(
 ): void {
   if (!actions.length) return;
   const bridge = getWorkbenchCanvasBridge();
-  if (bridge?.isActive && bridge.draftScopeId === draftScopeId) {
-    dispatchWorkbenchActions(actions, { draftScopeId });
-    clearPendingWorkbenchActions(draftScopeId);
+  const targetScopeId =
+    bridge?.isActive ? bridge.draftScopeId : draftScopeId;
+  if (bridge?.isActive) {
+    dispatchWorkbenchActions(actions, { draftScopeId: targetScopeId });
+    clearPendingWorkbenchActions(targetScopeId);
+    if (targetScopeId !== draftScopeId) {
+      clearPendingWorkbenchActions(draftScopeId);
+    }
     return;
   }
   stashPendingWorkbenchActions(draftScopeId, actions);

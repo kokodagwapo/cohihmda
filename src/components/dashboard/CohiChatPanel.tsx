@@ -83,8 +83,16 @@ import {
 } from "@/lib/unifiedChatEnvelope";
 import { cohiChatNavigationState, useChatShell } from "@/contexts/ChatShellContext";
 import {
+  COHI_WORKBENCH_EDITING_WIDGET_STATE_EVENT,
   COHI_WORKBENCH_EDIT_WIDGET_EVENT,
+  COHI_WORKBENCH_STOP_EDITING_EVENT,
+  isMyDashboardCanvasPath,
+  bindWorkbenchEditDraftScope,
   navigateForWorkbenchChatSubmit,
+  navigateForWorkbenchConversationResume,
+  navigateForWorkbenchWidgetEdit,
+  type WorkbenchEditWidgetEventDetail,
+  type WorkbenchEditingWidgetStateDetail,
 } from "@/lib/workbench/workbenchChatHandoff";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { PAGE_INSIGHTS_CARD } from "@/components/cohi/pageContentStyles";
@@ -440,6 +448,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     "gemini"
   );
   const [attachedUploadIds, setAttachedUploadIds] = useState<string[]>([]);
+  const [workbenchEditingWidget, setWorkbenchEditingWidget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [researchViewOnly, setResearchViewOnly] = useState(false);
   const [vizTypeOverrides, setVizTypeOverrides] = useState<
     Record<string, VisualizationConfig["type"]>
@@ -607,12 +619,18 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const navigateWorkbenchOnSubmit = useCallback(
     (forceNewConversation: boolean) => {
       if (
-        activeChatType === "workbench" &&
-        isUnifiedChatClientEnabled()
+        activeChatType !== "workbench" ||
+        !isUnifiedChatClientEnabled()
       ) {
-        if (!isMobile) {
-          setShellExpandMode("split");
-        }
+        return;
+      }
+      if (!isMobile) {
+        setShellExpandMode("split");
+      }
+      const onDashboard =
+        typeof window !== "undefined" &&
+        isMyDashboardCanvasPath(window.location.pathname);
+      if (!onDashboard) {
         navigateForWorkbenchChatSubmit(navigate, { forceNewConversation });
       }
     },
@@ -628,23 +646,49 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (
-        e as CustomEvent<{ message?: string }>
-      ).detail;
+      const detail = (e as CustomEvent<WorkbenchEditWidgetEventDetail>).detail;
       if (!detail?.message?.trim()) return;
       setActiveChatType("workbench");
       if (isUnifiedChatClientEnabled()) {
+        bindWorkbenchEditDraftScope(detail);
         if (!isMobile) {
           setShellExpandMode("split");
         }
-        navigateForWorkbenchChatSubmit(navigate, { forceNewConversation: false });
+        navigateForWorkbenchWidgetEdit(navigate, detail);
+        if (detail.widgetId && detail.widgetTitle) {
+          setWorkbenchEditingWidget({
+            id: detail.widgetId,
+            title: detail.widgetTitle,
+          });
+        }
       }
-      void sendMessage(detail.message.trim());
+      void sendMessage(detail.message.trim(), { forceNewConversation: false });
     };
     window.addEventListener(COHI_WORKBENCH_EDIT_WIDGET_EVENT, handler);
     return () =>
       window.removeEventListener(COHI_WORKBENCH_EDIT_WIDGET_EVENT, handler);
   }, [sendMessage, setActiveChatType, navigate, isMobile, setShellExpandMode]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<WorkbenchEditingWidgetStateDetail>).detail;
+      if (!detail) return;
+      if (detail.widgetId && detail.widgetTitle) {
+        setWorkbenchEditingWidget({
+          id: detail.widgetId,
+          title: detail.widgetTitle,
+        });
+      } else {
+        setWorkbenchEditingWidget(null);
+      }
+    };
+    window.addEventListener(COHI_WORKBENCH_EDITING_WIDGET_STATE_EVENT, handler);
+    return () =>
+      window.removeEventListener(
+        COHI_WORKBENCH_EDITING_WIDGET_STATE_EVENT,
+        handler,
+      );
+  }, []);
 
   useEffect(() => {
     if (layout === "shell") return;
@@ -1051,8 +1095,36 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       const result = await loadSession(sessionId);
       setAttachedUploadIds(result.datasetUploadIds);
       void listAvailableUploads();
+      if (result.chatType === "workbench" && isUnifiedChatClientEnabled()) {
+        if (!isMobile && layout === "shell") {
+          setShellExpandMode(
+            isMyDashboardCanvasPath(pathname) ? "split" : "full",
+          );
+        }
+        const scopeType = result.scope?.type;
+        const scopeId = result.scope?.id;
+        if (
+          scopeId &&
+          (scopeType === "canvas" || scopeType === "draft") &&
+          !isMyDashboardCanvasPath(pathname)
+        ) {
+          navigateForWorkbenchConversationResume(navigate, {
+            conversationId: sessionId,
+            scopeType,
+            scopeId,
+          });
+        }
+      }
     },
-    [loadSession, listAvailableUploads],
+    [
+      loadSession,
+      listAvailableUploads,
+      layout,
+      isMobile,
+      pathname,
+      setShellExpandMode,
+      navigate,
+    ],
   );
 
   useEffect(() => {
@@ -1062,15 +1134,31 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         chatType: import("@/lib/unifiedChatClient").UnifiedChatType;
       }>).detail;
       if (!detail?.conversationId) return;
+      const chatType = detail.chatType ?? "chat";
       if (layout === "shell") {
-        setShellExpandMode("full");
+        if (
+          chatType === "workbench" &&
+          isMyDashboardCanvasPath(pathname) &&
+          !isMobile
+        ) {
+          setShellExpandMode("split");
+        } else {
+          setShellExpandMode("full");
+        }
       }
-      setActiveChatType(detail.chatType ?? "chat");
+      setActiveChatType(chatType);
       void handleLoadSession(detail.conversationId);
     };
     window.addEventListener("cohi-chat-resume", onResume);
     return () => window.removeEventListener("cohi-chat-resume", onResume);
-  }, [handleLoadSession, setActiveChatType, layout, setShellExpandMode]);
+  }, [
+    handleLoadSession,
+    setActiveChatType,
+    layout,
+    setShellExpandMode,
+    pathname,
+    isMobile,
+  ]);
 
   /**
    * Handle key press (Enter to send)
@@ -2115,6 +2203,27 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             : "border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/50 dark:bg-slate-900/50",
       )}
     >
+      {activeChatType === "workbench" && workbenchEditingWidget && (
+        <div className="flex items-center justify-between gap-2 mb-2 px-2 py-1.5 rounded-lg bg-violet-50/90 dark:bg-indigo-950/40 border border-violet-100 dark:border-indigo-900/50">
+          <span className="text-xs font-medium text-indigo-800 dark:text-indigo-200 truncate">
+            Editing: {workbenchEditingWidget.title}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 shrink-0 text-indigo-600 dark:text-indigo-400"
+            onClick={() => {
+              setWorkbenchEditingWidget(null);
+              window.dispatchEvent(
+                new CustomEvent(COHI_WORKBENCH_STOP_EDITING_EVENT),
+              );
+            }}
+            title="Stop editing"
+          >
+            Stop
+          </Button>
+        </div>
+      )}
       {isUnifiedChatClientEnabled() && (
         <UnifiedChatRebindBanner
           tenantId={tenantId}

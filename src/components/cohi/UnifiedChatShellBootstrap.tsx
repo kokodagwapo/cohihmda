@@ -3,10 +3,11 @@
  */
 
 import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { createUnifiedChatClient } from "@/lib/unifiedChatClient";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
+import { navigateForWorkbenchConversationResume } from "@/lib/workbench/workbenchChatHandoff";
 
 export interface UnifiedChatShellBootstrapProps {
   tenantId?: string;
@@ -18,6 +19,7 @@ export function UnifiedChatShellBootstrap({
   onResume,
 }: UnifiedChatShellBootstrapProps) {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!isUnifiedChatClientEnabled() || !onResume) return;
@@ -38,7 +40,23 @@ export function UnifiedChatShellBootstrap({
       try {
         const client = createUnifiedChatClient(tenantId);
         const row = await client.getConversation(resume);
-        onResume(row.id, (row.chat_type as UnifiedChatType) ?? chatType);
+        const resolvedType = (row.chat_type as UnifiedChatType) ?? chatType;
+        const scopeType = row.scope?.type;
+        const scopeId = row.scope?.id;
+        if (
+          resolvedType === "workbench" &&
+          scopeId &&
+          (scopeType === "canvas" || scopeType === "draft") &&
+          navigateForWorkbenchConversationResume(navigate, {
+            conversationId: row.id,
+            scopeType,
+            scopeId,
+          })
+        ) {
+          onResume(row.id, "workbench");
+          return;
+        }
+        onResume(row.id, resolvedType);
       } catch {
         const client = createUnifiedChatClient(tenantId);
         if (chatType === "research") {

@@ -35,7 +35,9 @@ export function UnifiedChatShell({ tenantId, className }: UnifiedChatShellProps)
     useChatShellAnimatedHeight(mode, contentMeasureRef);
 
   const onResume = (conversationId: string, chatType: UnifiedChatType) => {
-    setMode("full");
+    if (chatType !== "workbench") {
+      setMode("full");
+    }
     window.dispatchEvent(
       new CustomEvent("cohi-chat-resume", {
         detail: { conversationId, chatType },

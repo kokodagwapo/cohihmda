@@ -552,13 +552,15 @@ export function AgentTimeline({
   );
 
   const visibleEvents = events.filter((e) => e.type !== "heartbeat");
-  const totalQuestions =
-    totalQuestionsProp ??
-    (() => {
-      const planEvent = events.find((e) => e.type === "plan");
-      return planEvent?.data?.questions?.length ?? 0;
-    })();
+  const planQuestionCount = (() => {
+    const planEvent = events.find((e) => e.type === "plan");
+    return planEvent?.data?.questions?.length ?? 0;
+  })();
   const completedCount = events.filter((e) => e.type === "agent_complete").length;
+  const totalQuestions = Math.max(
+    totalQuestionsProp ?? planQuestionCount,
+    completedCount,
+  );
   const keyEvents = visibleEvents.filter((e) => KEY_EVENT_TYPES.includes(e.type));
 
   if (visibleEvents.length === 0 && !isRunning) {
