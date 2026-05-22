@@ -366,6 +366,16 @@ export async function processUnifiedChatMessage(
   if (!conversationId) conversationId = randomUUID();
   const turnId = randomUUID();
 
+  const tenantId = req.tenantContext?.tenantId || req.tenantId;
+  let resolvedUploadIds: string[] = [];
+  if (tenantId) {
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    resolvedUploadIds = await resolveDatasetUploadIdsForRequest(
+      { ...body, conversationId },
+      tenantPool,
+    );
+  }
+
   let blocks: UnifiedBlock[];
   let metadata: Record<string, unknown>;
   let legacySource: string | null = null;
@@ -377,7 +387,7 @@ export async function processUnifiedChatMessage(
       conversationId,
       legacyRef,
       deepAnalysis: body.options?.research?.deepAnalysis,
-      uploadIds: mergeDatasetUploadIds(body),
+      uploadIds: resolvedUploadIds,
       policy,
     });
     blocks = research.blocks;
