@@ -1054,7 +1054,7 @@ async function handlePostMessage(
     }
 
     const tenantId = req.tenantContext?.tenantId || req.tenantId;
-    const userId = req.userId;
+    let userId = req.userId;
     if (!tenantId || !userId) {
       res.status(400).json({
         error: "bad_request",
@@ -1066,6 +1066,8 @@ async function handlePostMessage(
     // Platform staff can target a tenant via tenant_id while authenticated against
     // management identities. Ensure a tenant-local users row exists before writing
     // idempotency keys (FK: unified_chat_idempotency_keys.user_id -> users.id).
+    // If a tenant row already exists by email with a different UUID, use that tenant
+    // UUID for this request to keep FK writes consistent.
     let tenantUserReady = true;
     const platformRoles = new Set(["super_admin", "platform_admin", "support"]);
     const role = (req.userRole || "").toLowerCase();
@@ -1074,7 +1076,26 @@ async function handlePostMessage(
       (platformRoles.has(role) ? await tenantDbManager.getTenantPool(tenantId) : null);
 
     if (tenantPool) {
-      tenantUserReady = await ensureTenantUserRow(tenantPool, userId, req.userEmail ?? null);
+      const byId = await tenantPool.query(
+        `SELECT id::text AS id FROM public.users WHERE id = $1::uuid LIMIT 1`,
+        [userId],
+      );
+      if (byId.rows.length > 0) {
+        userId = String(byId.rows[0].id);
+      } else if (req.userEmail) {
+        const email = req.userEmail.trim().toLowerCase();
+        const byEmail = await tenantPool.query(
+          `SELECT id::text AS id FROM public.users WHERE lower(email) = $1 LIMIT 1`,
+          [email],
+        );
+        if (byEmail.rows.length > 0) {
+          userId = String(byEmail.rows[0].id);
+        } else {
+          tenantUserReady = await ensureTenantUserRow(tenantPool, userId, email);
+        }
+      } else {
+        tenantUserReady = await ensureTenantUserRow(tenantPool, userId, null);
+      }
     }
 
     if (!tenantUserReady) {
@@ -1085,6 +1106,7 @@ async function handlePostMessage(
       });
       return;
     }
+    req.userId = userId;
 
     const idem = await tryReserveClientMessageId(tenantId, userId, body.clientMessageId);
     if (idem === "duplicate") {
