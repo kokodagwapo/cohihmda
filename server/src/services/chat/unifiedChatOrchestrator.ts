@@ -31,7 +31,7 @@ import { runUnifiedResearchTurn } from "./unifiedResearchChat.js";
 import { findUnifiedConversationByLegacyRef } from "./unifiedConversationService.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import {
-  mergeDatasetUploadIds,
+  resolveDatasetUploadIdsForRequest,
   resolveUploadSchemaContext,
 } from "../research/uploadConversationService.js";
 
@@ -114,9 +114,9 @@ async function buildChatContextWithUploads(
   body: UnifiedChatRequestBody,
 ): Promise<ChatContext> {
   const base = buildChatContext(req);
-  const uploadIds = mergeDatasetUploadIds(body);
-  if (uploadIds.length === 0) return base;
   const tenantPool = await tenantDbManager.getTenantPool(base.tenantId);
+  const uploadIds = await resolveDatasetUploadIdsForRequest(body, tenantPool);
+  if (uploadIds.length === 0) return base;
   const resolved = await resolveUploadSchemaContext(uploadIds, tenantPool);
   if (!resolved.instructionBlock) return base;
   return {
@@ -206,12 +206,16 @@ async function executeWorkbenchBranch(
   policy: PolicyDecision,
   bundle: ReturnType<typeof composePromptBundle>,
 ): Promise<{ blocks: UnifiedBlock[]; metadata: Record<string, unknown> }> {
-  const uploadIds = mergeDatasetUploadIds(body);
+  const tenantId = req.tenantContext?.tenantId || req.tenantId;
+  const tenantPool = tenantId
+    ? await tenantDbManager.getTenantPool(tenantId)
+    : null;
+  const uploadIds = tenantPool
+    ? await resolveDatasetUploadIdsForRequest(body, tenantPool)
+    : [];
   let uploadSchemaContext: string | undefined;
-  if (uploadIds.length > 0) {
-    const tenantId = req.tenantContext?.tenantId || req.tenantId;
+  if (uploadIds.length > 0 && tenantPool) {
     if (tenantId) {
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
       const resolved = await resolveUploadSchemaContext(uploadIds, tenantPool);
       uploadSchemaContext = resolved.instructionBlock || undefined;
     }

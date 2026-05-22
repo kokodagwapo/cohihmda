@@ -277,3 +277,32 @@ export function mergeDatasetUploadIds(
   const fromResearch = body.options?.research?.uploadIds ?? [];
   return [...new Set([...fromDataset, ...fromResearch].filter(Boolean))];
 }
+
+/**
+ * Merge request upload IDs with datasets already linked to this conversation (follow-up turns).
+ */
+export async function resolveDatasetUploadIdsForRequest(
+  body: {
+    conversationId?: string;
+    options?: {
+      datasetUploadIds?: string[];
+      research?: { uploadIds?: string[] };
+    };
+  },
+  tenantPool?: pg.Pool,
+): Promise<string[]> {
+  const fromBody = mergeDatasetUploadIds(body);
+  const convId = body.conversationId?.trim();
+  if (!convId || !tenantPool) return fromBody;
+
+  try {
+    const linked = await getUploadIdsForConversation(tenantPool, convId);
+    return [...new Set([...fromBody, ...linked].filter(Boolean))];
+  } catch (err: unknown) {
+    console.warn(
+      "[uploadConversation] Failed to load linked uploads for conversation:",
+      err instanceof Error ? err.message : err,
+    );
+    return fromBody;
+  }
+}
