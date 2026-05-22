@@ -51,6 +51,11 @@ import { retrieveRAGContext } from "../services/ai/ragRetrieval.js";
 import { getLoanAccessContext } from "../services/userLoanAccessService.js";
 import { safeParseMetricSpec } from "../services/metrics/metricSpec.js";
 import { composeMetricSql } from "../services/metrics/metricQueryComposer.js";
+import {
+  parseRequestedPeriodFromText,
+  reconcileWidgetActionPeriods,
+  type WorkbenchLlmPreset,
+} from "../services/workbench/workbenchWidgetPeriodReconcile.js";
 
 const router = Router();
 
@@ -1198,6 +1203,11 @@ Map the user's requested time range to the correct defaultPreset in filterConfig
 - No time constraint / "all time" / "since inception" → null
 NEVER hard-code date ranges in SQL for filterable:true widgets. Use filterConfig.defaultPreset.
 
+## Widget Title Rules (CRITICAL)
+- Do NOT put period tokens in create_widget titles (no "MTD", "YTD", "L12M", "QTD", etc.).
+- Express time scope ONLY via filterConfig.defaultPreset; the UI filter bar shows the period.
+- Good title: "Funded Units". Bad title: "Funded Units MTD".
+
 ## Metric Consistency (CRITICAL)
 When computing metrics like Revenue, Pull-Through Rate, Volume, Fallout, Cycle Time:
 - **ALWAYS use the exact SQL formulas from the VERIFIED METRICS SQL section below.** Do NOT invent your own formulas.
@@ -1412,6 +1422,7 @@ export async function runWorkbenchChatTurn(
       conversationHistory,
       uploadSchemaContext,
       datasetUploadIds,
+      requestedPeriod: requestedPeriodBody,
     } = rawBody as {
       question: string;
       canvasState?: CanvasStateSnapshot;
@@ -1420,6 +1431,7 @@ export async function runWorkbenchChatTurn(
       tenantId?: string;
       uploadSchemaContext?: string;
       datasetUploadIds?: string[];
+      requestedPeriod?: WorkbenchLlmPreset;
     };
 
       if (!question || typeof question !== "string") {
@@ -1532,6 +1544,18 @@ export async function runWorkbenchChatTurn(
 
       if (hasUploadContext) {
         personaSupplement += `\n\n## CSV dataset mode (CRITICAL)\nThe user attached CSV data. Use create_widget with SQL that queries ONLY the upload_* tables listed in the schema context. Do not use the loans table unless the user explicitly asks to compare with portfolio data.`;
+      }
+
+      const historyTexts = (conversationHistory ?? [])
+        .filter((m) => m.role === "user")
+        .map((m) => m.content)
+        .slice(-6);
+      const requestedPeriod: WorkbenchLlmPreset =
+        requestedPeriodBody ??
+        parseRequestedPeriodFromText(question, ...historyTexts);
+
+      if (requestedPeriod) {
+        personaSupplement += `\n\n## Required time scope (CRITICAL)\nThe user requested period scope: **${requestedPeriod}**. Every filterable create_widget MUST set filterConfig.defaultPreset to "${requestedPeriod}" (or null only for true all-time snapshots). Do not encode the period in widget titles.`;
       }
 
       const now = new Date();
@@ -1673,6 +1697,11 @@ export async function runWorkbenchChatTurn(
           }
         }
       }
+
+      reconcileWidgetActionPeriods(validActions, {
+        requestedPeriod,
+        userQuestion: question,
+      });
 
       // Log modify_widget actions for debugging (instanceId, sql provided?, changes keys)
       for (const action of validActions) {
