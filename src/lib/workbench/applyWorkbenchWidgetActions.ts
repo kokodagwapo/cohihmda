@@ -8,9 +8,12 @@ import type { Dispatch, SetStateAction } from "react";
 import type { WidgetFilterConfig } from "@/components/workbench/canvas/types";
 import type { WidgetAction } from "@/types/widgetActions";
 import {
+  allActionsShareSamePreset,
+  buildGroupSavedFiltersFromFilterConfig,
+  dominantDefaultPresetFromActions,
   filterConfigToInitialState,
-  wrapCohiWidgetInGroup,
-} from "@/lib/workbench/workbenchCohiLayoutUtils";
+} from "@/lib/workbench/workbenchPresetMapping";
+import { wrapCohiWidgetInGroup } from "@/lib/workbench/workbenchCohiLayoutUtils";
 
 export interface ApplyWorkbenchWidgetActionsParams {
   actions: WidgetAction[];
@@ -72,6 +75,20 @@ export function applyWorkbenchWidgetActions({
     onWidgetsAdded?.(1, [createWidgetActions[0].title].filter(Boolean));
   } else if (createWidgetActions.length > 1) {
     setItemsWithHistory((prev) => {
+      const syncFilters = allActionsShareSamePreset(createWidgetActions);
+      const dominantPreset = dominantDefaultPresetFromActions(createWidgetActions);
+      const groupFilterConfig: WidgetFilterConfig | undefined =
+        dominantPreset != null
+          ? {
+              filterable: true,
+              dateColumn:
+                createWidgetActions.find((a) => a.filterConfig?.dateColumn)?.filterConfig
+                  ?.dateColumn ?? "application_date",
+              defaultPreset: dominantPreset,
+            }
+          : undefined;
+      const groupSavedFilters = buildGroupSavedFiltersFromFilterConfig(groupFilterConfig);
+
       const cohiItems = createWidgetActions.map((action, idx) => {
         const fc: WidgetFilterConfig = (action as { filterConfig?: WidgetFilterConfig }).filterConfig ?? {
           filterable: true,
@@ -115,7 +132,8 @@ export function applyWorkbenchWidgetActions({
           sectionType: "company-scorecard" as SectionType,
           widgetIds: [],
           items: cohiItems,
-          filterSync: false,
+          filterSync: syncFilters,
+          ...(groupSavedFilters ? { savedFilters: groupSavedFilters } : {}),
         },
         { x: 0, y: yOffset, w: defaultGroupWidth, h: groupH },
       );
