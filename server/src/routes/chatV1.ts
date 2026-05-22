@@ -48,6 +48,7 @@ import {
 import { emitValidatedStreamWithDeltas } from "../services/chat/unifiedChatStream.js";
 import { runUnifiedResearchStream } from "../services/chat/unifiedResearchStream.js";
 import { runUnifiedInsightBuilderStream } from "../services/chat/unifiedChatInsightBuilderStream.js";
+import { ensureTenantUserRow } from "../services/chat/tenantUserEnsure.js";
 import {
   linkUploadsToConversation,
   unlinkUploadFromConversation,
@@ -1058,6 +1059,29 @@ async function handlePostMessage(
       res.status(400).json({
         error: "bad_request",
         message: "Tenant and user context required",
+      });
+      return;
+    }
+
+    // Platform staff can target a tenant via tenant_id while authenticated against
+    // management identities. Ensure a tenant-local users row exists before writing
+    // idempotency keys (FK: unified_chat_idempotency_keys.user_id -> users.id).
+    let tenantUserReady = true;
+    const platformRoles = new Set(["super_admin", "platform_admin", "support"]);
+    const role = (req.userRole || "").toLowerCase();
+    const tenantPool =
+      req.tenantContext?.tenantPool ??
+      (platformRoles.has(role) ? await tenantDbManager.getTenantPool(tenantId) : null);
+
+    if (tenantPool) {
+      tenantUserReady = await ensureTenantUserRow(tenantPool, userId, req.userEmail ?? null);
+    }
+
+    if (!tenantUserReady) {
+      res.status(403).json({
+        error: "tenant_user_not_provisioned",
+        message:
+          "User is not provisioned in this tenant. Select a tenant membership account or sync tenant user mapping.",
       });
       return;
     }
