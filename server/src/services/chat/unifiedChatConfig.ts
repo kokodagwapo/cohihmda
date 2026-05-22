@@ -1,12 +1,12 @@
 /**
  * Feature flag and helpers for unified chat API.
- * UNIFIED_CHAT_ENABLED: unset = enabled in non-production, enabled if "true" in production;
- * set to "false" to disable /api/chat/v1 (returns 404).
+ * Unified chat is enabled by default in all environments.
+ * Set UNIFIED_CHAT_ENABLED=false only as an emergency kill switch
+ * (returns 404 for /api/chat/v1).
  */
 
 export function isUnifiedChatApiEnabled(): boolean {
   const raw = process.env.UNIFIED_CHAT_ENABLED;
   if (raw === "false") return false;
-  if (raw === "true") return true;
-  return process.env.NODE_ENV !== "production";
+  return true;
 }
