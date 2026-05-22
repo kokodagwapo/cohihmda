@@ -147,8 +147,6 @@ export const ROLE_MATRIX: RouteExpectation[] = [
   { routeGroup: "/api/cohi-chat", method: "GET", path: "/api/cohi-chat/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/cohi-chat/workbench", method: "GET", path: "/api/cohi-chat/workbench/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
   { routeGroup: "/api/chat/v1", method: "POST", path: "/api/chat/v1/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
-  { routeGroup: "/api/chat/v1", method: "GET", path: "/api/chat/v1/__rbac_probe_get", policy: "auth", expect: AUTH_EXPECTED },
-  { routeGroup: "/api/chat/v1", method: "DELETE", path: "/api/chat/v1/__rbac_probe_delete", policy: "auth", expect: AUTH_EXPECTED },
   { routeGroup: "/api/data-quality", method: "GET", path: "/api/data-quality/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/news", method: "GET", path: "/api/news/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/email", method: "GET", path: "/api/email/__rbac_probe", policy: "public", expect: PUBLIC_BLOCKS_CANVAS_ONLY },

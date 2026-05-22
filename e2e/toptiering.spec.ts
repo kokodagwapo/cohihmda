@@ -1,6 +1,5 @@
 import { test, expect } from "./fixtures";
 import { expectPageHeading } from "./helpers";
-import { resetUnifiedChatShellToCompact } from "./helpers/unifiedChat";
 import type { Response } from "@playwright/test";
 
 const topTieringRoutes = [
@@ -70,7 +69,6 @@ test.describe("TopTiering pages", () => {
   test("@critical @COHI-96 supports at least one drill-down style interaction", async ({ userPage }) => {
     await userPage.goto("/fallout-forecast", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-    await resetUnifiedChatShellToCompact(userPage);
 
     // The reliable drill-down is the loan-officer button on the critical loan cards.
     const officerButton = userPage

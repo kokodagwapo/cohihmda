@@ -15,9 +15,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
-import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
-import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
-import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { useHighPerformersData } from "@/hooks/useHighPerformersData";
 import type {
@@ -351,8 +348,9 @@ export default function HighPerformers() {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="High Performers - Leaderboards" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="High Performers - Leaderboards" />
+        <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 max-w-[1800px] mx-auto w-full">
             {hasError && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>
@@ -450,7 +448,7 @@ export default function HighPerformers() {
               </div>
             </div>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 }

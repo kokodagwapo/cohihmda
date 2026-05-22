@@ -5,9 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
-import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
-import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
-import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import {
   useSalesCompanyOverviewData,
@@ -711,8 +708,9 @@ const SalesCompanyOverview = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Sales Company Overview" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="Sales Company Overview" />
+        <main className="flex-1 overflow-y-auto px-2 sm:px-4 py-2 sm:py-3">
           <div className="mx-auto max-w-[1800px] space-y-3 sm:space-y-4">
             <Card className={dashboardCardClass}>
               <CardContent className="p-4 sm:p-5">
@@ -1015,7 +1013,7 @@ const SalesCompanyOverview = () => {
             </div>
           </div>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 };

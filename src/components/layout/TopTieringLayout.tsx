@@ -2,11 +2,13 @@ import React, { createContext, useContext, useMemo, useState } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { Footer } from '@/components/layout/Footer';
 import { ReportsSidebar } from '@/components/dashboard/ReportsSidebar';
+import { ChatShellPageGrid } from '@/components/dashboard/ChatShellPageGrid';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import type { ReportData } from '@/data/reportSimulations';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatShell } from '@/contexts/ChatShellContext';
 import { isUnifiedChatClientEnabled } from '@/lib/unifiedChatEnvelope';
+import { useTenantStore } from '@/stores/tenantStore';
 import { cn } from '@/lib/utils';
 
 const TopTieringLayoutContext = createContext<{ openMobileMenu: () => void } | null>(null);
@@ -19,7 +21,8 @@ interface TopTieringLayoutProps {
 }
 
 export function TopTieringLayout({ children, visitorFirstName: propVisitorFirstName }: TopTieringLayoutProps) {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const { selectedTenantId } = useTenantStore();
   const visitorFirstName = useMemo(() => {
     if (propVisitorFirstName != null) return propVisitorFirstName;
     if (user?.full_name) return String(user.full_name).trim().split(/\s+/)[0] || null;
@@ -33,7 +36,9 @@ export function TopTieringLayout({ children, visitorFirstName: propVisitorFirstN
   const openMobileMenu = () => setMobileMenuOpen(true);
   const unifiedShell = isUnifiedChatClientEnabled();
   const { mode } = useChatShell();
-  const isSplitLayout = !!user && unifiedShell && mode === 'split';
+  const effectiveTenantId = selectedTenantId || user?.tenant_id || undefined;
+  const showChat = isAuthenticated && unifiedShell;
+  const isSplitLayout = showChat && mode === 'split';
 
   return (
     <TopTieringLayoutContext.Provider value={{ openMobileMenu }}>
@@ -65,7 +70,17 @@ export function TopTieringLayout({ children, visitorFirstName: propVisitorFirstN
               isSplitLayout ? 'h-full min-h-0 max-h-full flex-1 !overflow-hidden' : 'h-full',
             )}
           >
-            {children}
+            {showChat ? (
+              <ChatShellPageGrid
+                tenantId={effectiveTenantId}
+                showSplitPaneFooter
+                className={cn(isSplitLayout && 'h-full')}
+              >
+                {children}
+              </ChatShellPageGrid>
+            ) : (
+              children
+            )}
           </SidebarInset>
         </SidebarProvider>
 

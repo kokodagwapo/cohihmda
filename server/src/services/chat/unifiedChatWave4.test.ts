@@ -3,6 +3,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("../ai/queryBuilderService.js", () => ({
+  checkSectionAccess: vi.fn().mockResolvedValue(true),
+}));
 import {
   mapCohiChatResponseToBlocks,
   mapWorkbenchResponseToBlocks,

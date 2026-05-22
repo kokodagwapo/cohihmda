@@ -1,8 +1,5 @@
 import { useMemo } from "react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
-import { DASHBOARD_MAIN_CLASSNAME } from "@/components/cohi/pageContentStyles";
-import { DashboardPageContent } from "@/components/layout/DashboardPageContent";
-import { TopTieringPageFrame } from "@/components/layout/TopTieringPageFrame";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { useDashboardFilters } from "@/hooks/useDashboardFilters";
@@ -31,8 +28,9 @@ export default function BusinessOverviewDashboard() {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame topBar={<TopTieringTopBar title="Business Overview" />}>
-        <main className={DASHBOARD_MAIN_CLASSNAME}>
+      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+        <TopTieringTopBar title="Business Overview" />
+        <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 max-w-[1800px] mx-auto w-full">
           <ExecutiveDashboard
             dateFilter={dateFilter}
             year={currentYear}
@@ -40,7 +38,7 @@ export default function BusinessOverviewDashboard() {
             selectedChannel={selectedChannel}
           />
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 }

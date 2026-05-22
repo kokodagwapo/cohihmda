@@ -4,11 +4,7 @@ import { LayoutDashboard, Link, ShieldCheck } from 'lucide-react';
 import { CohiBuilderEmbedded } from '@/cohibuilder/CohiBuilderEmbedded';
 import { CohiBuilderPortfolioProvider } from '@/cohibuilder/contexts/CohiBuilderPortfolioContext';
 import '@/cohibuilder/cohibuilder.css';
-import { DASHBOARD_MAIN_CLASSNAME } from '@/components/cohi/pageContentStyles';
-import { DashboardPageContent } from '@/components/layout/DashboardPageContent';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
-import { TopTieringPageFrame } from '@/components/layout/TopTieringPageFrame';
-import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
 import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 import { cn } from '@/lib/utils';
@@ -112,18 +108,18 @@ const CaptureAnalysis = () => {
 
   return (
     <TopTieringLayout>
-      <TopTieringPageFrame
-        topBar={<TopTieringTopBar title="Capture Analysis" />}
-        className="bg-slate-50/50 dark:bg-slate-950"
-      >
-        <main ref={pageRef} className={DASHBOARD_MAIN_CLASSNAME}>
-          <DashboardPageContent>
-            <CohiBuilderPortfolioProvider>
-              <CohiBuilderEmbedded headerAfterSearch={captureHeaderExtras} />
-            </CohiBuilderPortfolioProvider>
-          </DashboardPageContent>
+      <div ref={pageRef} className="flex flex-col min-h-[calc(100vh-4rem)] bg-slate-50/50 dark:bg-slate-950">
+        <main className="flex-1 overflow-y-auto pb-8 px-4 sm:px-6 lg:px-8 pt-3 sm:pt-4">
+          <CohiBuilderPortfolioProvider>
+            <div className="max-w-[min(100%,1800px)] mx-auto w-full">
+              {/* Single embedded shell: Layout header (search + tabs + period). Keep below global nav — no negative margin. */}
+              <div className="mt-2 sm:mt-3">
+                <CohiBuilderEmbedded headerAfterSearch={captureHeaderExtras} />
+              </div>
+            </div>
+          </CohiBuilderPortfolioProvider>
         </main>
-      </TopTieringPageFrame>
+      </div>
     </TopTieringLayout>
   );
 };

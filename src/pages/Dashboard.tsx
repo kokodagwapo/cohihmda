@@ -85,14 +85,14 @@ import {
 } from "@/components/ui/popover";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
-import { cn } from "@/lib/utils";
 import { SeedDataButton } from "@/components/dashboard/SeedDataButton";
 import { useToast } from "@/hooks/use-toast";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { DashboardContainer } from "@/components/dashboard/DashboardContainer";
 import { Footer } from "@/components/layout/Footer";
 import { useChatShell } from "@/contexts/ChatShellContext";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
-import { DashboardContainer } from "@/components/dashboard/DashboardContainer";
+import { cn } from "@/lib/utils";
 import { useDashboardState } from "@/hooks/useDashboardState";
 import { useDashboardFilters } from "@/hooks/useDashboardFilters";
 import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
