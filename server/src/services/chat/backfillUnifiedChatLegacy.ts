@@ -1,6 +1,7 @@
 /**
  * Idempotent backfill: link research_sessions → unified_chat_conversations (COHI-395).
  * Safe to run on every deploy; skips rows that already have a matching legacy_ref.
+ * Skips orphan sessions whose user_id is not in public.users (no FK on research_sessions).
  */
 
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
@@ -9,6 +10,7 @@ export interface BackfillUnifiedChatLegacyResult {
   tenantId: string;
   inserted: number;
   skipped: number;
+  orphaned: number;
   total: number;
   skippedReason?: string;
 }
@@ -39,6 +41,7 @@ export async function backfillUnifiedChatLegacyForTenant(
       tenantId,
       inserted: 0,
       skipped: 0,
+      orphaned: 0,
       total: 0,
       skippedReason: "research_sessions table missing",
     };
@@ -49,13 +52,34 @@ export async function backfillUnifiedChatLegacyForTenant(
       tenantId,
       inserted: 0,
       skipped: 0,
+      orphaned: 0,
       total: 0,
       skippedReason: "unified_chat_conversations table missing",
     };
   }
 
+  const totalResult = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM public.research_sessions`,
+  );
+  const total = (totalResult.rows[0] as { count: number }).count;
+
+  const orphanResult = await pool.query(
+    `
+    SELECT COUNT(*)::int AS count
+    FROM public.research_sessions rs
+    LEFT JOIN public.users u ON u.id = rs.user_id
+    WHERE u.id IS NULL
+    `,
+  );
+  const orphaned = (orphanResult.rows[0] as { count: number }).count;
+
   const sessions = await pool.query(
-    `SELECT id, user_id, topic, created_at, updated_at FROM public.research_sessions ORDER BY created_at ASC`,
+    `
+    SELECT rs.id, rs.user_id, rs.topic, rs.created_at, rs.updated_at
+    FROM public.research_sessions rs
+    INNER JOIN public.users u ON u.id = rs.user_id
+    ORDER BY rs.created_at ASC
+    `,
   );
 
   let inserted = 0;
@@ -91,10 +115,17 @@ export async function backfillUnifiedChatLegacyForTenant(
     inserted++;
   }
 
+  if (orphaned > 0) {
+    console.warn(
+      `[backfillUnifiedChatLegacy] tenant=${tenantId} skipped ${orphaned} orphan research_sessions (user_id not in users)`,
+    );
+  }
+
   return {
     tenantId,
     inserted,
     skipped,
-    total: sessions.rows.length,
+    orphaned,
+    total,
   };
 }

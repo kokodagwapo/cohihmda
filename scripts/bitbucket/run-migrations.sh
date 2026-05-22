@@ -157,6 +157,23 @@ run_migrations() {
 # ============================================================================
 # Main
 # ============================================================================
+run_unified_chat_backfill_if_dev() {
+    if [[ "${UNIFIED_CHAT_LEGACY_BACKFILL_ENABLED:-true}" == "false" ]]; then
+        log_warning "Skipping unified chat backfill (UNIFIED_CHAT_LEGACY_BACKFILL_ENABLED=false)"
+        return 0
+    fi
+    if [[ "${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-}" != "dev" ]]; then
+        log_info "Skipping unified chat backfill (deployment is not dev)"
+        return 0
+    fi
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    log_info "Running unified chat legacy backfill (dev)..."
+    chmod +x "${script_dir}/run-unified-chat-backfill.sh"
+    "${script_dir}/run-unified-chat-backfill.sh"
+}
+
 main() {
     echo "=============================================="
     echo "  Database Migration Runner (ECS Exec)"
@@ -168,6 +185,7 @@ main() {
     check_ecs_exec_enabled
     get_running_task
     run_migrations
+    run_unified_chat_backfill_if_dev
     
     echo ""
     log_success "Done!"

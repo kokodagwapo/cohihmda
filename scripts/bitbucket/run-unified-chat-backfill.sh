@@ -46,6 +46,24 @@ install_session_manager_plugin() {
   rm -f session-manager-plugin.deb
 }
 
+check_ecs_exec_enabled() {
+  log_info "Checking if ECS Exec is enabled..."
+  local exec_enabled
+  exec_enabled=$(aws ecs describe-services \
+    --cluster "$ECS_CLUSTER" \
+    --services "$ECS_SERVICE" \
+    --region "$AWS_REGION" \
+    --query 'services[0].enableExecuteCommand' \
+    --output text)
+
+  if [[ "$exec_enabled" != "True" ]]; then
+    log_error "ECS Exec is not enabled on service: $ECS_SERVICE"
+    log_warning "Enable it with:"
+    echo "  aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --enable-execute-command --force-new-deployment"
+    exit 1
+  fi
+}
+
 get_running_task() {
   TASK_ARN=$(aws ecs list-tasks \
     --cluster "$ECS_CLUSTER" \
@@ -69,6 +87,9 @@ run_backfill() {
   local backfill_cmd="cd /app/server && node dist/migrations/backfillUnifiedChatCli.js --all"
 
   log_info "Running unified chat legacy backfill inside ECS task..."
+  echo "  Cluster: $ECS_CLUSTER"
+  echo "  Service: $ECS_SERVICE"
+  echo "  Task: $TASK_ID"
   echo "  Command: $backfill_cmd"
 
   aws ecs execute-command \
@@ -101,6 +122,7 @@ main() {
 
   validate_env
   install_session_manager_plugin
+  check_ecs_exec_enabled
   get_running_task
   run_backfill
 }
