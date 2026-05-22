@@ -22,4 +22,45 @@ describe("applyWorkbenchWidgetActions", () => {
 
     expect(executed).toEqual(["Second"]);
   });
+
+  it("multi create_widget sets group savedFilters and filterSync when presets match", () => {
+    const items: unknown[] = [];
+    const actions = [
+      {
+        type: "create_widget",
+        sql: "SELECT 1 AS v",
+        title: "Funded Units",
+        config: { type: "kpi" },
+        filterConfig: { filterable: true, dateColumn: "funding_date", defaultPreset: "MTD" },
+      },
+      {
+        type: "create_widget",
+        sql: "SELECT 2 AS v",
+        title: "Funded Volume",
+        config: { type: "kpi" },
+        filterConfig: { filterable: true, dateColumn: "funding_date", defaultPreset: "MTD" },
+      },
+    ] as import("@/types/widgetActions").WidgetAction[];
+
+    applyWorkbenchWidgetActions({
+      actions,
+      executeAction: vi.fn(),
+      setItemsWithHistory: (updater) => {
+        const next = typeof updater === "function" ? updater([]) : updater;
+        items.push(...next);
+      },
+      canvasWidth: 800,
+      defaultGroupWidth: 700,
+    });
+
+    expect(items).toHaveLength(1);
+    const group = items[0] as { payload: Record<string, unknown> };
+    expect(group.payload.filterSync).toBe(true);
+    const saved = group.payload.savedFilters as {
+      periodSelection?: { preset?: string };
+    };
+    expect(saved?.periodSelection?.preset).toBe("mtd");
+    const cohiItems = group.payload.items as Array<{ savedFilters?: { preset?: string } }>;
+    expect(cohiItems[0]?.savedFilters?.preset).toBe("mtd");
+  });
 });

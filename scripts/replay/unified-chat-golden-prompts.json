@@ -17,6 +17,16 @@
       "id": "hub-ask",
       "surface": "workbench_hub",
       "message": "What can I do in the workbench?"
+    },
+    {
+      "id": "workbench-mtd-board-overview",
+      "surface": "workbench_canvas",
+      "message": "Prepare a board-ready overview of this month's performance",
+      "expect": {
+        "requestedPeriod": "MTD",
+        "widgetTitleMustNotInclude": ["MTD", "YTD", "L12M"],
+        "defaultPreset": "MTD"
+      }
     }
   ]
 }
