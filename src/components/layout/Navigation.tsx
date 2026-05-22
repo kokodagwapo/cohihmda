@@ -1,5 +1,10 @@
 ﻿import { Button } from "@/components/ui/button";
 import { CoheusLogo } from "@/components/ui/CoheusLogo";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -1082,14 +1087,19 @@ export function Navigation(
         <div className="flex h-16 items-center gap-3">
           {/* Left: Logo */}
           <div className="flex items-center min-w-0">
-            <Link
-              to="/"
-              data-track="nav_home"
-              className="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:opacity-90 transition-opacity"
-              aria-label="Go to home page"
-            >
-              <CoheusLogo className="h-9 sm:h-10 md:h-11" height={44} />
-            </Link>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/"
+                  data-track="nav_home"
+                  className="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:opacity-90 transition-opacity"
+                  aria-label="Go to home page"
+                >
+                  <CoheusLogo className="h-9 sm:h-10 md:h-11" height={44} />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="top">Home</TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Center: Main Navigation with Dropdowns (Desktop) - matches feb1cohi */}
