@@ -23,7 +23,7 @@ import { runSqlThroughRouter } from "./sqlAndMetricsRouter.js";
 import type { UnifiedChatRequestBody } from "./unifiedChatOrchestrator.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import {
-  mergeDatasetUploadIds,
+  resolveDatasetUploadIdsForRequest,
   resolveUploadSchemaContext,
 } from "../research/uploadConversationService.js";
 
@@ -58,9 +58,12 @@ async function buildChatContextForStream(
     userEmail: req.userEmail,
   };
   if (!requestBody) return base;
-  const uploadIds = mergeDatasetUploadIds(requestBody);
-  if (uploadIds.length === 0) return base;
   const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+  const uploadIds = await resolveDatasetUploadIdsForRequest(
+    requestBody,
+    tenantPool,
+  );
+  if (uploadIds.length === 0) return base;
   const resolved = await resolveUploadSchemaContext(uploadIds, tenantPool);
   if (!resolved.instructionBlock) return base;
   return {

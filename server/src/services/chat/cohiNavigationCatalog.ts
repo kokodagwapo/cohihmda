@@ -195,10 +195,61 @@ export function isCohiGuidanceIntent(question: string): boolean {
   );
 }
 
+/** Metric / amount questions (e.g. "what is net income?") — not "where is the dashboard?". */
+export function looksLikeMetricOrAmountQuestion(question: string): boolean {
+  const t = question.trim().toLowerCase();
+  if (/\b(where|which)\s+(page|dashboard|report|link)\b/.test(t)) return false;
+  return (
+    /^(what is|what's|how much|how many|what was|what were|calculate|compute|tell me the|show me the)\b/.test(
+      t,
+    ) ||
+    /\b(net income|gross income|total revenue|profit margin|ebitda|balance sheet)\b/.test(
+      t,
+    )
+  );
+}
+
+const NAV_VERB_CANDIDATES = [
+  "track",
+  "find",
+  "see",
+  "view",
+  "open",
+  "access",
+  "navigate",
+  "go",
+  "get",
+] as const;
+
+/** Tokens that must not fuzzy-match navigation verbs (e.g. "net" ~ "get"). */
+const NAV_VERB_FUZZY_STOP_TOKENS = new Set([
+  "net",
+  "gross",
+  "ebit",
+  "ebitda",
+  "roi",
+  "apr",
+  "ltv",
+  "dti",
+  "pnl",
+  "ytd",
+  "mtd",
+  "qtd",
+]);
+
+function hasNavigationVerbToken(tokens: string[]): boolean {
+  for (const token of tokens) {
+    if (NAV_VERB_FUZZY_STOP_TOKENS.has(token)) continue;
+    if (hasApproxToken([token], NAV_VERB_CANDIDATES)) return true;
+  }
+  return false;
+}
+
 /** User wants to know which page/dashboard to open (not necessarily portfolio numbers). */
 export function isNavigationIntent(question: string): boolean {
   const t = question.trim().toLowerCase();
   if (isCohiGuidanceIntent(question)) return false;
+  if (looksLikeMetricOrAmountQuestion(question)) return false;
   if (
     /\b(where|which)\s+(can|do)\s+i\s+(track|find|see|view|go|open|access|get)\b/.test(
       t,
@@ -216,17 +267,7 @@ export function isNavigationIntent(question: string): boolean {
   // e.g. "wher can i se dashbord for pullthough"
   const tokens = tokenizeNavText(t);
   const asksWhereLike = hasApproxToken(tokens, ["where", "which", "what", "how"]);
-  const navVerbLike = hasApproxToken(tokens, [
-    "track",
-    "find",
-    "see",
-    "view",
-    "open",
-    "access",
-    "navigate",
-    "go",
-    "get",
-  ]);
+  const navVerbLike = hasNavigationVerbToken(tokens);
   const navObjectLike =
     hasConcept(t, NAV_CONCEPT_KEYWORDS.dashboard) ||
     hasApproxToken(tokens, ["link", "url", "page"]);

@@ -57,6 +57,12 @@ describe("cohiNavigationCatalog", () => {
     // resolveNavigationAnswer may still match keywords; cohiChatService only uses it when isNavigationIntent passes.
   });
 
+  it("does not treat net income follow-ups as navigation (net must not match verb get)", () => {
+    const q = "What is the net income?";
+    expect(isNavigationIntent(q)).toBe(false);
+    expect(resolveNavigationAnswer(q)).toBeNull();
+  });
+
   it("does not route broad daily-summary asks to navigation fallback", () => {
     const q = "What's important to know today?";
     expect(isNavigationIntent(q)).toBe(false);

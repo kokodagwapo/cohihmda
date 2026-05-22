@@ -582,6 +582,17 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     if (showDatasetAttach) void listAvailableUploads();
   }, [showDatasetAttach, listAvailableUploads]);
 
+  /** Keep conversation ↔ upload links in sync so follow-up turns resolve datasets server-side. */
+  useEffect(() => {
+    if (
+      currentSessionId &&
+      attachedUploadIds.length > 0 &&
+      isUnifiedChatClientEnabled()
+    ) {
+      void linkUploadsToCurrentConversation(attachedUploadIds);
+    }
+  }, [currentSessionId, attachedUploadIds, linkUploadsToCurrentConversation]);
+
   /** Only the latest assistant draft preview may be edited; older drafts stay read-only. */
   const lastInsightBuilderDraftIdx = useMemo(() => {
     if (activeChatType !== "insight_builder") return -1;

@@ -2057,26 +2057,28 @@ export async function processCohiQuestion(
       };
     }
 
-    const expandedNav = expandEffectiveQuestionForNavigation(
-      question,
-      conversationHistory.map((m) => ({ role: m.role, content: m.content })),
-    ).trim();
+    if (!context.uploadOnlyMode) {
+      const expandedNav = expandEffectiveQuestionForNavigation(
+        question,
+        conversationHistory.map((m) => ({ role: m.role, content: m.content })),
+      ).trim();
 
-    const nav = resolveNavigationAnswer(expandedNav);
-    const navShortcutAllowed =
-      nav !== null &&
-      (isNavigationIntent(expandedNav) ||
-        isNavigationIntent(question.trim()) ||
-        (/^(yes|yeah|yep|please|ok|okay|sure)\b/i.test(question.trim()) &&
-          expandedNav !== question.trim()) ||
-        /\bgive me (a )?(page|link)\b/i.test(question.trim()));
+      const nav = resolveNavigationAnswer(expandedNav);
+      const navShortcutAllowed =
+        nav !== null &&
+        (isNavigationIntent(expandedNav) ||
+          isNavigationIntent(question.trim()) ||
+          (/^(yes|yeah|yep|please|ok|okay|sure)\b/i.test(question.trim()) &&
+            expandedNav !== question.trim()) ||
+          /\bgive me (a )?(page|link)\b/i.test(question.trim()));
 
-    if (navShortcutAllowed && nav) {
-      return {
-        message: nav.message,
-        navigationHints: buildRecommendedNavigationHints(expandedNav, false),
-        suggestedQuestions: nav.suggestedQuestions,
-      };
+      if (navShortcutAllowed && nav) {
+        return {
+          message: nav.message,
+          navigationHints: buildRecommendedNavigationHints(expandedNav, false),
+          suggestedQuestions: nav.suggestedQuestions,
+        };
+      }
     }
 
     const gathered = await gatherAllContext(
@@ -2135,27 +2137,29 @@ export async function processCohiQuestionStreaming(
     };
   }
 
-  const expandedNav = expandEffectiveQuestionForNavigation(
-    question,
-    conversationHistory.map((m) => ({ role: m.role, content: m.content })),
-  ).trim();
+  if (!context.uploadOnlyMode) {
+    const expandedNav = expandEffectiveQuestionForNavigation(
+      question,
+      conversationHistory.map((m) => ({ role: m.role, content: m.content })),
+    ).trim();
 
-  const nav = resolveNavigationAnswer(expandedNav);
-  const navShortcutAllowed =
-    nav !== null &&
-    (isNavigationIntent(expandedNav) ||
-      isNavigationIntent(question.trim()) ||
-      (/^(yes|yeah|yep|please|ok|okay|sure)\b/i.test(question.trim()) &&
-        expandedNav !== question.trim()) ||
-      /\bgive me (a )?(page|link)\b/i.test(question.trim()));
+    const nav = resolveNavigationAnswer(expandedNav);
+    const navShortcutAllowed =
+      nav !== null &&
+      (isNavigationIntent(expandedNav) ||
+        isNavigationIntent(question.trim()) ||
+        (/^(yes|yeah|yep|please|ok|okay|sure)\b/i.test(question.trim()) &&
+          expandedNav !== question.trim()) ||
+        /\bgive me (a )?(page|link)\b/i.test(question.trim()));
 
-  if (navShortcutAllowed && nav) {
-    options?.onTextDelta?.(nav.message);
-    return {
-      message: nav.message,
-      navigationHints: buildRecommendedNavigationHints(expandedNav, false),
-      suggestedQuestions: nav.suggestedQuestions,
-    };
+    if (navShortcutAllowed && nav) {
+      options?.onTextDelta?.(nav.message);
+      return {
+        message: nav.message,
+        navigationHints: buildRecommendedNavigationHints(expandedNav, false),
+        suggestedQuestions: nav.suggestedQuestions,
+      };
+    }
   }
 
   const gathered = await gatherAllContext(
