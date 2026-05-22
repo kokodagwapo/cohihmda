@@ -1234,14 +1234,17 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     isUnifiedChatClientEnabled() &&
     activeChatType === "research" &&
     researchViewOnly;
-  const showEmptyPromptCards =
-    messages.length === 0 &&
-    promptCardsLayout !== "hidden" &&
-    !isSharedResearchViewOnly;
   const showResearchWorkspace =
     activeChatType === "research" &&
     isUnifiedChatClientEnabled() &&
     (messages.length > 0 || !!legacyRef);
+  /** Backfilled research has no transcript messages; workspace still counts as an open session. */
+  const showEmptyPromptCards =
+    messages.length === 0 &&
+    promptCardsLayout !== "hidden" &&
+    !isSharedResearchViewOnly &&
+    !showResearchWorkspace &&
+    !(activeChatType === "research" && isUnifiedChatClientEnabled() && isLoadingSession);
   /** Research transcript lives in {@link UnifiedChatResearchWorkspace}; skip empty flex-1 messages pane. */
   const showStandardMessagesPane =
     !isShellCompact &&
@@ -2550,7 +2553,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   researchSessionId={legacyRef}
                   tenantId={tenantId}
                   messages={messages}
-                  chatLoading={isLoading}
+                  chatLoading={
+                    isLoadingSession ||
+                    (isLoading && activeChatType === "research")
+                  }
                   onSessionAccess={({ isOwner }) => {
                     setResearchViewOnly(!isOwner);
                   }}

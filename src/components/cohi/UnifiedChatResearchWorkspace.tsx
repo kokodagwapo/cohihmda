@@ -140,6 +140,7 @@ export function UnifiedChatResearchWorkspace({
       setSelectedFindingId(null);
       return;
     }
+    reset();
     void loadSession(researchSessionId);
   }, [researchSessionId, loadSession, reset]);
 

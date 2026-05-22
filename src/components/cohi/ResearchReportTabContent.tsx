@@ -124,6 +124,9 @@ export function ResearchReportTabContent({
   const reportSnapshotsRef = useRef<ResearchReportType[]>([]);
   const sortedFindings = useMemo(() => sortFindings(findings), [findings]);
   const turns = useMemo(() => buildResearchTurns(messages), [messages]);
+  /** Backfilled / Research Lab sessions: transcript empty but session API has report + findings. */
+  const hasSessionBackedContent =
+    phase === "complete" && (!!report || sortedFindings.length >= 1);
 
   // Before each follow-up re-synthesis, snapshot the current full report (deep mode).
   useEffect(() => {
@@ -140,7 +143,7 @@ export function ResearchReportTabContent({
     }
   }, [researchSessionId]);
 
-  if (turns.length === 0 && !chatLoading) {
+  if (turns.length === 0 && !chatLoading && !hasSessionBackedContent) {
     return (
       <p className={cn("text-xs text-slate-500 py-4 px-1", className)}>
         Your question and Cohi&apos;s answer will appear here.
@@ -254,7 +257,9 @@ export function ResearchReportTabContent({
         );
       })}
 
-      {chatLoading && messages[messages.length - 1]?.role !== "assistant" && (
+      {chatLoading &&
+        !hasSessionBackedContent &&
+        messages[messages.length - 1]?.role !== "assistant" && (
         <div className="flex justify-start">
           <div className="rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/90 dark:bg-slate-800/60 px-4 py-3">
             <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
@@ -265,8 +270,8 @@ export function ResearchReportTabContent({
         </div>
       )}
 
-      {/* Single-turn legacy: no assistant message yet but findings/report exist */}
-      {turns.length === 0 && sortedFindings.length >= 1 && phase === "complete" && (
+      {/* Backfilled / Research Lab: empty transcript but session has report + findings */}
+      {turns.length === 0 && hasSessionBackedContent && (
         <div className="border-t border-slate-200/70 dark:border-slate-700/70 pt-4">
           {report ? (
             <ResearchReport
