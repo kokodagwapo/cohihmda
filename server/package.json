@@ -16,6 +16,7 @@
     "migrate:create": "tsx src/migrations/cli.ts create",
     "migrate:repair": "tsx scripts/repair-tenant-schemas.ts",
     "backfill:understory-bullets": "tsx scripts/backfill-understory-bullets.ts",
+    "backfill:unified-chat-legacy": "tsx src/migrations/backfillUnifiedChatCli.ts",
     "audit:pricing-schema": "tsx scripts/audit-tenant-pricing-schema.ts",
     "seed:super-admin": "tsx scripts/seed-super-admin.ts",
     "seed:local": "tsx scripts/seed-local-dev.ts",

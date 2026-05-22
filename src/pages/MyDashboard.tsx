@@ -11,6 +11,13 @@ import { useDashboardVisibility } from '@/hooks/useDashboardVisibility';
 import type { ReportData } from '@/data/reportSimulations';
 import { cn } from '@/lib/utils';
 import { useWorkbenchNav } from '@/hooks/useWorkbenchNav';
+import {
+  WORKBENCH_CHAT_HANDOFF_STATE_KEY,
+  lookupWorkbenchDraftTab,
+  rememberWorkbenchDraftTab,
+  resetActiveWorkbenchDraftSession,
+  type WorkbenchChatHandoffLocationState,
+} from '@/lib/workbench/workbenchChatHandoff';
 
 type CanvasListItem = {
   id: string;
@@ -81,6 +88,8 @@ export default function MyDashboard() {
   const [activeTabId, setActiveTabId] = useState<string | null>(persisted.current.active);
   // Map temp tab IDs → readable titles for unsaved canvases
   const [tabTitles, setTabTitles] = useState<Record<string, string>>({});
+  /** Per-tab draft scope ids for unified workbench chat widget handoff. */
+  const [tabDraftScopes, setTabDraftScopes] = useState<Record<string, string>>({});
   // Track which tabs have unsaved changes (dirty state from canvas autosave)
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
 
@@ -247,6 +256,69 @@ export default function MyDashboard() {
     navigate(location.pathname, { replace: true, state: null });
   }, [reloadCanvasSignal, urlCanvasId, navigate, location.pathname]);
 
+  /** Unified workbench chat → canvas tab handoff (open/focus draft scope tab). */
+  useEffect(() => {
+    if (isHydratingWorkbench) return;
+    const handoff = (location.state as WorkbenchChatHandoffLocationState | null)?.[
+      WORKBENCH_CHAT_HANDOFF_STATE_KEY
+    ];
+    if (!handoff) return;
+
+    const clearHandoffState = () => {
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    };
+
+    if (handoff.openNewTab) {
+      const newTabId = `new-${Date.now()}`;
+      setTabDraftScopes((prev) => ({ ...prev, [newTabId]: handoff.draftScopeId }));
+      rememberWorkbenchDraftTab(handoff.draftScopeId, newTabId);
+      setOpenTabs((prev) => [...prev, newTabId]);
+      setActiveTabId(newTabId);
+      setLoadCanvasId(null);
+      setCanvasKey((k) => k + 1);
+      updateUrl(null);
+      clearHandoffState();
+      return;
+    }
+
+    if (handoff.activateDraftScopeId) {
+      const boundTabId = lookupWorkbenchDraftTab(handoff.activateDraftScopeId);
+      if (boundTabId) {
+        setTabDraftScopes((prev) => ({
+          ...prev,
+          [boundTabId]: handoff.activateDraftScopeId!,
+        }));
+        if (!openTabs.includes(boundTabId)) {
+          setOpenTabs((prev) => [...prev, boundTabId]);
+        }
+        setActiveTabId(boundTabId);
+        if (boundTabId.startsWith('new-')) {
+          setLoadCanvasId(null);
+          setCanvasKey((k) => k + 1);
+        } else {
+          setLoadCanvasId(boundTabId);
+        }
+        updateUrl(boundTabId.startsWith('new-') ? null : boundTabId);
+      } else if (activeTabId?.startsWith('new-')) {
+        setTabDraftScopes((prev) => ({
+          ...prev,
+          [activeTabId]: handoff.activateDraftScopeId!,
+        }));
+        rememberWorkbenchDraftTab(handoff.activateDraftScopeId, activeTabId);
+      }
+      clearHandoffState();
+    }
+  }, [
+    isHydratingWorkbench,
+    location.state,
+    location.pathname,
+    location.search,
+    navigate,
+    openTabs,
+    activeTabId,
+    updateUrl,
+  ]);
+
   // Open a canvas tab (from sidebar click)
   const handleSelectCanvas = useCallback((id: string) => {
     setOpenTabs((prev) => prev.includes(id) ? prev : [...prev, id]);
@@ -257,6 +329,7 @@ export default function MyDashboard() {
 
   // Create a new blank canvas tab
   const handleNewCanvas = useCallback(() => {
+    resetActiveWorkbenchDraftSession();
     const newTabId = `new-${Date.now()}`;
     setOpenTabs((prev) => [...prev, newTabId]);
     setActiveTabId(newTabId);
@@ -495,6 +568,9 @@ export default function MyDashboard() {
                 <WorkbenchCanvas
                   key={canvasKey}
                   loadCanvasId={loadCanvasId}
+                  chatDraftScopeId={
+                    activeTabId ? tabDraftScopes[activeTabId] : undefined
+                  }
                   onLoaded={handleCanvasLoaded}
                   onSaved={handleCanvasSaved}
                   onDirtyChange={handleDirtyChange}
