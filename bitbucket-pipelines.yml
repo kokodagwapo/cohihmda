@@ -226,7 +226,7 @@ definitions:
           - |
             FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
             BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
-            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config|scripts/bitbucket/)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config|scripts/bitbucket/|bitbucket-pipelines\.yml)' || true)
             echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
             echo "Backend changed: ${BACKEND_CHANGED:-none}"
             echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
@@ -265,12 +265,15 @@ definitions:
               apt-get update -qq && apt-get install -y -qq curl
               chmod +x ./scripts/bitbucket/run-migrations.sh
               ./scripts/bitbucket/run-migrations.sh
-              echo ">>> Backfilling unified chat legacy research sessions (dev only)..."
-              chmod +x ./scripts/bitbucket/run-unified-chat-backfill.sh
-              ./scripts/bitbucket/run-unified-chat-backfill.sh
             else
               echo ">>> Skipping Migrations (no backend/infra changes)"
             fi
+          # Idempotent DB job — run on every dev deploy so frontend-only pushes still backfill.
+          - |
+            echo ">>> Backfilling unified chat legacy research sessions (dev)..."
+            apt-get update -qq && apt-get install -y -qq curl
+            chmod +x ./scripts/bitbucket/run-unified-chat-backfill.sh
+            ./scripts/bitbucket/run-unified-chat-backfill.sh
 
     - step: &deploy-prod
         name: Deploy to Production
@@ -285,7 +288,7 @@ definitions:
           - |
             FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
             BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
-            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config|scripts/bitbucket/)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config|scripts/bitbucket/|bitbucket-pipelines\.yml)' || true)
             echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
             echo "Backend changed: ${BACKEND_CHANGED:-none}"
             echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
@@ -347,6 +350,10 @@ definitions:
           - *setup-oidc
           - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
           - ./scripts/bitbucket/deploy-backend-ecs.sh
+          - echo ">>> Running migrations and unified chat backfill"
+          - apt-get update -qq && apt-get install -y -qq curl
+          - chmod +x ./scripts/bitbucket/run-migrations.sh
+          - ./scripts/bitbucket/run-migrations.sh
 
     - step: &deploy-backend-prod
         name: Deploy Backend to Prod
@@ -548,9 +555,6 @@ definitions:
           - apt-get update && apt-get install -y curl
           - chmod +x ./scripts/bitbucket/run-migrations.sh
           - ./scripts/bitbucket/run-migrations.sh
-          - echo ">>> Backfilling unified chat legacy research sessions"
-          - chmod +x ./scripts/bitbucket/run-unified-chat-backfill.sh
-          - ./scripts/bitbucket/run-unified-chat-backfill.sh
 
     - step: &deploy-all-prod-force
         name: Force Deploy All to Prod
@@ -841,6 +845,17 @@ pipelines:
             - apt-get update && apt-get install -y curl
             - chmod +x ./scripts/bitbucket/run-migrations.sh
             - ./scripts/bitbucket/run-migrations.sh
+
+    run-unified-chat-backfill-dev:
+      - step:
+          name: Run Unified Chat Backfill (Dev)
+          oidc: true
+          deployment: dev
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - chmod +x ./scripts/bitbucket/run-unified-chat-backfill.sh
+            - ./scripts/bitbucket/run-unified-chat-backfill.sh
 
     run-migrations-prod:
       - step:

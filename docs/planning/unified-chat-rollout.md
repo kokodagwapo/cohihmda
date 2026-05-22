@@ -36,7 +36,9 @@
 
 After tenant migrations, the **dev** Bitbucket pipeline runs an idempotent backfill that links `research_sessions` → `unified_chat_conversations` for every active tenant:
 
-- **Pipeline:** `scripts/bitbucket/run-unified-chat-backfill.sh` (after `run-migrations.sh`)
+- **Every dev branch deploy:** `scripts/bitbucket/run-unified-chat-backfill.sh` (even frontend-only pushes)
+- **After migrations:** same script is also invoked from `run-migrations.sh` when `BITBUCKET_DEPLOYMENT_ENVIRONMENT=dev`
+- **Manual custom pipeline:** `run-unified-chat-backfill-dev`
 - **CLI (local or ECS):** `node dist/migrations/backfillUnifiedChatCli.js --all`
 - **Opt-out:** set `UNIFIED_CHAT_LEGACY_BACKFILL_ENABLED=false` on the Bitbucket dev deployment
 
@@ -48,6 +50,16 @@ npm run backfill:unified-chat-legacy -- --tenant=<tenant-slug>
 ```
 
 Production deploy does **not** run this automatically.
+
+### Why backfill might not run (troubleshooting)
+
+| Symptom | Likely cause |
+| -------- | ------------- |
+| Log says `Skipping Migrations (no backend/infra changes)` and no backfill block | Old pipeline YAML — backfill now runs in a **separate** step on every dev deploy |
+| `backfillUnifiedChatCli.js` / module not found in ECS | Backend with the backfill code was never deployed; run **backend-dev** or push `server/` changes |
+| `ECS Exec is not enabled` | Enable execute-command on the dev ECS service |
+| Pipeline fails on FK / user_id | Orphan `research_sessions` — fixed by skipping rows without a matching `users` row |
+| `UNIFIED_CHAT_LEGACY_BACKFILL_ENABLED=false` | Bitbucket dev deployment variable disables the job |
 
 ## Golden replay
 

@@ -124,6 +124,10 @@ async function main(): Promise<void> {
         (sum, r) => sum + ("skipped" in r ? r.skipped : 0),
         0,
       ),
+      orphaned: results.reduce(
+        (sum, r) => sum + ("orphaned" in r ? r.orphaned : 0),
+        0,
+      ),
     }),
   );
 
