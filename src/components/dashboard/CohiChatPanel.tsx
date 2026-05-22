@@ -528,6 +528,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const startNewChatSession = useCallback(async () => {
     setResearchViewOnly(false);
     setAttachedUploadIds([]);
+    setExpandedPromptCard(null);
     await newSession();
   }, [newSession]);
 
@@ -1171,7 +1172,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
   const handlePromptCardSelect = useCallback(
     (chatType: UnifiedChatType) => {
-      setExpandedPromptCard(chatType);
+      setExpandedPromptCard((current) =>
+        current === chatType ? null : chatType,
+      );
       setActiveChatType(chatType);
     },
     [setActiveChatType],
@@ -1185,7 +1188,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
   const handleChatTypeChange = useCallback(
     (next: UnifiedChatType) => {
-      setExpandedPromptCard(next);
+      setExpandedPromptCard(null);
       if (next === "insight_builder") {
         setAttachedUploadIds([]);
       }
@@ -1196,6 +1199,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     },
     [setActiveChatType],
   );
+
+  useEffect(() => {
+    setExpandedPromptCard(null);
+  }, [pathname]);
 
   useEffect(() => {
     if (messages.length > 0) {
