@@ -234,6 +234,8 @@ export type StreamMockOptions = {
   researchSessionId?: string;
   chatType?: string;
   actionsBlock?: boolean;
+  /** Custom workbench action items (overrides default add_existing_widget stub). */
+  actionItems?: unknown[];
   insightBuilderPreview?: boolean;
   /** Optional chart block (COHI-335 / COHI-78 style mocks). */
   visualization?: Record<string, unknown>;
@@ -371,7 +373,12 @@ export async function mockV1MessageStream(
         });
       }
     }
-    if (options?.actionsBlock) {
+    if (options?.actionItems?.length) {
+      blocks.push({
+        type: "actions",
+        items: options.actionItems,
+      });
+    } else if (options?.actionsBlock) {
       blocks.push({
         type: "actions",
         items: [

@@ -2,11 +2,37 @@ import { test, expect } from "./fixtures";
 import {
   forceUnifiedChat,
   gotoWithUnifiedChatShell,
+  mockUnifiedChatApis,
   mockUnifiedChatTenantApi,
   mockV1Permissions,
   selectUnifiedChatType,
   unifiedChatMessageInput,
 } from "./helpers/unifiedChat";
+
+const MTD_DASHBOARD_ACTIONS = [
+  {
+    type: "create_widget",
+    sql: "SELECT COUNT(*) AS funded_units FROM public.loans l WHERE l.funding_date IS NOT NULL",
+    title: "Funded Units",
+    config: { type: "kpi", yKey: "funded_units" },
+    filterConfig: {
+      filterable: true,
+      dateColumn: "funding_date",
+      defaultPreset: "MTD",
+    },
+  },
+  {
+    type: "create_widget",
+    sql: "SELECT SUM(l.loan_amount) AS funded_volume FROM public.loans l WHERE l.funding_date IS NOT NULL",
+    title: "Funded Volume",
+    config: { type: "kpi", yKey: "funded_volume", numberFormat: "compact" },
+    filterConfig: {
+      filterable: true,
+      dateColumn: "funding_date",
+      defaultPreset: "MTD",
+    },
+  },
+];
 
 test.describe("Unified chat workbench period scope (COHI-398)", () => {
   test.beforeEach(async ({ userPage }) => {
@@ -18,63 +44,29 @@ test.describe("Unified chat workbench period scope (COHI-398)", () => {
   test("@critical @COHI-398 applies MTD group filters from mocked create_widget actions", async ({
     userPage,
   }) => {
-    await userPage.route(/\/api\/chat\/v1\/messages:stream(?:\?.*)?$/, async (route) => {
-      if (route.request().method() !== "POST") {
-        await route.continue();
-        return;
+    const sqlDateFilters: Array<{ start?: string; end?: string; column?: string }> = [];
+
+    await userPage.route(/\/api\/cohi-chat\/execute-sql(?:\?.*)?$/, async (route) => {
+      try {
+        const body = route.request().postDataJSON() as {
+          dateFilter?: { start?: string; end?: string; column?: string };
+        };
+        if (body?.dateFilter) sqlDateFilters.push(body.dateFilter);
+      } catch {
+        /* ignore */
       }
-      const conversationId = "550e8400-e29b-41d4-a716-446655440099";
-      const turnId = "6ba7b810-9dad-11d1-80b4-00c04fd43099";
-      const blocks = [
-        {
-          type: "text",
-          markdown: "Built an executive dashboard for this month.",
-        },
-        {
-          type: "actions",
-          items: [
-            {
-              type: "create_widget",
-              sql: "SELECT COUNT(*) AS funded_units FROM public.loans l WHERE l.funding_date IS NOT NULL",
-              title: "Funded Units",
-              config: { type: "kpi", yKey: "funded_units" },
-              filterConfig: {
-                filterable: true,
-                dateColumn: "funding_date",
-                defaultPreset: "MTD",
-              },
-            },
-            {
-              type: "create_widget",
-              sql: "SELECT SUM(l.loan_amount) AS funded_volume FROM public.loans l WHERE l.funding_date IS NOT NULL",
-              title: "Funded Volume",
-              config: { type: "kpi", yKey: "funded_volume", numberFormat: "compact" },
-              filterConfig: {
-                filterable: true,
-                dateColumn: "funding_date",
-                defaultPreset: "MTD",
-              },
-            },
-          ],
-        },
-      ];
-      const events = [
-        { event: "turn.started", conversationId, turnId },
-        { event: "block.delta", conversationId, turnId, blocks },
-        {
-          event: "turn.completed",
-          conversationId,
-          turnId,
-          metadata: { route: "workbench", suggestedQuestions: [] },
-        },
-      ];
-      const body = events.map((ev) => `data: ${JSON.stringify(ev)}\n\n`).join("");
       await route.fulfill({
         status: 200,
-        contentType: "text/event-stream",
-        headers: { "Cache-Control": "no-cache" },
-        body,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: [{ funded_units: 42, funded_volume: 1_250_000 }],
+        }),
       });
+    });
+
+    await mockUnifiedChatApis(userPage, {
+      replyText: "Built an executive dashboard for this month.",
+      actionItems: MTD_DASHBOARD_ACTIONS,
     });
 
     await gotoWithUnifiedChatShell(userPage, "/my-dashboard/new");
@@ -91,8 +83,20 @@ test.describe("Unified chat workbench period scope (COHI-398)", () => {
       timeout: 10_000,
     });
     await expect(userPage.getByText(/Funded Units MTD/i)).toHaveCount(0);
-    await expect(
-      userPage.locator("button").filter({ hasText: /^MTD$/ }).first(),
-    ).toBeVisible({ timeout: 15_000 });
+
+    await expect
+      .poll(() => sqlDateFilters.length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
+
+    const now = new Date();
+    const expectedStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    const hasMtdScopedFilter = sqlDateFilters.some(
+      (f) =>
+        f.column === "funding_date" &&
+        f.start === expectedStart &&
+        typeof f.end === "string" &&
+        f.end.length === 10,
+    );
+    expect(hasMtdScopedFilter).toBe(true);
   });
 });
