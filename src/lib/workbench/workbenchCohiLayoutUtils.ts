@@ -2,33 +2,18 @@
  * Shared layout helpers for Cohi workbench widget actions.
  */
 
-import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import {
   createLayoutItem,
   type CanvasLayoutItem,
   type SectionType,
   type WidgetFilterConfig,
-  type WidgetFilterState,
 } from "@/components/workbench/canvas/types";
+import {
+  buildGroupSavedFiltersFromFilterConfig,
+  filterConfigToInitialState,
+} from "@/lib/workbench/workbenchPresetMapping";
 
-export function filterConfigToInitialState(
-  fc: WidgetFilterConfig | undefined,
-): WidgetFilterState | undefined {
-  if (!fc || !fc.filterable) return undefined;
-  const state: WidgetFilterState = {};
-  if (fc.dateColumn && fc.dateColumn !== "application_date") {
-    state.dateField = fc.dateColumn;
-  }
-  if (fc.defaultPreset) {
-    try {
-      computePresetDateRange(fc.defaultPreset as Parameters<typeof computePresetDateRange>[0]);
-      state.preset = fc.defaultPreset;
-    } catch {
-      /* unknown preset */
-    }
-  }
-  return Object.keys(state).length > 0 ? state : undefined;
-}
+export { filterConfigToInitialState } from "@/lib/workbench/workbenchPresetMapping";
 
 export function wrapCohiWidgetInGroup(
   action: {
@@ -49,16 +34,7 @@ export function wrapCohiWidgetInGroup(
     dateColumn: "application_date",
   };
   const initialFilters = filterConfigToInitialState(filterConfig);
-
-  const groupSavedFilters =
-    filterConfig.filterable && filterConfig.dateColumn
-      ? {
-          dateField: filterConfig.dateColumn,
-          ...(filterConfig.defaultPreset
-            ? { periodSelection: { preset: filterConfig.defaultPreset as "L12M" } }
-            : {}),
-        }
-      : undefined;
+  const groupSavedFilters = buildGroupSavedFiltersFromFilterConfig(filterConfig);
 
   return createLayoutItem(
     groupId,

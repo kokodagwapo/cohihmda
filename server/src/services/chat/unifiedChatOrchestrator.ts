@@ -11,6 +11,7 @@ import {
   type CohiChatMessage,
 } from "../ai/cohiChatService.js";
 import { runWorkbenchChatTurn } from "../../routes/cohiWorkbench.js";
+import { parseRequestedPeriodFromText } from "../workbench/workbenchWidgetPeriodReconcile.js";
 import {
   mapCohiChatResponseToBlocks,
   mapWorkbenchResponseToBlocks,
@@ -223,6 +224,14 @@ async function executeWorkbenchBranch(
       uploadSchemaContext = resolved.instructionBlock || undefined;
     }
   }
+  const historyForPeriod = (body.history ?? [])
+    .filter((h) => h.role === "user")
+    .map((h) => h.content);
+  const requestedPeriod = parseRequestedPeriodFromText(
+    body.message,
+    ...historyForPeriod.slice(-6),
+  );
+
   const wbBody = {
     question: body.message,
     canvasState: body.context?.canvasState,
@@ -233,6 +242,7 @@ async function executeWorkbenchBranch(
     })),
     datasetUploadIds: uploadIds.length > 0 ? uploadIds : undefined,
     uploadSchemaContext,
+    requestedPeriod: requestedPeriod ?? undefined,
   };
   const chatContext = buildChatContext(req);
   const raw = await runSqlThroughRouter(

@@ -3057,6 +3057,18 @@ export function WidgetGroup({
     filters.year,
   ]);
 
+  const cohiChildPeriodMismatch = useMemo(() => {
+    if (!effectiveFilterSync) return false;
+    const groupPreset = filters.periodSelection?.preset;
+    if (!groupPreset) return false;
+    return items.some(
+      (item) =>
+        item.kind === "cohi" &&
+        item.savedFilters?.preset &&
+        item.savedFilters.preset !== groupPreset,
+    );
+  }, [effectiveFilterSync, filters.periodSelection?.preset, items]);
+
   // ─── Build dimension filters (branch, loan officer, dynamic, etc.) for cohi widgets ───
   const groupDimensionFilters = useMemo<DimensionFilter[] | null>(() => {
     const dims: DimensionFilter[] = [];
@@ -4005,6 +4017,19 @@ export function WidgetGroup({
                 <span>{filterSync ? "Synced" : "Independent"}</span>
               </button>
             )}
+
+          {!collapsed && cohiChildPeriodMismatch && (
+            <span className="inline-flex items-center gap-1 text-[9px] text-amber-800 dark:text-amber-200 bg-amber-50/90 dark:bg-amber-950/40 px-1.5 py-0.5 rounded shrink-0 max-w-[220px]">
+              Group period overrides widget scope.
+              <button
+                type="button"
+                className="underline font-medium canvas-interactive"
+                onClick={toggleFilterSync}
+              >
+                Use widget scope
+              </button>
+            </span>
+          )}
 
           {/* Filter bar toggle (only when sync is on) */}
           {!collapsed &&
