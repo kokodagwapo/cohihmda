@@ -2987,6 +2987,9 @@ export function WidgetGroup({
         delete (toRestore as Record<string, unknown>)
           .loanComplexitySelectedGroupName;
       }
+      if (toRestore.periodSelection) {
+        toRestore = { ...toRestore, year: undefined, dateRange: toRestore.dateRange ?? toRestore.periodSelection.dateRange };
+      }
       updateFilters(groupId, toRestore);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5021,13 +5024,7 @@ export function WidgetGroup({
                               })
                           : undefined
                       }
-                      periodSelectionFromStore={
-                        sectionType === "loan-detail" ||
-                        sectionType === "sales-scorecard-overview" ||
-                        sectionType === "production-trends"
-                          ? filters.periodSelection
-                          : undefined
-                      }
+                      periodSelectionFromStore={filters.periodSelection}
                     />
                   ) : null}
 

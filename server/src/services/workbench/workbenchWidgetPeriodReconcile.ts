@@ -56,7 +56,11 @@ export function parseRequestedPeriodFromText(
 
   if (!combined.trim()) return null;
 
-  if (/\b(this month|month to date|mtd|current month|board.*this month)\b/.test(combined)) {
+  if (
+    /\b(this month'?s?|month to date|mtd|current month|board[- ]?ready|monthly performance)\b/.test(
+      combined,
+    )
+  ) {
     return "MTD";
   }
   if (/\b(this quarter|quarter to date|qtd|current quarter)\b/.test(combined)) {
@@ -113,6 +117,20 @@ function ensureFilterConfig(action: CreateWidgetActionLike): WidgetFilterConfigL
 /**
  * Align create_widget / nested cohi widgets with requested period and title hygiene.
  */
+/** True when the canvas has no widgets and the user wants a new scoped executive view. */
+export function shouldBuildExecutiveDashboardOnEmptyCanvas(
+  question: string,
+  totalItems: number | undefined,
+  requestedPeriod?: WorkbenchLlmPreset,
+): boolean {
+  if ((totalItems ?? 0) > 0) return false;
+  if (requestedPeriod) return true;
+  const q = question.toLowerCase();
+  return /\b(board[- ]?ready|executive (dashboard|overview|summary)|monthly performance|fresh dashboard|this month)\b/.test(
+    q,
+  );
+}
+
 export function reconcileWidgetActionPeriods(
   actions: unknown[],
   options?: { requestedPeriod?: WorkbenchLlmPreset; userQuestion?: string },

@@ -54,6 +54,7 @@ import { composeMetricSql } from "../services/metrics/metricQueryComposer.js";
 import {
   parseRequestedPeriodFromText,
   reconcileWidgetActionPeriods,
+  shouldBuildExecutiveDashboardOnEmptyCanvas,
   type WorkbenchLlmPreset,
 } from "../services/workbench/workbenchWidgetPeriodReconcile.js";
 
@@ -964,6 +965,14 @@ Do NOT ask when:
 - The request is clear and specific (e.g. "create a bar chart of funded volume by month")
 - The user is clearly referring to the [SELECTED] widget and the change is unambiguous
 - You can confidently infer intent from context (canvas state, conversation history)
+- The canvas is empty but the user wants a new executive/monthly view built (e.g. "board-ready overview", "this month's performance", "executive dashboard", "MTD KPIs") — build widgets immediately; do not ask dashboard vs presentation first
+
+## Empty Canvas — Build First (CRITICAL)
+When the canvas is empty and the user asks for a board-ready overview, executive dashboard, monthly performance, or this month/MTD scope:
+1. Return 4-6 **create_widget** actions immediately (mix of KPIs and 1-2 charts) with filterConfig.defaultPreset matching the requested period.
+2. Do NOT say you lack data because the canvas is empty — your actions populate the canvas.
+3. Do NOT ask "build dashboard first or presentation?" — build the dashboard unless they explicitly asked only for a presentation/report.
+4. Keep "message" short: what you added and the time scope (e.g. month-to-date).
 
 ## Intent Routing (CRITICAL)
 When a [SELECTED] widget exists, do NOT assume every message is an edit request.
@@ -1556,6 +1565,17 @@ export async function runWorkbenchChatTurn(
 
       if (requestedPeriod) {
         personaSupplement += `\n\n## Required time scope (CRITICAL)\nThe user requested period scope: **${requestedPeriod}**. Every filterable create_widget MUST set filterConfig.defaultPreset to "${requestedPeriod}" (or null only for true all-time snapshots). Do not encode the period in widget titles.`;
+      }
+
+      if (
+        shouldBuildExecutiveDashboardOnEmptyCanvas(
+          question,
+          canvasState?.totalItems,
+          requestedPeriod,
+        )
+      ) {
+        const period = requestedPeriod ?? "MTD";
+        personaSupplement += `\n\n## Empty canvas — build now (CRITICAL)\nThe canvas is empty. The user wants a **${period}** executive dashboard. Respond with 4-6 create_widget actions (funded units, funded volume, pull-through, margin or fallout, cycle time — pick what fits schema). Set filterConfig.defaultPreset to "${period}" on every filterable widget. Do not ask clarifying questions. Do not offer presentation-only as the primary path.`;
       }
 
       const now = new Date();

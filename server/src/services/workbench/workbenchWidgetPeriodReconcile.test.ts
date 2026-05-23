@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseRequestedPeriodFromText,
   reconcileWidgetActionPeriods,
+  shouldBuildExecutiveDashboardOnEmptyCanvas,
 } from "./workbenchWidgetPeriodReconcile.js";
 
 describe("workbenchWidgetPeriodReconcile", () => {
@@ -11,6 +12,23 @@ describe("workbenchWidgetPeriodReconcile", () => {
         "Prepare a board-ready overview of this month's performance",
       ),
     ).toBe("MTD");
+  });
+
+  it("detects empty canvas board-ready build intent", () => {
+    expect(
+      shouldBuildExecutiveDashboardOnEmptyCanvas(
+        "Prepare a board-ready overview of this month's performance",
+        0,
+        "MTD",
+      ),
+    ).toBe(true);
+    expect(
+      shouldBuildExecutiveDashboardOnEmptyCanvas(
+        "Prepare a board-ready overview of this month's performance",
+        3,
+        "MTD",
+      ),
+    ).toBe(false);
   });
 
   it("strips MTD from title and sets defaultPreset", () => {
