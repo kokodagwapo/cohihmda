@@ -17,6 +17,7 @@
 
 import React, {
   useEffect,
+  useLayoutEffect,
   useCallback,
   useState,
   useMemo,
@@ -88,6 +89,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   useWidgetSectionStore,
+  DEFAULT_SECTION_FILTERS,
   type SectionFilters,
   type SectionType,
   type DynamicFilterEntry,
@@ -2581,6 +2583,7 @@ function GridCellCohiWidget({
         groupDateFilter={dateFilter}
         groupDimensionFilters={dimensionFilters}
         filterSyncEnabled={filterSyncEnabled}
+        filterInjectionEnabled={item.filterConfig?.filterable !== false}
         initialFilters={item.savedFilters}
         allowLowSamplePullThrough={item.allowLowSamplePullThrough}
         onFilterChange={onFilterChange}
@@ -2741,7 +2744,38 @@ export function WidgetGroup({
   const updateDynamicFilter = useWidgetSectionStore(
     (s) => s.updateDynamicFilter,
   );
-  const filters = useWidgetSectionStore((s) => s.getFilters(groupId));
+  const registeredSectionFilters = useWidgetSectionStore((s) => s.sections[groupId]);
+  const filters = useMemo(() => {
+    if (registeredSectionFilters) return registeredSectionFilters;
+    const base = { ...DEFAULT_SECTION_FILTERS, sectionType };
+    if (sectionType === "executive-dashboard") {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const range = {
+        start: start.toISOString().slice(0, 10),
+        end: now.toISOString().slice(0, 10),
+      };
+      let next: SectionFilters = {
+        ...base,
+        year: undefined,
+        periodSelection: { type: "preset", preset: "mtd", dateRange: range },
+        dateRange: range,
+      };
+      if (savedFiltersProp) {
+        let toRestore: Partial<SectionFilters> = savedFiltersProp;
+        if (toRestore.periodSelection) {
+          toRestore = {
+            ...toRestore,
+            year: undefined,
+            dateRange: toRestore.dateRange ?? toRestore.periodSelection.dateRange,
+          };
+        }
+        next = { ...next, ...toRestore };
+      }
+      return next;
+    }
+    return base;
+  }, [registeredSectionFilters, sectionType, savedFiltersProp]);
 
   // Pipeline Analysis filter options (used when sectionType === 'pipeline-analysis')
   const { selectedTenantId } = useTenantStore();
@@ -2954,8 +2988,8 @@ export function WidgetGroup({
     if (collapsedProp !== undefined) setCollapsed(collapsedProp);
   }, [collapsedProp]);
 
-  // Register this group as a section on mount, then restore saved filters
-  useEffect(() => {
+  // Register section and restore saved filters before paint (avoids YTD year default flash)
+  useLayoutEffect(() => {
     registerSection(groupId, sectionType);
     if (savedFiltersProp && !filtersRestoredRef.current) {
       filtersRestoredRef.current = true;
@@ -2987,10 +3021,34 @@ export function WidgetGroup({
         delete (toRestore as Record<string, unknown>)
           .loanComplexitySelectedGroupName;
       }
+      if (toRestore.periodSelection) {
+        toRestore = { ...toRestore, year: undefined, dateRange: toRestore.dateRange ?? toRestore.periodSelection.dateRange };
+      }
       updateFilters(groupId, toRestore);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, sectionType, registerSection]);
+
+  // When LLM/workbench updates group savedFilters (e.g. set_period), sync into the section store
+  useEffect(() => {
+    if (!savedFiltersProp) return;
+    let toRestore: Partial<SectionFilters> =
+      sectionType === "loan-detail"
+        ? {
+            ...savedFiltersProp,
+            periodSelection: undefined,
+            dateRange: undefined,
+          }
+        : savedFiltersProp;
+    if (toRestore.periodSelection) {
+      toRestore = {
+        ...toRestore,
+        year: undefined,
+        dateRange: toRestore.dateRange ?? toRestore.periodSelection.dateRange,
+      };
+    }
+    updateFilters(groupId, toRestore);
+  }, [groupId, sectionType, savedFiltersProp, updateFilters]);
 
   // Pipeline Analysis: set default year range when options have loaded and none is set (so table/charts show correct years from first paint)
   const yearRangeOptions = useMemo(() => {
@@ -5021,13 +5079,7 @@ export function WidgetGroup({
                               })
                           : undefined
                       }
-                      periodSelectionFromStore={
-                        sectionType === "loan-detail" ||
-                        sectionType === "sales-scorecard-overview" ||
-                        sectionType === "production-trends"
-                          ? filters.periodSelection
-                          : undefined
-                      }
+                      periodSelectionFromStore={filters.periodSelection}
                     />
                   ) : null}
 

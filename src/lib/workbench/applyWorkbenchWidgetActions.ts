@@ -129,7 +129,7 @@ export function applyWorkbenchWidgetActions({
           type: "widget_group" as const,
           groupId,
           title: "Cohi Dashboard",
-          sectionType: "company-scorecard" as SectionType,
+          sectionType: "executive-dashboard" as SectionType,
           widgetIds: [],
           items: cohiItems,
           filterSync: syncFilters,

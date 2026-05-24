@@ -226,6 +226,8 @@ interface CohiWidgetRendererProps {
    * When false (or undefined), the widget uses its own independent filters.
    */
   filterSyncEnabled?: boolean;
+  /** When false (AI all-time / run-as-is widgets), never inject group or local date filters. */
+  filterInjectionEnabled?: boolean;
   /**
    * Initial filter state to restore from persisted data.
    * Used when the widget has its own saved filter state.
@@ -1144,6 +1146,7 @@ export function CohiWidgetRenderer({
   groupDateFilter,
   groupDimensionFilters,
   filterSyncEnabled,
+  filterInjectionEnabled = true,
   initialFilters,
   onFilterChange,
   onVizTypeChange,
@@ -1258,11 +1261,12 @@ export function CohiWidgetRenderer({
   const runSqlAsStored =
     sourceType === 'research' && artifactCapabilities?.canInjectFilters !== true;
 
-  const effectiveDateFilter = runSqlAsStored
-    ? null
-    : filterSyncEnabled
-      ? (groupDateFilter ?? null)
-      : localDateFilter;
+  const effectiveDateFilter =
+    !filterInjectionEnabled || runSqlAsStored
+      ? null
+      : filterSyncEnabled
+        ? (groupDateFilter ?? null)
+        : localDateFilter;
   const effectiveDimFilters = runSqlAsStored
     ? null
     : filterSyncEnabled

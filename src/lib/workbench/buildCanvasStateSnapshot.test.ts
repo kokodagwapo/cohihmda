@@ -45,4 +45,35 @@ describe("buildCanvasStateSnapshot", () => {
       true,
     );
   });
+
+  it("assigns stable cohi__ keys for group SQL widgets", () => {
+    const items: CanvasLayoutItem[] = [
+      {
+        i: "g1",
+        x: 0,
+        y: 0,
+        w: 12,
+        h: 8,
+        type: "widget_group",
+        payload: {
+          type: "widget_group",
+          groupId: "grp-1",
+          title: "Executive",
+          sectionType: "executive-dashboard",
+          widgetIds: [],
+          items: [
+            {
+              kind: "cohi",
+              id: "abc",
+              sql: "SELECT 1",
+              title: "Pull-Through Rate",
+              vizConfig: { type: "kpi", yKey: "rate" },
+            },
+          ],
+        },
+      },
+    ];
+    const snapshot = buildCanvasStateSnapshot(items);
+    expect(snapshot.groups[0].widgets?.[0].id).toBe("cohi__abc__0");
+  });
 });

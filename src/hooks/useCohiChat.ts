@@ -49,7 +49,10 @@ import { insightBuilderApproveClientMessageId } from "@/lib/insightBuilderApprov
 import {
   notifyOptimisticUnifiedChatConversation,
   refreshUnifiedChatHistoryList,
+  UNIFIED_CHAT_HISTORY_SYNC_EVENT,
+  type UnifiedChatHistorySyncDetail,
 } from "@/lib/unifiedChatFolderUtils";
+import { useUnifiedChatRunStore } from "@/stores/unifiedChatRunStore";
 
 export interface SendMessageOptions {
   /** Start a new server conversation (e.g. compact shell send). */
@@ -247,8 +250,32 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const [isLoadingSession, setIsLoadingSession] = useState(false);
 
   const messageIdCounter = useRef(0);
-  const sendInFlightRef = useRef(false);
+  const viewingSessionRef = useRef<string | null>(null);
   const loadSessionGenerationRef = useRef(0);
+
+  useEffect(() => {
+    viewingSessionRef.current = sessionId;
+  }, [sessionId]);
+
+  const applyMessagesForStream = useCallback(
+    (
+      streamConversationId: string,
+      updater: (prev: ChatMessage[]) => ChatMessage[],
+    ) => {
+      if (viewingSessionRef.current !== streamConversationId) return;
+      setMessages(updater);
+    },
+    [],
+  );
+
+  const setLoadingForStream = useCallback(
+    (streamConversationId: string, loading: boolean) => {
+      if (viewingSessionRef.current === streamConversationId) {
+        setIsLoading(loading);
+      }
+    },
+    [],
+  );
   const defaultTenantIdRef = useRef<string | null | undefined>(undefined);
 
   const [workbenchSavedCanvasId, setWorkbenchSavedCanvasId] = useState<
@@ -393,13 +420,20 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           ? options.datasetUploadIds
           : undefined;
       const hasDatasetOnly = !!datasetIds && !question.trim();
-      if ((!question.trim() && !hasDatasetOnly) || isLoading || sendInFlightRef.current)
-        return;
+      if (!question.trim() && !hasDatasetOnly) return;
 
-      sendInFlightRef.current = true;
       const forceNew = options?.forceNewConversation ?? false;
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
+
+      if (
+        !forceNew &&
+        activeSessionId &&
+        useUnifiedChatRunStore.getState().isRunning(activeSessionId)
+      ) {
+        return;
+      }
+      if (!forceNew && isLoading) return;
       const priorLegacyRef = forceNew ? null : legacyRef;
       const effectiveQuestion =
         question.trim() ||
@@ -435,6 +469,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       };
 
       if (forceNew) {
+        viewingSessionRef.current = null;
         setSuggestedQuestions([]);
         setLegacyRef(null);
         setSessionId(null);
@@ -453,7 +488,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       } else {
         setMessages((prev) => [...prev, userMessage, loadingMessage]);
       }
-      setIsLoading(true);
+
+      let streamConversationIdForRun = activeSessionId;
 
       try {
         const effectiveTenantId = await getEffectiveTenantId();
@@ -470,6 +506,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           ) => {
             const id = crypto.randomUUID();
             setSessionId(id);
+            viewingSessionRef.current = id;
             notifyOptimisticUnifiedChatConversation(
               buildOptimisticUnifiedConversation({
                 id,
@@ -480,6 +517,22 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             );
             pendingHistoryRefresh = true;
             return id;
+          };
+
+          const beginStreamRun = (conversationId: string) => {
+            streamConversationIdForRun = conversationId;
+            useUnifiedChatRunStore.getState().startRun({
+              conversationId,
+              title: effectiveQuestion.slice(0, 120),
+              chatType,
+              startedAt: Date.now(),
+            });
+            setLoadingForStream(conversationId, true);
+          };
+
+          const endStreamRun = (conversationId: string) => {
+            useUnifiedChatRunStore.getState().endRun(conversationId);
+            setLoadingForStream(conversationId, false);
           };
 
           if (chatType === "workbench") {
@@ -500,7 +553,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             const scopeType = savedCanvasId ? ("canvas" as const) : ("draft" as const);
             const streamConversationId = isNewConversation
               ? registerNewUnifiedConversation({ type: scopeType, id: scopeId })
-              : activeSessionId;
+              : activeSessionId!;
+            beginStreamRun(streamConversationId);
 
             const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
               client,
@@ -511,7 +565,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               history,
               datasetUploadIds: datasetUploadIdsForSend,
               onStreamText: (text) => {
-                setMessages((prev) =>
+                applyMessagesForStream(streamConversationId, (prev) =>
                   prev.map((m) =>
                     m.id === assistantMessageId
                       ? { ...m, content: text, isLoading: true }
@@ -521,6 +575,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               },
             });
             setSessionId(conversationId);
+            if (viewingSessionRef.current === conversationId) {
+              viewingSessionRef.current = conversationId;
+            }
 
             const autoActions = filterExecutableWorkbenchActions(parsed.actions);
             if (autoActions.length > 0) {
@@ -537,7 +594,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               workbenchActions: parsed.actions,
               workbenchActionsAppliedCount: autoActions.length,
             };
-            setMessages((prev) =>
+            applyMessagesForStream(streamConversationId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMessageId ? assistantMessage : m,
               ),
@@ -545,6 +602,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
+            endStreamRun(streamConversationId);
           } else {
             const ibOpts = options?.insightBuilder;
             let ibDraft = ibOpts?.draft;
@@ -562,7 +620,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 : undefined;
             const streamConversationId = isNewConversation
               ? registerNewUnifiedConversation({ type: "global_session" })
-              : activeSessionId;
+              : activeSessionId!;
+            beginStreamRun(streamConversationId);
             const { conversationId, parsed } = await sendUnifiedGlobalStream({
               client,
               message: effectiveQuestion,
@@ -587,7 +646,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                     : undefined,
               onStreamEvent: applyUnifiedStreamEvent,
               onStreamText: (text) => {
-                setMessages((prev) =>
+                applyMessagesForStream(streamConversationId, (prev) =>
                   prev.map((m) =>
                     m.id === assistantMessageId
                       ? { ...m, content: text, isLoading: true }
@@ -611,7 +670,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               insightBuilderPhase: parsed.insightBuilderPhase,
               visualizationArtifactId: parsed.visualizationArtifactId,
             };
-            setMessages((prev) =>
+            applyMessagesForStream(streamConversationId, (prev) =>
               prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
             );
             if (parsed.suggestedQuestions?.length) {
@@ -622,8 +681,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 if (row.legacy_ref) setLegacyRef(row.legacy_ref);
               });
             }
+            endStreamRun(streamConversationId);
           }
         } else {
+          setIsLoading(true);
           const endpoint = effectiveTenantId
             ? `/api/cohi-chat/ask?tenant_id=${encodeURIComponent(effectiveTenantId)}`
             : "/api/cohi-chat/ask";
@@ -662,6 +723,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           if (response.suggestedQuestions) {
             setSuggestedQuestions(response.suggestedQuestions);
           }
+          setIsLoading(false);
         }
       } catch (error: any) {
         console.error("[CohiChat] Error sending message:", error);
@@ -674,9 +736,18 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           error: error.message,
         };
 
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? errorMessage : m))
-        );
+        if (streamConversationIdForRun) {
+          applyMessagesForStream(streamConversationIdForRun, (prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+          );
+          useUnifiedChatRunStore.getState().endRun(streamConversationIdForRun);
+          setLoadingForStream(streamConversationIdForRun, false);
+        } else {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+          );
+          setIsLoading(false);
+        }
 
         if (onError) {
           onError(error);
@@ -685,8 +756,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         if (pendingHistoryRefresh) {
           refreshUnifiedChatHistoryList();
         }
-        sendInFlightRef.current = false;
-        setIsLoading(false);
       }
     },
     [
@@ -701,6 +770,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       chatType,
       researchDeepAnalysis,
       applyUnifiedStreamEvent,
+      applyMessagesForStream,
+      setLoadingForStream,
       workbenchSavedCanvasId,
       resetWorkbenchChatSession,
     ]
@@ -753,6 +824,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
       if (!lastUserMessage || !lastAssistantMessage) return;
 
+      if (sessionId && useUnifiedChatRunStore.getState().isRunning(sessionId)) {
+        return;
+      }
+
       const userMessageId = generateMessageId();
       const assistantMessageId = generateMessageId();
 
@@ -772,7 +847,24 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       };
 
       setMessages((prev) => [...prev, userMessage, loadingMessage]);
-      setIsLoading(true);
+
+      const streamConversationId = sessionId;
+      const startRefineRun = (conversationId: string) => {
+        useUnifiedChatRunStore.getState().startRun({
+          conversationId,
+          title: refinement.slice(0, 120),
+          chatType,
+          startedAt: Date.now(),
+        });
+        setLoadingForStream(conversationId, true);
+      };
+      const endRefineRun = (conversationId: string) => {
+        useUnifiedChatRunStore.getState().endRun(conversationId);
+        setLoadingForStream(conversationId, false);
+      };
+
+      if (streamConversationId) startRefineRun(streamConversationId);
+      else setIsLoading(true);
 
       try {
         const effectiveTenantId = await getEffectiveTenantId();
@@ -785,7 +877,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             content: m.content,
           }));
           const onStreamText = (text: string) => {
-            setMessages((prev) =>
+            const apply = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+              if (streamConversationId) {
+                applyMessagesForStream(streamConversationId, updater);
+              } else {
+                setMessages(updater);
+              }
+            };
+            apply((prev) =>
               prev.map((m) =>
                 m.id === assistantMessageId
                   ? { ...m, content: text, isLoading: true }
@@ -830,7 +929,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               workbenchActions: parsed.actions,
               workbenchActionsAppliedCount: autoActions.length,
             };
-            setMessages((prev) =>
+            const applyFinal = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+              if (streamConversationId) {
+                applyMessagesForStream(streamConversationId, updater);
+              } else {
+                setMessages(updater);
+              }
+            };
+            applyFinal((prev) =>
               prev.map((m) =>
                 m.id === assistantMessageId ? assistantMessage : m,
               ),
@@ -838,6 +944,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
+            if (streamConversationId) endRefineRun(streamConversationId);
           } else {
             const composedUploadIds =
               chatType === "research" &&
@@ -877,7 +984,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               insightBuilderPhase: parsed.insightBuilderPhase,
               visualizationArtifactId: parsed.visualizationArtifactId,
             };
-            setMessages((prev) =>
+            const applyFinal = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+              if (streamConversationId) {
+                applyMessagesForStream(streamConversationId, updater);
+              } else {
+                setMessages(updater);
+              }
+            };
+            applyFinal((prev) =>
               prev.map((m) =>
                 m.id === assistantMessageId ? assistantMessage : m,
               ),
@@ -885,6 +999,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
+            if (streamConversationId) endRefineRun(streamConversationId);
           }
         } else {
           const endpoint = effectiveTenantId
@@ -924,6 +1039,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           if (response.suggestedQuestions) {
             setSuggestedQuestions(response.suggestedQuestions);
           }
+          if (!streamConversationId) setIsLoading(false);
         }
       } catch (error: any) {
         console.error("[CohiChat] Error refining query:", error);
@@ -936,15 +1052,21 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           error: error.message,
         };
 
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? errorMessage : m))
-        );
+        if (streamConversationId) {
+          applyMessagesForStream(streamConversationId, (prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+          );
+          endRefineRun(streamConversationId);
+        } else {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+          );
+          setIsLoading(false);
+        }
 
         if (onError) {
           onError(error);
         }
-      } finally {
-        setIsLoading(false);
       }
     },
     [
@@ -957,11 +1079,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       chatType,
       researchDeepAnalysis,
       applyUnifiedStreamEvent,
+      applyMessagesForStream,
+      setLoadingForStream,
       workbenchSavedCanvasId,
     ]
   );
   const clearMessages = useCallback(() => {
     setMessages([]);
+    viewingSessionRef.current = null;
     setSessionId(null);
     setLegacyRef(null);
     resetWorkbenchChatSession();
@@ -981,10 +1106,45 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       const effectiveTenantId = await getEffectiveTenantId();
       if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
         const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
-        const rows = await client.listConversations({
-          scope_type: "global_session",
-          limit: 50,
-        });
+        let rows: UnifiedConversationSummary[] = [];
+        if (chatType === "workbench") {
+          const draftScopeId = resolveWorkbenchDraftScopeId();
+          const bridge = getWorkbenchCanvasBridge();
+          const canvasId =
+            workbenchSavedCanvasId ??
+            getConnectedWorkbenchCanvasId() ??
+            (bridge?.isActive ? bridge.canvasId : null) ??
+            getWorkbenchCanvasIdForDraft(draftScopeId);
+          const lists = await Promise.all([
+            client.listConversations({
+              scope_type: "draft",
+              scope_key: draftScopeId,
+              chat_type: "workbench",
+              limit: 50,
+            }),
+            ...(canvasId
+              ? [
+                  client.listConversations({
+                    scope_type: "canvas",
+                    scope_key: canvasId,
+                    chat_type: "workbench",
+                    limit: 50,
+                  }),
+                ]
+              : []),
+          ]);
+          const byId = new Map<string, UnifiedConversationSummary>();
+          for (const r of lists.flat()) byId.set(r.id, r);
+          rows = [...byId.values()].sort(
+            (a, b) =>
+              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+          );
+        } else {
+          rows = await client.listConversations({
+            scope_type: "global_session",
+            limit: 50,
+          });
+        }
         setChatSessions(
           rows.map((r) => ({
             id: r.id,
@@ -1008,7 +1168,36 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     } finally {
       setIsLoadingSessions(false);
     }
-  }, [getEffectiveTenantId, tenantId]);
+  }, [getEffectiveTenantId, tenantId, chatType, workbenchSavedCanvasId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onHistorySync = (event: Event) => {
+      const detail = (event as CustomEvent<UnifiedChatHistorySyncDetail>).detail;
+      if (detail?.conversation) {
+        const c = detail.conversation;
+        setChatSessions((prev) => {
+          if (prev.some((s) => s.id === c.id)) return prev;
+          return [
+            {
+              id: c.id,
+              title: c.title,
+              messageCount: 0,
+              lastMessageAt: c.updated_at,
+              createdAt: c.created_at ?? c.updated_at,
+            },
+            ...prev,
+          ];
+        });
+      }
+      if (detail?.refresh) {
+        void fetchSessions();
+      }
+    };
+    window.addEventListener(UNIFIED_CHAT_HISTORY_SYNC_EVENT, onHistorySync);
+    return () =>
+      window.removeEventListener(UNIFIED_CHAT_HISTORY_SYNC_EVENT, onHistorySync);
+  }, [fetchSessions]);
 
   /**
    * Load a specific session's messages into the chat
@@ -1101,6 +1290,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           }
           setMessages(loadedMessages);
           setSessionId(targetSessionId);
+          viewingSessionRef.current = targetSessionId;
           setLegacyRef(row.legacy_ref ?? null);
           return {
             datasetUploadIds: row.dataset_upload_ids ?? [],
@@ -1218,6 +1408,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    */
   const newSession = useCallback(async () => {
     clearMessages();
+    viewingSessionRef.current = null;
     setSessionId(null);
     setIsLoading(false);
     resetWorkbenchChatSession();
@@ -1243,10 +1434,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     }
   }, [clearMessages, fetchSessions, getEffectiveTenantId, resetWorkbenchChatSession]);
 
+  const isSessionRunning = useUnifiedChatRunStore((s) =>
+    sessionId ? !!s.runs[sessionId] : false,
+  );
+
   return {
     messages,
-    isLoading,
+    isLoading: isLoading || isSessionRunning,
     sessionId,
+    isSessionRunning,
     legacyRef,
     suggestedQuestions,
     sendMessage,

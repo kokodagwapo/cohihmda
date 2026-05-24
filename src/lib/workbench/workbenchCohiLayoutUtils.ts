@@ -43,7 +43,7 @@ export function wrapCohiWidgetInGroup(
       type: "widget_group" as const,
       groupId,
       title: action.title,
-      sectionType: "company-scorecard" as SectionType,
+      sectionType: "executive-dashboard" as SectionType,
       widgetIds: [],
       items: [
         {

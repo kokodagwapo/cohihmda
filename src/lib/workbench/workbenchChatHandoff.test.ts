@@ -4,6 +4,8 @@ import {
   deliverWorkbenchWidgetActions,
   EXECUTABLE_WORKBENCH_ACTION_TYPES,
   filterExecutableWorkbenchActions,
+  describeWorkbenchActionsApplied,
+  shouldForceNewWorkbenchConversation,
   generateWorkbenchDraftScopeId,
   isMyDashboardCanvasPath,
   setActiveWorkbenchDraftScope,
@@ -18,6 +20,53 @@ import { registerWorkbenchCanvasBridge } from "./workbenchCanvasBridge";
 import type { WidgetAction } from "@/types/widgetActions";
 
 describe("workbenchChatHandoff", () => {
+  it("shouldForceNewWorkbenchConversation only on first compact turn", () => {
+    expect(
+      shouldForceNewWorkbenchConversation({
+        isShellCompact: true,
+        currentSessionId: null,
+        userTurnCount: 0,
+      }),
+    ).toBe(true);
+    expect(
+      shouldForceNewWorkbenchConversation({
+        isShellCompact: true,
+        currentSessionId: "sess-1",
+        userTurnCount: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldForceNewWorkbenchConversation({
+        isShellCompact: false,
+        currentSessionId: null,
+        userTurnCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("describeWorkbenchActionsApplied distinguishes group updates from creates", () => {
+    expect(
+      describeWorkbenchActionsApplied([
+        {
+          type: "modify_group",
+          groupId: "g1",
+          operations: [{ op: "set_period", period: "YTD" }],
+        },
+      ] as WidgetAction[]),
+    ).toBe("Updated dashboard period");
+
+    expect(
+      describeWorkbenchActionsApplied([
+        {
+          type: "create_widget",
+          sql: "SELECT 1",
+          title: "A",
+          config: { type: "kpi", title: "A", data: [] },
+        },
+      ] as WidgetAction[]),
+    ).toBe("Applied 1 widget to canvas");
+  });
+
   it("filterExecutableWorkbenchActions keeps known types only", () => {
     const actions = [
       { type: "create_widget", sql: "SELECT 1", title: "A", config: { type: "kpi", title: "A", data: [] } },

@@ -338,6 +338,19 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           highPerformersLeftPeriod: 'mtd',
           highPerformersRightPeriod: 'ytd',
         };
+      } else if (sectionType === 'executive-dashboard') {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const range = {
+          start: start.toISOString().slice(0, 10),
+          end: now.toISOString().slice(0, 10),
+        };
+        filters = {
+          ...base,
+          year: undefined,
+          periodSelection: { type: 'preset' as const, preset: 'mtd' as const, dateRange: range },
+          dateRange: range,
+        };
       } else if (sectionType === 'actors') {
         const now = new Date();
         const start = new Date(now.getFullYear(), now.getMonth(), 1);

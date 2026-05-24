@@ -70,6 +70,7 @@ import {
   ResearchDeepAnalysisToggle,
 } from "@/components/cohi/ChatTypeSelector";
 import { UnifiedChatRebindBanner } from "@/components/cohi/UnifiedChatRebindBanner";
+import { BackgroundChatRunsBadge } from "@/components/cohi/BackgroundChatRunsBadge";
 import { useUnifiedChatPermissions } from "@/hooks/useUnifiedChatPermissions";
 import { InsightBuilderPreviewCard } from "@/components/cohi/InsightBuilderPreviewCard";
 import { UnifiedChatResearchWorkspace } from "@/components/cohi/UnifiedChatResearchWorkspace";
@@ -93,6 +94,8 @@ import {
   navigateForWorkbenchWidgetEdit,
   type WorkbenchEditWidgetEventDetail,
   type WorkbenchEditingWidgetStateDetail,
+  describeWorkbenchActionsApplied,
+  shouldForceNewWorkbenchConversation,
 } from "@/lib/workbench/workbenchChatHandoff";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { PAGE_INSIGHTS_CARD } from "@/components/cohi/pageContentStyles";
@@ -522,6 +525,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const {
     messages,
     isLoading,
+    isSessionRunning,
     sessionId: currentSessionId,
     legacyRef,
     suggestedQuestions,
@@ -1046,11 +1050,20 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       isUnifiedChatClientEnabled() && activeChatType === "research";
     if (isResearchMode && researchViewOnly) return;
     const hasDatasetAttach = attachedUploadIds.length > 0;
-    if ((!input.trim() && !hasDatasetAttach) || isLoading) {
+    if (!input.trim() && !hasDatasetAttach) return;
+    if (isSessionRunning || (isLoading && !!currentSessionId)) {
       return;
     }
 
-    const forceNewConversation = isShellCompact;
+    const userTurnCount = messages.filter((m) => m.role === "user").length;
+    const forceNewConversation =
+      activeChatType === "workbench"
+        ? shouldForceNewWorkbenchConversation({
+            isShellCompact,
+            currentSessionId,
+            userTurnCount,
+          })
+        : isShellCompact;
     expandShellIfCompact();
     if (forceNewConversation) {
       setResearchViewOnly(false);
@@ -1193,9 +1206,16 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
    */
   const handleSuggestionClick = useCallback(
     (question: string, targetChatType?: UnifiedChatType) => {
-      const forceNewConversation = isShellCompact;
+      const userTurnCount = messages.filter((m) => m.role === "user").length;
       const chatTypeForSend = targetChatType ?? activeChatType;
-
+      const forceNewConversation =
+        chatTypeForSend === "workbench"
+          ? shouldForceNewWorkbenchConversation({
+              isShellCompact,
+              currentSessionId,
+              userTurnCount,
+            })
+          : isShellCompact;
       if (chatTypeForSend !== activeChatType) {
         pendingSuggestionRef.current = {
           question,
@@ -2228,11 +2248,14 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         </div>
       )}
       {isUnifiedChatClientEnabled() && (
-        <UnifiedChatRebindBanner
-          tenantId={tenantId}
-          conversationId={currentSessionId}
-          chatType={activeChatType}
-        />
+        <>
+          <BackgroundChatRunsBadge activeConversationId={currentSessionId} />
+          <UnifiedChatRebindBanner
+            tenantId={tenantId}
+            conversationId={currentSessionId}
+            chatType={activeChatType}
+          />
+        </>
       )}
       <div className="flex gap-2 items-end" data-tour="unified-chat-composer">
         {isUnifiedChatClientEnabled() && (
@@ -3211,14 +3234,16 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
             )}
 
             {!isUser &&
-              message.workbenchActionsAppliedCount != null &&
-              message.workbenchActionsAppliedCount > 0 && (
-                <p className="px-4 pb-2 text-xs font-medium text-violet-600 dark:text-violet-400">
-                  Applied {message.workbenchActionsAppliedCount} widget
-                  {message.workbenchActionsAppliedCount !== 1 ? "s" : ""} to
-                  canvas
-                </p>
-              )}
+              (() => {
+                const summary = describeWorkbenchActionsApplied(
+                  message.workbenchActions,
+                );
+                return summary ? (
+                  <p className="px-4 pb-2 text-xs font-medium text-violet-600 dark:text-violet-400">
+                    {summary}
+                  </p>
+                ) : null;
+              })()}
 
             {!isUser && message.insightBuilderDraft && (
               <InsightBuilderPreviewCard

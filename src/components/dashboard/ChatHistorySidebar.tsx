@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { ChatSession } from "@/hooks/useCohiChat";
+import { ConversationRunningIndicator } from "@/components/cohi/ConversationRunningIndicator";
 
 // ============================================================================
 // Types
@@ -221,13 +222,14 @@ function SessionItem({
         ) : (
           <p
             className={cn(
-              "text-sm font-medium truncate leading-tight",
+              "text-sm font-medium truncate leading-tight flex items-center gap-1.5",
               isActive
                 ? "text-blue-700 dark:text-blue-300"
                 : "text-slate-700 dark:text-slate-200"
             )}
           >
-            {session.title}
+            <span className="truncate flex-1 min-w-0">{session.title}</span>
+            <ConversationRunningIndicator conversationId={session.id} />
           </p>
         )}
         <div className="flex items-center gap-2 mt-0.5">

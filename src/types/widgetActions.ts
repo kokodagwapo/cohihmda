@@ -121,7 +121,9 @@ export type GroupOperation =
   | { op: 'resize'; widgetId: string; w: number; h: number }
   | { op: 'reorder'; widgetIds: string[] }
   | { op: 'set_title'; title: string }
-  | { op: 'set_filters'; filters: Partial<SectionFilters> };
+  | { op: 'set_filters'; filters: Partial<SectionFilters> }
+  | { op: 'set_period'; preset: string }
+  | { op: 'set_widget_title'; widgetId: string; title: string };
 
 export interface ModifyGroupAction {
   type: 'modify_group';

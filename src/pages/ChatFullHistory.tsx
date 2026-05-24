@@ -46,6 +46,7 @@ import {
   FolderMoveMenu,
 } from "@/components/cohi/UnifiedChatMoveMenus";
 import { HistoryMetaPill } from "@/components/cohi/UnifiedChatHistoryMeta";
+import { ConversationRunningIndicator } from "@/components/cohi/ConversationRunningIndicator";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 50;
@@ -512,8 +513,9 @@ export default function ChatFullHistory() {
                       void resumeConversation(row.id, row.chat_type, row)
                     }
                   >
-                    <p className="font-medium text-slate-900 dark:text-white truncate">
-                      {row.title}
+                    <p className="font-medium text-slate-900 dark:text-white truncate flex items-center gap-2">
+                      <span className="truncate flex-1 min-w-0">{row.title}</span>
+                      <ConversationRunningIndicator conversationId={row.id} />
                     </p>
                     <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-1.5">
                       <HistoryMetaPill
