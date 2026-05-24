@@ -26,6 +26,19 @@ export interface CreateWidgetActionLike {
   sql?: string;
 }
 
+type MutableGroupOperationLike = {
+  op?: string;
+  preset?: WorkbenchLlmPreset;
+  widgetId?: string;
+};
+
+type MutableWorkbenchActionLike = {
+  type?: string;
+  groupId?: string;
+  explanation?: string;
+  operations?: MutableGroupOperationLike[];
+};
+
 const PERIOD_TOKEN_IN_TITLE =
   /\b(?:MTD|YTD|QTD|L13M|L12M|L6M|L3M|LM|LQ|LY|CY|PY|month[- ]to[- ]date|year[- ]to[- ]date|quarter[- ]to[- ]date)\b/gi;
 
@@ -238,7 +251,7 @@ export function augmentPeriodSwitchActions(
   const groupId = options.canvasState?.groups?.[0]?.groupId;
   if (!groupId) return;
 
-  const typed = actions as Array<{ type?: string; operations?: Array<{ op?: string }> }>;
+  const typed = actions as MutableWorkbenchActionLike[];
   if (
     typed.some(
       (a) =>
@@ -317,10 +330,7 @@ export function augmentGroupRemoveFromQuestion(
   const group = options?.canvasState?.groups?.[0];
   if (!group?.widgets?.length) return;
 
-  const typed = actions as Array<{
-    type?: string;
-    operations?: Array<{ op?: string }>;
-  }>;
+  const typed = actions as MutableWorkbenchActionLike[];
   const already = typed.some(
     (a) =>
       a.type === "modify_group" &&
