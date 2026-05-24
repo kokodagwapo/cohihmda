@@ -84,11 +84,59 @@ export function parseRequestedPeriodFromText(
   if (/\b(last 3 months|l3m|last 90 days)\b/.test(combined)) {
     return "L3M";
   }
-  if (/\b(all time|since inception|lifetime|no time)\b/.test(combined)) {
+  if (/\b(all[- ]?time|since inception|lifetime|no (date )?filter)\b/.test(combined)) {
     return null;
+  }
+  if (
+    /\b(switch|change|convert|set)\b/.test(combined) &&
+    /\b(ytd|year[- ]to[- ]date)\b/.test(combined)
+  ) {
+    return "YTD";
+  }
+  if (
+    /\b(switch|change|convert|set)\b/.test(combined) &&
+    /\b(mtd|month[- ]to[- ]date|this month)\b/.test(combined)
+  ) {
+    return "MTD";
   }
 
   return null;
+}
+
+export function isAllTimeRequest(
+  ...texts: Array<string | undefined | null>
+): boolean {
+  const combined = texts
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .join("\n")
+    .toLowerCase();
+  return /\b(all[- ]?time|since inception|lifetime|no date filter)\b/.test(combined);
+}
+
+export function isChartTypeChangeRequest(
+  ...texts: Array<string | undefined | null>
+): boolean {
+  const combined = texts
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .join("\n")
+    .toLowerCase();
+  return /\b(bar chart|line chart|pie chart|chart type|convert.*(to|into).*(bar|line|pie|chart)|change.*(to|into).*(bar|line|pie)|kpi to|from kpi)\b/.test(
+    combined,
+  );
+}
+
+export function isPeriodSwitchOnlyRequest(
+  ...texts: Array<string | undefined | null>
+): boolean {
+  const combined = texts
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .join("\n")
+    .toLowerCase();
+  if (!/\b(switch|change|convert|set)\b/.test(combined)) return false;
+  if (/\b(add|create|new widget|another)\b/.test(combined)) return false;
+  return /\b(ytd|mtd|year|month|period|dashboard|group|filters?|l12m|l6m)\b/.test(
+    combined,
+  );
 }
 
 function presetFromTitle(title: string): WorkbenchLlmPreset {
@@ -138,6 +186,7 @@ export function reconcileWidgetActionPeriods(
   const requested =
     options?.requestedPeriod ??
     parseRequestedPeriodFromText(options?.userQuestion);
+  const allTime = isAllTimeRequest(options?.userQuestion);
 
   for (const raw of actions) {
     if (!raw || typeof raw !== "object") continue;
@@ -147,7 +196,7 @@ export function reconcileWidgetActionPeriods(
     };
 
     if (action.type === "create_widget") {
-      reconcileOneCreateWidget(action, requested);
+      reconcileOneCreateWidget(action, requested, allTime);
       continue;
     }
 
@@ -166,8 +215,198 @@ export function reconcileWidgetActionPeriods(
         }
       }
       for (const w of nested) {
-        reconcileCohiDashboardWidget(w, requested);
+        reconcileCohiDashboardWidget(w, requested, allTime);
       }
+    }
+  }
+}
+
+/** Prefer modify_group set_period over recreating widgets when user only changes period. */
+export function augmentPeriodSwitchActions(
+  actions: unknown[],
+  options: {
+    userQuestion?: string;
+    canvasState?: { totalItems?: number; groups?: Array<{ groupId: string }> };
+  },
+): void {
+  if ((options.canvasState?.totalItems ?? 0) === 0) return;
+  if (!isPeriodSwitchOnlyRequest(options.userQuestion)) return;
+
+  const period = parseRequestedPeriodFromText(options.userQuestion);
+  if (!period) return;
+
+  const groupId = options.canvasState?.groups?.[0]?.groupId;
+  if (!groupId) return;
+
+  const typed = actions as Array<{ type?: string; operations?: Array<{ op?: string }> }>;
+  if (
+    typed.some(
+      (a) =>
+        a.type === "modify_group" &&
+        a.operations?.some((o) => o.op === "set_period" || o.op === "set_filters"),
+    )
+  ) {
+    return;
+  }
+
+  const kept = typed.filter(
+    (a) => a.type !== "create_widget" && a.type !== "create_dashboard",
+  );
+  kept.unshift({
+    type: "modify_group",
+    groupId,
+    operations: [{ op: "set_period", preset: period }],
+    explanation: `Set dashboard period to ${period}`,
+  });
+  actions.length = 0;
+  actions.push(...kept);
+}
+
+export type CanvasWidgetRef = {
+  id: string;
+  title?: string;
+  name?: string;
+  kind?: string;
+};
+
+/** Map LLM widget id / title fragment to the stable canvas widget key. */
+export function resolveCanvasWidgetKey(
+  widgets: CanvasWidgetRef[],
+  widgetIdRef: string,
+): string | null {
+  const needle = widgetIdRef.trim().toLowerCase();
+  if (!needle || widgets.length === 0) return null;
+
+  const exact = widgets.find((w) => w.id.toLowerCase() === needle);
+  if (exact) return exact.id;
+
+  const needleNorm = needle.replace(/[^a-z0-9]/g, "");
+  const partial = widgets.find((w) => {
+    const id = w.id.toLowerCase();
+    if (id.includes(needle) || needle.includes(id)) return true;
+    const label = (w.title ?? w.name ?? "").toLowerCase();
+    if (!label) return false;
+    const labelNorm = label.replace(/[^a-z0-9]/g, "");
+    return (
+      label.includes(needle) ||
+      needle.includes(label) ||
+      (needleNorm.length >= 4 &&
+        (labelNorm.includes(needleNorm) || needleNorm.includes(labelNorm))) ||
+      (needleNorm.includes("pullthrough") && labelNorm.includes("pullthrough"))
+    );
+  });
+  return partial?.id ?? null;
+}
+
+/** Normalize modify_group / modify_widget ids using the client canvas snapshot. */
+/** When the user asks to remove a grouped widget but the model omitted modify_group. */
+export function augmentGroupRemoveFromQuestion(
+  actions: unknown[],
+  options?: {
+    userQuestion?: string;
+    canvasState?: {
+      groups?: Array<{
+        groupId: string;
+        widgets?: CanvasWidgetRef[];
+      }>;
+    };
+  },
+): void {
+  const q = (options?.userQuestion ?? "").toLowerCase();
+  if (!/\b(remove|delete)\b/.test(q)) return;
+  const group = options?.canvasState?.groups?.[0];
+  if (!group?.widgets?.length) return;
+
+  const typed = actions as Array<{
+    type?: string;
+    operations?: Array<{ op?: string }>;
+  }>;
+  const already = typed.some(
+    (a) =>
+      a.type === "modify_group" &&
+      a.operations?.some((o) => o.op === "remove"),
+  );
+  if (already) return;
+
+  const qNorm = q.replace(/[^a-z0-9]/g, "");
+  const target = group.widgets.find((w) => {
+    const label = (w.title ?? w.name ?? w.id ?? "").toLowerCase();
+    const labelNorm = label.replace(/[^a-z0-9]/g, "");
+    if (!labelNorm) return false;
+    if (q.includes(label) || label.includes(q.slice(0, 20))) return true;
+    if (qNorm.includes("pullthrough") && labelNorm.includes("pullthrough")) {
+      return true;
+    }
+    return (
+      qNorm.length >= 4 &&
+      (labelNorm.includes(qNorm) || qNorm.includes(labelNorm))
+    );
+  });
+  if (!target) return;
+
+  typed.unshift({
+    type: "modify_group",
+    groupId: group.groupId,
+    operations: [{ op: "remove", widgetId: target.id }],
+    explanation: `Removed ${target.title ?? target.name ?? target.id}`,
+  });
+}
+
+export function normalizeWorkbenchWidgetIds(
+  actions: unknown[],
+  canvasState?: {
+    groups?: Array<{ groupId: string; widgets?: CanvasWidgetRef[] }>;
+    standaloneWidgets?: CanvasWidgetRef[];
+  },
+): void {
+  if (!canvasState) return;
+
+  const standalone = canvasState.standaloneWidgets ?? [];
+  const allGroupWidgets = (canvasState.groups ?? []).flatMap((g) => g.widgets ?? []);
+  const allWidgets = [...standalone, ...allGroupWidgets];
+
+  for (const raw of actions) {
+    if (!raw || typeof raw !== "object") continue;
+    const action = raw as {
+      type?: string;
+      groupId?: string;
+      instanceId?: string;
+      widgetId?: string;
+      operations?: Array<{ op?: string; widgetId?: string }>;
+    };
+
+    if (action.type === "modify_widget" && action.instanceId) {
+      const resolved = resolveCanvasWidgetKey(allWidgets, action.instanceId);
+      if (resolved) action.instanceId = resolved;
+      continue;
+    }
+
+    if (action.type === "modify_registry_widget" && action.widgetId) {
+      const group = canvasState.groups?.find((g) => g.groupId === action.groupId);
+      const pool = group?.widgets?.length ? group.widgets : allGroupWidgets;
+      const resolved = resolveCanvasWidgetKey(pool, action.widgetId);
+      if (resolved) action.widgetId = resolved;
+      continue;
+    }
+
+    if (action.type !== "modify_group" || !action.groupId || !action.operations) {
+      continue;
+    }
+    const group = canvasState.groups?.find((g) => g.groupId === action.groupId);
+    if (!group?.widgets?.length) continue;
+
+    for (const op of action.operations) {
+      if (!op.widgetId) continue;
+      if (
+        op.op !== "remove" &&
+        op.op !== "resize" &&
+        op.op !== "set_widget_title" &&
+        op.op !== "reorder"
+      ) {
+        continue;
+      }
+      const resolved = resolveCanvasWidgetKey(group.widgets, op.widgetId);
+      if (resolved) op.widgetId = resolved;
     }
   }
 }
@@ -175,21 +414,28 @@ export function reconcileWidgetActionPeriods(
 function reconcileOneCreateWidget(
   action: CreateWidgetActionLike,
   requested: WorkbenchLlmPreset,
+  allTime: boolean,
 ): void {
   const title = String(action.title ?? "").trim();
-  const fromTitle = title ? presetFromTitle(title) : null;
-  const implied = fromTitle ?? requested;
-
   if (title) {
     const stripped = stripPeriodTokensFromTitle(title);
     if (stripped) action.title = stripped;
   }
 
+  const fc = ensureFilterConfig(action);
+  if (allTime) {
+    fc.filterable = false;
+    fc.defaultPreset = null;
+    return;
+  }
+
+  const fromTitle = title ? presetFromTitle(title) : null;
+  const implied = fromTitle ?? requested;
   if (!implied) return;
 
-  const fc = ensureFilterConfig(action);
-  if (!fc.defaultPreset) fc.defaultPreset = implied;
-  if (fc.filterable === false && implied) {
+  const preset = requested ?? implied;
+  fc.defaultPreset = preset;
+  if (fc.filterable === false && preset) {
     fc.filterable = true;
   }
 }
@@ -197,21 +443,28 @@ function reconcileOneCreateWidget(
 function reconcileCohiDashboardWidget(
   widget: CreateWidgetActionLike & { filterConfig?: WidgetFilterConfigLike; title?: string },
   requested: WorkbenchLlmPreset,
+  allTime: boolean,
 ): void {
   const title = String(widget.title ?? "").trim();
-  const fromTitle = title ? presetFromTitle(title) : null;
-  const implied = fromTitle ?? requested;
-
   if (title) {
     const stripped = stripPeriodTokensFromTitle(title);
     if (stripped) widget.title = stripped;
   }
 
+  const fc = ensureFilterConfig(widget);
+  if (allTime) {
+    fc.filterable = false;
+    fc.defaultPreset = null;
+    return;
+  }
+
+  const fromTitle = title ? presetFromTitle(title) : null;
+  const implied = fromTitle ?? requested;
   if (!implied) return;
 
-  const fc = ensureFilterConfig(widget);
-  if (!fc.defaultPreset) fc.defaultPreset = implied;
-  if (fc.filterable === false && implied) {
+  const preset = requested ?? implied;
+  fc.defaultPreset = preset;
+  if (fc.filterable === false && preset) {
     fc.filterable = true;
   }
 }

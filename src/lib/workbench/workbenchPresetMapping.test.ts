@@ -22,6 +22,23 @@ describe("workbenchPresetMapping", () => {
     expect(saved?.dateField).toBe("funding_date");
   });
 
+  it("returns undefined saved state when filterable is false (all-time)", () => {
+    expect(
+      filterConfigToInitialState({
+        filterable: false,
+        dateColumn: "funding_date",
+        defaultPreset: null,
+      }),
+    ).toBeUndefined();
+    expect(
+      buildGroupSavedFiltersFromFilterConfig({
+        filterable: false,
+        dateColumn: "funding_date",
+        defaultPreset: null,
+      }),
+    ).toBeUndefined();
+  });
+
   it("filterConfigToInitialState includes mapped preset and dateRange", () => {
     const state = filterConfigToInitialState({
       filterable: true,

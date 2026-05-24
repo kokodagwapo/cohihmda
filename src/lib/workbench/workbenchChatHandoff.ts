@@ -85,6 +85,61 @@ export function filterExecutableWorkbenchActions(
   return actions.filter((a) => EXECUTABLE_WORKBENCH_ACTION_TYPES.has(a.type));
 }
 
+/**
+ * Workbench compact-shell submit: only the first turn starts a new conversation tab.
+ * Follow-ups must reuse sessionId so canvas/chat stay in sync.
+ */
+export function shouldForceNewWorkbenchConversation(options: {
+  isShellCompact: boolean;
+  currentSessionId: string | null;
+  userTurnCount: number;
+}): boolean {
+  return (
+    options.isShellCompact &&
+    !options.currentSessionId &&
+    options.userTurnCount === 0
+  );
+}
+
+/** User-facing summary for applied workbench actions (chat bubble footer). */
+export function describeWorkbenchActionsApplied(
+  actions: WidgetAction[] | undefined,
+): string | null {
+  const applied = filterExecutableWorkbenchActions(actions);
+  if (!applied.length) return null;
+
+  const creates = applied.filter((a) => a.type === "create_widget").length;
+  const groupMods = applied.filter((a) => a.type === "modify_group");
+  const widgetMods = applied.filter((a) => a.type === "modify_widget").length;
+
+  if (groupMods.length > 0 && creates === 0 && widgetMods === 0) {
+    const ops = groupMods.flatMap((a) =>
+      a.type === "modify_group" ? a.operations ?? [] : [],
+    );
+    const hasPeriod = ops.some((o) => o.op === "set_period");
+    const hasRemove = ops.some((o) => o.op === "remove");
+    const hasRename = ops.some((o) => o.op === "set_widget_title");
+    if (hasPeriod) return "Updated dashboard period";
+    if (hasRemove) return "Updated dashboard widgets";
+    if (hasRename) return "Renamed dashboard widget";
+    return "Updated dashboard group";
+  }
+
+  if (widgetMods > 0 && creates === 0) {
+    return widgetMods === 1
+      ? "Updated dashboard widget"
+      : `Updated ${widgetMods} dashboard widgets`;
+  }
+
+  if (creates > 0) {
+    return creates === 1
+      ? "Applied 1 widget to canvas"
+      : `Applied ${creates} widgets to canvas`;
+  }
+
+  return "Updated dashboard";
+}
+
 const DRAFT_TAB_STORAGE_KEY = "cohi_workbench_draft_tabs";
 const PENDING_ACTIONS_STORAGE_KEY = "cohi_workbench_pending_actions";
 const ACTIVE_DRAFT_SCOPE_KEY = "cohi_workbench_active_draft";

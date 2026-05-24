@@ -54,9 +54,19 @@ import { composeMetricSql } from "../services/metrics/metricQueryComposer.js";
 import {
   parseRequestedPeriodFromText,
   reconcileWidgetActionPeriods,
+  augmentPeriodSwitchActions,
+  normalizeWorkbenchWidgetIds,
+  augmentGroupRemoveFromQuestion,
+  isChartTypeChangeRequest,
+  isAllTimeRequest,
+  isPeriodSwitchOnlyRequest,
   shouldBuildExecutiveDashboardOnEmptyCanvas,
   type WorkbenchLlmPreset,
 } from "../services/workbench/workbenchWidgetPeriodReconcile.js";
+import {
+  augmentPresentationFromCanvas,
+  isReportRequest,
+} from "../services/workbench/workbenchPresentationAugment.js";
 
 const router = Router();
 
@@ -951,6 +961,17 @@ You help users build, modify, and understand data visualizations on their canvas
 9. **See actual data** on the canvas (KPI values, chart data, table rows) — use this to give data-driven answers
 10. **Generate reports** — create full multi-slide PowerPoint/PDF presentations using the "generate_report" action
 
+## Period Change on Existing Dashboard (CRITICAL)
+When the canvas already has a widget group and the user asks to switch/change the period (YTD, MTD, L12M, etc.) without asking for new widgets:
+- Return ONE **modify_group** action with **set_period** (preset matching their request) on the existing groupId from canvas state.
+- Do NOT recreate the dashboard with multiple create_widget actions.
+- Do NOT ask "switch existing vs rebuild?" — change the period on the existing group.
+
+## Rename Widget in Group (CRITICAL)
+When the user asks to rename a widget inside a Cohi Dashboard group:
+- Use **modify_group** with **set_widget_title** and the widget's stable id (e.g. cohi__abc123__0) from the canvas state.
+- Return exactly one modify_group action. Do NOT recreate the whole dashboard.
+
 ## Clarification Before Action
 When the user's request is ambiguous or underspecified, ASK a clarifying question
 instead of guessing. Return an empty "actions" array and put your question in "message".
@@ -1020,8 +1041,9 @@ Each action in the "actions" array must be one of:
    - For table widgets, include \`changes.tableConfig.columns\` whenever header labels need to be updated to match the new SQL meaning.
    - Return EXACTLY ONE modify_widget action per user request. Do NOT return multiple modify_widget actions for the same widget.
 
-5. **delete_widget**: Remove a widget from canvas
-   {"type": "delete_widget", "instanceId": "<canvas item id>", "explanation": "Why removing"}
+5. **delete_widget**: Remove a **standalone** canvas item (top-level only)
+   {"type": "delete_widget", "instanceId": "<canvas layout item id>", "explanation": "Why removing"}
+   For widgets **inside a Cohi Dashboard group**, use **modify_group** with {"op": "remove", "widgetId": "<cohi__id__idx from canvas>"} — match by the stable id in canvas state, or the widget title if id is unknown.
 
 6. **modify_group**: Rearrange, add, remove, or resize widgets within a dashboard group
    {"type": "modify_group", "groupId": "<groupId from canvas>", "operations": [...], "explanation": "What changed"}
@@ -1034,7 +1056,10 @@ Each action in the "actions" array must be one of:
    - {"op": "reorder", "widgetIds": ["<id1>", "<id2>", ...]} — new order (all current ids in desired order)
    - {"op": "set_title", "title": "New Section Title"}
    - {"op": "set_filters", "filters": {"year": 2025, ...}}
-   Use modify_group when the user asks to add/remove widgets in a dashboard section, reorder them, resize, or change the section title.
+   - {"op": "set_period", "preset": "YTD"} — change the group's date scope (YTD, MTD, L12M, L6M, L3M, PY). Use when the user asks to switch/change the dashboard period. Do NOT recreate widgets.
+   - {"op": "set_widget_title", "widgetId": "<cohi__id__idx from canvas>", "title": "New Title"} — rename one SQL widget inside the group. Use for rename requests; do NOT use create_widget.
+   Use modify_group when the user asks to add/remove widgets in a dashboard section, reorder them, resize, change the section title, switch period, or rename a widget in the group.
+   For **chart type / viz changes on a SQL widget inside a group**, use **modify_widget** with that widget's \`cohi__id__idx\` from the canvas list — do NOT use create_widget.
 
 6a. **modify_registry_widget**: Change config on a pre-built catalog widget inside a group
    {"type": "modify_registry_widget", "groupId": "<groupId>", "widgetId": "<widget id from group list, e.g. company-scorecard-units__0>", "configOverrides": {"format": "currency", "chartType": "line"}, "explanation": "What changed"}
@@ -1123,6 +1148,7 @@ Each action in the "actions" array must be one of:
     **CANVAS-TO-REPORT (CRITICAL — NARRATIVE-FIRST APPROACH):**
     When the user asks to create a report/presentation FROM the canvas (or from "what's here" / "this data"):
     - Look at ALL the LIVE DATA VALUES in the CURRENT CANVAS STATE section below
+    - You already have the numbers — NEVER say you need the user to "refresh" or "share live values". Call **generate_report** immediately with embedded data.
     - Use the ACTUAL values, chart data, and table data from the canvas as static data in your report elements
     - For KPI elements: set "value" to the real number from the canvas (e.g., if Active Loans shows 342, use 342)
     - For chart elements: include the actual data arrays from the canvas charts in the "data" field
@@ -1562,9 +1588,35 @@ export async function runWorkbenchChatTurn(
       const requestedPeriod: WorkbenchLlmPreset =
         requestedPeriodBody ??
         parseRequestedPeriodFromText(question, ...historyTexts);
+      const reportRequested = isReportRequest(question, ...historyTexts);
 
       if (requestedPeriod) {
         personaSupplement += `\n\n## Required time scope (CRITICAL)\nThe user requested period scope: **${requestedPeriod}**. Every filterable create_widget MUST set filterConfig.defaultPreset to "${requestedPeriod}" (or null only for true all-time snapshots). Do not encode the period in widget titles.`;
+      }
+
+      if (
+        (canvasState?.totalItems ?? 0) > 0 &&
+        isPeriodSwitchOnlyRequest(question, ...historyTexts)
+      ) {
+        const period = requestedPeriod ?? parseRequestedPeriodFromText(question);
+        if (period) {
+          personaSupplement += `\n\n## Period switch only (CRITICAL)\nThe user wants to change the existing dashboard to **${period}**. Return ONE modify_group with set_period preset "${period}" on the existing groupId. Do not create_widget. Do not ask clarifying questions.`;
+        }
+      }
+
+      if (reportRequested && (canvasState?.totalItems ?? 0) > 0) {
+        personaSupplement += `\n\n## Presentation from canvas (CRITICAL)\nLIVE DATA VALUES are in CANVAS STATE below. Call generate_report now with those values embedded in slide elements. Do not ask the user for live values, clarifying questions, or slide counts.`;
+      }
+
+      if (
+        (canvasState?.totalItems ?? 0) > 0 &&
+        isChartTypeChangeRequest(question, ...historyTexts)
+      ) {
+        personaSupplement += `\n\n## Chart type change (CRITICAL)\nUpdate the existing widget with **modify_widget** using the widget's stable id from CANVAS STATE (e.g. cohi__id__idx). Set changes.type to the target chart type and provide SQL grouped appropriately. Do NOT use create_widget.`;
+      }
+
+      if (isAllTimeRequest(question, ...historyTexts)) {
+        personaSupplement += `\n\n## All-time scope (CRITICAL)\nUser requested all-time / lifetime metrics. Set filterConfig.filterable to false and defaultPreset to null on new widgets. SQL must compute the full-range metric without relying on injected date filters.`;
       }
 
       if (
@@ -1624,14 +1676,9 @@ export async function runWorkbenchChatTurn(
         `[CohiWorkbench] Processing question: "${question.substring(0, 80)}..." (tenant: ${tenantId || "none"}, personas: ${personaSummary})`,
       );
 
-      // Use higher token limit when user appears to be requesting a report
-      const isReportRequest =
-        /\b(report|presentation|powerpoint|pptx|pdf|slide|deck)\b/i.test(
-          question,
-        );
       const rawResponse = await callLLM(messages, apiKey, {
         temperature: 0.3,
-        maxTokens: isReportRequest ? 8000 : 4096,
+        maxTokens: reportRequested ? 8000 : 4096,
         jsonMode: true,
       });
 
@@ -1722,6 +1769,37 @@ export async function runWorkbenchChatTurn(
         requestedPeriod,
         userQuestion: question,
       });
+      augmentPeriodSwitchActions(validActions, {
+        userQuestion: question,
+        canvasState: canvasState
+          ? {
+              totalItems: canvasState.totalItems,
+              groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
+            }
+          : undefined,
+      });
+      if (canvasState) {
+        const canvasRefs = {
+          groups: canvasState.groups?.map((g) => ({
+            groupId: g.groupId,
+            widgets: g.widgets?.map((w) => ({
+              id: w.id,
+              title: w.title,
+              name: w.name,
+              kind: w.kind,
+            })),
+          })),
+          standaloneWidgets: canvasState.standaloneWidgets?.map((w) => ({
+            id: w.id,
+            title: w.title,
+          })),
+        };
+        augmentGroupRemoveFromQuestion(validActions, {
+          userQuestion: question,
+          canvasState: canvasRefs,
+        });
+        normalizeWorkbenchWidgetIds(validActions, canvasRefs);
+      }
 
       // Log modify_widget actions for debugging (instanceId, sql provided?, changes keys)
       for (const action of validActions) {
@@ -1747,6 +1825,17 @@ export async function runWorkbenchChatTurn(
       let finalMessage = parsed.message || "I processed your request.";
       let finalTeachingNotes = parsed.teachingNotes || undefined;
       let finalSuggestions = parsed.suggestedQuestions || [];
+
+      if (reportRequested && canvasState) {
+        const presentationInjected = augmentPresentationFromCanvas(validActions, {
+          userQuestion: question,
+          canvasState,
+        });
+        if (presentationInjected) {
+          finalMessage =
+            "Built a board-ready presentation from your dashboard data.";
+        }
+      }
 
       // SQL pre-validation: drop create_widget/modify_widget actions with invalid SQL
       // Step 1: Quick structural check (syntax, hallucinated tables)

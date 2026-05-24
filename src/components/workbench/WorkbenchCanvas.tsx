@@ -130,9 +130,11 @@ import type {
   CanvasStateSnapshot,
 } from "@/types/widgetActions";
 import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
+import { buildGroupSavedFiltersFromFilterConfig } from "@/lib/workbench/workbenchPresetMapping";
 import { registerWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
 import { buildCanvasStateSnapshot } from "@/lib/workbench/buildCanvasStateSnapshot";
 import { resolveWidgetGroupIndex } from "@/lib/workbench/resolveWidgetGroupIndex";
+import { resolveGroupWidgetItemIndex } from "@/lib/workbench/resolveGroupWidgetItem";
 import {
   loadWorkbenchDraftLayout,
   saveWorkbenchDraftLayout,
@@ -1737,6 +1739,7 @@ export function WorkbenchCanvas({
           let savedFilters = payload.savedFilters
             ? { ...payload.savedFilters }
             : undefined;
+          let removeMissed = false;
 
           for (const op of groupAction.operations) {
             if (op.op === "add_registry") {
@@ -1762,9 +1765,13 @@ export function WorkbenchCanvas({
               if (op.gridPosition)
                 layouts[itemKey(newItem, idx)] = op.gridPosition;
             } else if (op.op === "remove") {
-              const idx = itemsList.findIndex(
-                (it, i) => itemKey(it, i) === op.widgetId,
+              const idx = resolveGroupWidgetItemIndex(
+                itemsList,
+                op.widgetId ?? "",
               );
+              if (idx < 0) {
+                removeMissed = true;
+              }
               if (idx >= 0) {
                 const oldKeys = itemsList.map((it, i) => itemKey(it, i));
                 itemsList = itemsList.filter((_, i) => i !== idx);
@@ -1809,6 +1816,26 @@ export function WorkbenchCanvas({
               groupTitle = op.title;
             } else if (op.op === "set_filters") {
               savedFilters = { ...(savedFilters ?? {}), ...(op.filters ?? {}) };
+            } else if (op.op === "set_period") {
+              const built = buildGroupSavedFiltersFromFilterConfig({
+                filterable: true,
+                dateColumn: "application_date",
+                defaultPreset: op.preset,
+              });
+              if (built) {
+                savedFilters = {
+                  ...(savedFilters ?? {}),
+                  ...built,
+                  year: undefined,
+                };
+              }
+            } else if (op.op === "set_widget_title") {
+              const idx = itemsList.findIndex(
+                (it, i) => itemKey(it, i) === op.widgetId,
+              );
+              if (idx >= 0 && itemsList[idx].kind === "cohi") {
+                itemsList[idx] = { ...itemsList[idx], title: op.title };
+              }
             }
           }
 
@@ -1826,11 +1853,20 @@ export function WorkbenchCanvas({
               i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
             ),
           );
-          toast({
-            title: "Group updated",
-            description:
-              groupAction.explanation?.substring(0, 80) || "Changes applied",
-          });
+          const hadRemove = groupAction.operations.some((o) => o.op === "remove");
+          if (hadRemove && removeMissed) {
+            toast({
+              title: "Widget not found in group",
+              description: `Could not remove "${groupAction.operations.find((o) => o.op === "remove")?.widgetId ?? "widget"}". Check the canvas widget list ids.`,
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Group updated",
+              description:
+                groupAction.explanation?.substring(0, 80) || "Changes applied",
+            });
+          }
           break;
         }
         case "modify_registry_widget": {
@@ -2416,15 +2452,12 @@ export function WorkbenchCanvas({
             const payload = layoutItem.payload as {
               items: GroupWidgetItem[];
             } & typeof layoutItem.payload;
+            const matchIdx = resolveGroupWidgetItemIndex(
+              payload.items,
+              action.instanceId,
+            );
             const nextGroupItems = payload.items.map((groupItem, idx) => {
-              const groupItemKey =
-                groupItem.kind === "registry"
-                  ? `${groupItem.defId}__${idx}`
-                  : `cohi__${groupItem.id}__${idx}`;
-              if (
-                groupItem.kind !== "cohi" ||
-                groupItemKey !== action.instanceId
-              ) {
+              if (groupItem.kind !== "cohi" || idx !== matchIdx) {
                 return groupItem;
               }
               modifiedGrouped = true;

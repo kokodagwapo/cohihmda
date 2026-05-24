@@ -52,6 +52,7 @@ import {
   getChatTypePillClassName,
 } from "@/lib/unifiedChatTypeStyles";
 import { HistoryMetaPill } from "@/components/cohi/UnifiedChatHistoryMeta";
+import { ConversationRunningIndicator } from "@/components/cohi/ConversationRunningIndicator";
 import {
   ConversationMoveMenu,
   FolderMoveMenu,
@@ -227,7 +228,10 @@ function ConversationRow({
         {...listeners}
         {...attributes}
       >
-        <span className="block text-sm truncate">{conversation.title}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="block text-sm truncate flex-1 min-w-0">{conversation.title}</span>
+          <ConversationRunningIndicator conversationId={conversation.id} />
+        </span>
         {showMetaSubtitle ? (
           <ConversationMetaSubtitle
             conversation={conversation}
