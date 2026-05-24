@@ -13,6 +13,13 @@ export type CanvasStateForPresentation = {
   widgetData?: CanvasWidgetDataEntry[];
 };
 
+type MutableWorkbenchAction = {
+  type?: string;
+  reportDefinition?: Record<string, unknown>;
+  format?: "pptx" | "pdf";
+  explanation?: string;
+};
+
 const DEFAULT_THEME = {
   name: "professional",
   primaryColor: "#1e3a5f",
@@ -179,7 +186,7 @@ export function augmentPresentationFromCanvas(
   if ((options.canvasState?.totalItems ?? 0) === 0) return false;
   if (!options.canvasState?.widgetData?.length) return false;
 
-  const typed = actions as Array<{ type?: string }>;
+  const typed = actions as MutableWorkbenchAction[];
   if (typed.some((a) => a.type === "generate_report")) return false;
 
   const reportDefinition = buildFallbackReportFromCanvas(
