@@ -85,6 +85,36 @@ export function filterExecutableWorkbenchActions(
   return actions.filter((a) => EXECUTABLE_WORKBENCH_ACTION_TYPES.has(a.type));
 }
 
+import {
+  isAnalyticalWorkbenchQuestion,
+  isRemoveWidgetOnlyQuestion,
+} from "./workbenchPromptIntent";
+
+export {
+  isAnalyticalWorkbenchQuestion,
+  isRemoveWidgetOnlyQuestion,
+} from "./workbenchPromptIntent";
+
+/** Drop spurious create_* actions when the user asked an analytical question only. */
+export function gateWorkbenchActionsForUserQuestion(
+  actions: WidgetAction[] | undefined,
+  userQuestion: string,
+): WidgetAction[] {
+  let filtered = filterExecutableWorkbenchActions(actions);
+  if (isRemoveWidgetOnlyQuestion(userQuestion)) {
+    filtered = filtered.filter(
+      (a) =>
+        a.type !== "create_widget" &&
+        a.type !== "create_dashboard" &&
+        a.type !== "create_canvas",
+    );
+  }
+  if (!isAnalyticalWorkbenchQuestion(userQuestion)) return filtered;
+  return filtered.filter(
+    (a) => a.type !== "create_widget" && a.type !== "create_dashboard",
+  );
+}
+
 /**
  * Workbench compact-shell submit: only the first turn starts a new conversation tab.
  * Follow-ups must reuse sessionId so canvas/chat stay in sync.
@@ -99,6 +129,67 @@ export function shouldForceNewWorkbenchConversation(options: {
     !options.currentSessionId &&
     options.userTurnCount === 0
   );
+}
+
+export interface ChatMessageForCarryOver {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface CarryOverContext {
+  fromConversationId: string;
+  fromChatType: UnifiedChatType;
+  fromTitle?: string;
+  summary: string;
+}
+
+const CARRY_OVER_MAX_CHARS = 1200;
+
+/**
+ * Compact summary of the last user turns + latest assistant reply for a forked chat.
+ */
+export function buildCarryOverContext(
+  messages: ChatMessageForCarryOver[],
+  options?: { maxChars?: number },
+): string {
+  const maxChars = options?.maxChars ?? CARRY_OVER_MAX_CHARS;
+  if (!messages.length) return "";
+
+  const userTurns = messages.filter((m) => m.role === "user" && m.content.trim());
+  const lastUsers = userTurns.slice(-2);
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((m) => m.role === "assistant" && m.content.trim());
+
+  const parts: string[] = [];
+  if (lastUsers.length > 0) {
+    parts.push("Recent user messages:");
+    for (const u of lastUsers) {
+      parts.push(`- ${u.content.trim().replace(/\s+/g, " ")}`);
+    }
+  }
+  if (lastAssistant) {
+    const snippet = lastAssistant.content.trim().replace(/\s+/g, " ");
+    parts.push(
+      `Latest assistant reply: ${snippet.length > 400 ? `${snippet.slice(0, 397)}…` : snippet}`,
+    );
+  }
+
+  const combined = parts.join("\n").trim();
+  if (!combined) return "";
+  if (combined.length <= maxChars) return combined;
+  return `${combined.slice(0, maxChars - 1)}…`;
+}
+
+export function shouldForkOnChatTypeChange(options: {
+  previousChatType: UnifiedChatType;
+  nextChatType: UnifiedChatType;
+  currentSessionId: string | null;
+  messageCount: number;
+}): boolean {
+  if (options.previousChatType === options.nextChatType) return false;
+  if (options.messageCount === 0) return false;
+  return !!options.currentSessionId;
 }
 
 /** User-facing summary for applied workbench actions (chat bubble footer). */

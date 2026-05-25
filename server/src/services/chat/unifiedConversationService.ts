@@ -32,6 +32,9 @@ export interface UnifiedConversationListRow {
   legacy_ref: string | null;
   legacy_source: string | null;
   folder_id: string | null;
+  parent_conversation_id?: string | null;
+  forked_to_conversation_id?: string | null;
+  conversation_origin?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -60,7 +63,10 @@ async function ensureTable(tenantId: string): Promise<boolean> {
         ADD COLUMN IF NOT EXISTS chat_type TEXT NOT NULL DEFAULT 'chat',
         ADD COLUMN IF NOT EXISTS legacy_ref TEXT,
         ADD COLUMN IF NOT EXISTS legacy_source TEXT,
-        ADD COLUMN IF NOT EXISTS folder_id UUID
+        ADD COLUMN IF NOT EXISTS folder_id UUID,
+        ADD COLUMN IF NOT EXISTS parent_conversation_id UUID,
+        ADD COLUMN IF NOT EXISTS forked_to_conversation_id UUID,
+        ADD COLUMN IF NOT EXISTS conversation_origin TEXT
     `);
     return true;
   } catch (e: any) {
@@ -85,6 +91,12 @@ export async function appendUnifiedChatTurns(args: {
   chatType?: UnifiedConversationChatType;
   legacyRef?: string | null;
   legacySource?: string | null;
+  carryOverContext?: {
+    fromConversationId: string;
+    fromChatType?: string;
+    fromTitle?: string;
+    summary: string;
+  } | null;
 }): Promise<void> {
   const ok = await ensureTable(args.tenantId);
   if (!ok) return;
@@ -113,12 +125,15 @@ export async function appendUnifiedChatTurns(args: {
   );
 
   if (exists.rows.length === 0) {
+    const parentId = args.carryOverContext?.fromConversationId ?? null;
+    const origin = parentId ? "fork_on_type_change" : null;
     await pool.query(
       `
       INSERT INTO public.unified_chat_conversations (
-        id, user_id, scope_type, scope_key, title, chat_type, legacy_ref, legacy_source, messages, created_at, updated_at
+        id, user_id, scope_type, scope_key, title, chat_type, legacy_ref, legacy_source,
+        parent_conversation_id, conversation_origin, messages, created_at, updated_at
       )
-      VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW(), NOW())
+      VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, $11::jsonb, NOW(), NOW())
       `,
       [
         args.conversationId,
@@ -129,9 +144,21 @@ export async function appendUnifiedChatTurns(args: {
         chatType,
         args.legacyRef ?? null,
         args.legacySource ?? null,
+        parentId,
+        origin,
         chunk,
       ],
     );
+    if (parentId) {
+      const { linkConversationFork } = await import("./chatConversationFork.js");
+      await linkConversationFork({
+        tenantId: args.tenantId,
+        userId: args.userId,
+        parentConversationId: parentId,
+        childConversationId: args.conversationId,
+        origin: "fork_on_type_change",
+      });
+    }
     return;
   }
 
@@ -278,7 +305,9 @@ export async function listUnifiedConversations(args: {
     )
   )`);
   const q = `
-    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, created_at, updated_at
+    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id,
+           parent_conversation_id, forked_to_conversation_id, conversation_origin,
+           created_at, updated_at
     FROM public.unified_chat_conversations
     WHERE ${where.join(" AND ")}
     ORDER BY updated_at DESC
@@ -299,7 +328,9 @@ export async function getUnifiedConversation(args: {
   const pool = await tenantDbManager.getTenantPool(args.tenantId);
   const r = await pool.query(
     `
-    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, messages, created_at, updated_at
+    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id,
+           parent_conversation_id, forked_to_conversation_id, conversation_origin,
+           messages, created_at, updated_at
     FROM public.unified_chat_conversations
     WHERE id = $1::uuid AND user_id = $2::uuid
     LIMIT 1
@@ -317,6 +348,9 @@ export async function getUnifiedConversation(args: {
     legacy_ref: row.legacy_ref,
     legacy_source: row.legacy_source ?? null,
     folder_id: row.folder_id ?? null,
+    parent_conversation_id: row.parent_conversation_id ?? null,
+    forked_to_conversation_id: row.forked_to_conversation_id ?? null,
+    conversation_origin: row.conversation_origin ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     messages: Array.isArray(row.messages) ? row.messages : [],

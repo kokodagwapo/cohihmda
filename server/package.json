@@ -29,6 +29,7 @@
     "check-user": "tsx scripts/check-user-and-create-super-admin.js",
     "test": "vitest",
     "test:run": "vitest run",
+    "agency-eval": "tsx src/services/workbench/agencyEval/runAgencyEval.ts",
     "test:coverage": "vitest --coverage",
     "test:integration": "vitest run src/test/**/*.test.ts"
   },

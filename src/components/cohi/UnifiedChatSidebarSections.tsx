@@ -161,6 +161,16 @@ function ConversationMetaSubtitle({
             formatUserDisplayName(null, conversation.shared_by_email)}
         </HistoryMetaPill>
       )}
+      {conversation.parent_conversation_id ? (
+        <HistoryMetaPill className="bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+          Continued from prior
+        </HistoryMetaPill>
+      ) : null}
+      {conversation.forked_to_conversation_id ? (
+        <HistoryMetaPill className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          Continued in new chat
+        </HistoryMetaPill>
+      ) : null}
     </span>
   );
 }

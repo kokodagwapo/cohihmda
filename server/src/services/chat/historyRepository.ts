@@ -21,6 +21,9 @@ export interface CanonicalHistoryRow {
   legacy_source?: string | null;
   legacy_ref?: string | null;
   folder_id?: string | null;
+  parent_conversation_id?: string | null;
+  forked_to_conversation_id?: string | null;
+  conversation_origin?: string | null;
   /** Research Lab session phase when row comes from dual-read legacy list. */
   phase?: string | null;
   /** Viewer opened someone else's shared research (unified row, not dual-read). */
@@ -118,6 +121,9 @@ export async function listCanonicalHistory(
     legacy_source: r.legacy_source,
     legacy_ref: r.legacy_ref,
     folder_id: r.folder_id,
+    parent_conversation_id: r.parent_conversation_id ?? null,
+    forked_to_conversation_id: r.forked_to_conversation_id ?? null,
+    conversation_origin: r.conversation_origin ?? null,
   }));
 
   // Dual-read legacy rows have no folder_id and ignore SQL filters; skip when narrowed.

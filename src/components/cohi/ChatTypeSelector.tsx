@@ -68,7 +68,10 @@ export function ChatTypeSelect({
 
       <SelectTrigger
 
-        className={cn("h-10 w-[140px] shrink-0 text-xs rounded-xl", className)}
+        className={cn(
+          "h-10 w-full sm:w-[140px] max-w-full shrink-0 text-xs rounded-xl",
+          className,
+        )}
 
         aria-label="Chat type"
 

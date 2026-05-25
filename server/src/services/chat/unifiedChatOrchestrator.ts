@@ -75,6 +75,12 @@ export interface UnifiedChatRequestBody {
     /** Server-side insight builder draft state (optional). */
     insightBuilderDraft?: InsightBuilderDraft;
     legacyResearchSessionId?: string;
+    carryOverContext?: {
+      fromConversationId: string;
+      fromChatType?: string;
+      fromTitle?: string;
+      summary: string;
+    };
   };
   history?: { role: "user" | "assistant"; content: string }[];
   options?: {

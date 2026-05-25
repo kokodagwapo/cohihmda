@@ -17,6 +17,7 @@ import type { WidgetAction, CanvasStateSnapshot } from "@/types/widgetActions";
 import {
   deliverWorkbenchWidgetActions,
   filterExecutableWorkbenchActions,
+  gateWorkbenchActionsForUserQuestion,
   COHI_WORKBENCH_BIND_CANVAS_EVENT,
   draftScopeIdForCanvasTab,
   getConnectedWorkbenchCanvasId,
@@ -54,9 +55,13 @@ import {
 } from "@/lib/unifiedChatFolderUtils";
 import { useUnifiedChatRunStore } from "@/stores/unifiedChatRunStore";
 
+import type { CarryOverContext } from "@/lib/workbench/workbenchChatHandoff";
+
 export interface SendMessageOptions {
   /** Start a new server conversation (e.g. compact shell send). */
   forceNewConversation?: boolean;
+  /** When forking after a chat-type switch, compact context from the prior thread. */
+  carryOverContext?: CarryOverContext;
   /** CSV dataset upload IDs (chat, workbench, research). */
   datasetUploadIds?: string[];
   /** Research: dataset upload IDs for a new investigation only. */
@@ -77,6 +82,7 @@ function buildOptimisticUnifiedConversation(args: {
   title: string;
   chatType: UnifiedChatType;
   scope: UnifiedConversationSummary["scope"];
+  parentConversationId?: string | null;
 }): UnifiedConversationSummary {
   const now = new Date().toISOString();
   return {
@@ -86,7 +92,25 @@ function buildOptimisticUnifiedConversation(args: {
     chat_type: args.chatType,
     updated_at: now,
     created_at: now,
+    ...(args.parentConversationId
+      ? { parent_conversation_id: args.parentConversationId }
+      : {}),
   };
+}
+
+export interface ChatTypeForkUndoState {
+  sessionId: string;
+  messages: ChatMessage[];
+  chatType: UnifiedChatType;
+  legacyRef: string | null;
+  conversationForkLinks: ConversationForkLinks | null;
+}
+
+export interface ConversationForkLinks {
+  parentConversationId?: string | null;
+  parentTitle?: string | null;
+  forkedToConversationId?: string | null;
+  forkedToTitle?: string | null;
 }
 
 // ============================================================================
@@ -252,6 +276,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const messageIdCounter = useRef(0);
   const viewingSessionRef = useRef<string | null>(null);
   const loadSessionGenerationRef = useRef(0);
+  const pendingCarryOverRef = useRef<CarryOverContext | null>(null);
+  const forkUndoRef = useRef<ChatTypeForkUndoState | null>(null);
+  const [conversationForkLinks, setConversationForkLinks] =
+    useState<ConversationForkLinks | null>(null);
 
   useEffect(() => {
     viewingSessionRef.current = sessionId;
@@ -423,6 +451,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       if (!question.trim() && !hasDatasetOnly) return;
 
       const forceNew = options?.forceNewConversation ?? false;
+      const carryOver =
+        options?.carryOverContext ?? pendingCarryOverRef.current ?? undefined;
+      if (carryOver) {
+        pendingCarryOverRef.current = null;
+      }
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
 
@@ -507,12 +540,19 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             const id = crypto.randomUUID();
             setSessionId(id);
             viewingSessionRef.current = id;
+            if (carryOver) {
+              setConversationForkLinks({
+                parentConversationId: carryOver.fromConversationId,
+                parentTitle: carryOver.fromTitle ?? "Previous chat",
+              });
+            }
             notifyOptimisticUnifiedChatConversation(
               buildOptimisticUnifiedConversation({
                 id,
                 title: effectiveQuestion,
                 chatType,
                 scope,
+                parentConversationId: carryOver?.fromConversationId,
               }),
             );
             pendingHistoryRefresh = true;
@@ -561,7 +601,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               message: effectiveQuestion,
               conversationId: streamConversationId,
               scope: { type: scopeType, id: scopeId },
-              context: buildWorkbenchRequestContext(draftScopeId),
+              context: {
+                ...buildWorkbenchRequestContext(draftScopeId),
+                ...(carryOver ? { carryOverContext: carryOver } : {}),
+              },
               history,
               datasetUploadIds: datasetUploadIdsForSend,
               onStreamText: (text) => {
@@ -579,7 +622,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               viewingSessionRef.current = conversationId;
             }
 
-            const autoActions = filterExecutableWorkbenchActions(parsed.actions);
+            const autoActions = gateWorkbenchActionsForUserQuestion(
+              parsed.actions,
+              effectiveQuestion,
+            );
             if (autoActions.length > 0) {
               deliverWorkbenchWidgetActions(draftScopeId, autoActions);
             }
@@ -591,7 +637,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 ? `${parsed.message}\n${parsed.error}`
                 : parsed.message,
               timestamp: new Date(),
-              workbenchActions: parsed.actions,
+              workbenchActions:
+                autoActions.length > 0 ? autoActions : undefined,
               workbenchActionsAppliedCount: autoActions.length,
             };
             applyMessagesForStream(streamConversationId, (prev) =>
@@ -632,12 +679,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               deepAnalysis: researchDeepAnalysis,
               uploadIds: researchUploadIds,
               datasetUploadIds: datasetUploadIdsForSend,
-              context:
-                chatType === "research" && priorLegacyRef
+              context: {
+                ...(chatType === "research" && priorLegacyRef
                   ? { legacyResearchSessionId: priorLegacyRef }
                   : ibDraft && chatType === "insight_builder"
                     ? { insightBuilderDraft: ibDraft }
-                    : undefined,
+                    : {}),
+                ...(carryOver ? { carryOverContext: carryOver } : {}),
+              },
               insightBuilder:
                 chatType === "insight_builder" && ibOpts?.action
                   ? { action: ibOpts.action }
@@ -910,12 +959,18 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               message: composed,
               conversationId: sessionId,
               scope: { type: scopeType, id: scopeId },
-              context: buildWorkbenchRequestContext(draftScopeId),
+              context: {
+                ...buildWorkbenchRequestContext(draftScopeId),
+                ...(carryOver ? { carryOverContext: carryOver } : {}),
+              },
               history,
               onStreamText,
             });
             setSessionId(conversationId);
-            const autoActions = filterExecutableWorkbenchActions(parsed.actions);
+            const autoActions = gateWorkbenchActionsForUserQuestion(
+              parsed.actions,
+              effectiveQuestion,
+            );
             if (autoActions.length > 0) {
               deliverWorkbenchWidgetActions(draftScopeId, autoActions);
             }
@@ -926,7 +981,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 ? `${parsed.message}\n${parsed.error}`
                 : parsed.message,
               timestamp: new Date(),
-              workbenchActions: parsed.actions,
+              workbenchActions:
+                autoActions.length > 0 ? autoActions : undefined,
               workbenchActionsAppliedCount: autoActions.length,
             };
             const applyFinal = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
@@ -1089,9 +1145,48 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     viewingSessionRef.current = null;
     setSessionId(null);
     setLegacyRef(null);
+    setConversationForkLinks(null);
+    pendingCarryOverRef.current = null;
+    forkUndoRef.current = null;
     resetWorkbenchChatSession();
     setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
   }, [resetWorkbenchChatSession, chatType]);
+
+  const beginChatTypeFork = useCallback(
+    (carryOver: CarryOverContext, previousChatType: UnifiedChatType) => {
+      if (!sessionId) return;
+      forkUndoRef.current = {
+        sessionId,
+        messages: [...messages],
+        chatType: previousChatType,
+        legacyRef,
+        conversationForkLinks,
+      };
+      pendingCarryOverRef.current = carryOver;
+      viewingSessionRef.current = null;
+      setSessionId(null);
+      setLegacyRef(null);
+      setMessages([]);
+      setConversationForkLinks({
+        parentConversationId: carryOver.fromConversationId,
+        parentTitle: carryOver.fromTitle ?? "Previous chat",
+      });
+    },
+    [sessionId, messages, legacyRef, conversationForkLinks],
+  );
+
+  const undoChatTypeFork = useCallback((): ChatTypeForkUndoState | null => {
+    const undo = forkUndoRef.current;
+    if (!undo) return null;
+    forkUndoRef.current = null;
+    pendingCarryOverRef.current = null;
+    setSessionId(undo.sessionId);
+    viewingSessionRef.current = undo.sessionId;
+    setMessages(undo.messages);
+    setLegacyRef(undo.legacyRef);
+    setConversationForkLinks(undo.conversationForkLinks);
+    return undo;
+  }, []);
 
   // ===========================================================================
   // Session management
@@ -1224,6 +1319,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             return { datasetUploadIds: [] };
           }
           const loadedChatType = (row.chat_type ?? chatType) as UnifiedChatType;
+          setConversationForkLinks({
+            parentConversationId: row.parent_conversation_id ?? null,
+            forkedToConversationId: row.forked_to_conversation_id ?? null,
+          });
           const rowScope = row.scope;
 
           if (loadedChatType === "workbench" && rowScope?.id) {
@@ -1457,5 +1556,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     loadSession,
     deleteSession,
     renameSession,
+    conversationForkLinks,
+    beginChatTypeFork,
+    undoChatTypeFork,
   };
 }

@@ -96,7 +96,11 @@ import {
   type WorkbenchEditingWidgetStateDetail,
   describeWorkbenchActionsApplied,
   shouldForceNewWorkbenchConversation,
+  buildCarryOverContext,
+  shouldForkOnChatTypeChange,
 } from "@/lib/workbench/workbenchChatHandoff";
+import { ConversationForkChips } from "@/components/cohi/ConversationForkChips";
+import { formatChatTypeLabel } from "@/lib/unifiedChatTypeStyles";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { PAGE_INSIGHTS_CARD } from "@/components/cohi/pageContentStyles";
 import { CHAT_SHELL_VIEW_TRANSITION } from "@/hooks/useChatShellAnimatedHeight";
@@ -106,6 +110,7 @@ import {
   EnhancedVisualizationConfig,
 } from "@/components/visualizations/EnhancedVisualization";
 import { useToast } from "@/components/ui/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { convertChatToCanvasItems } from "@/utils/chatToCanvas";
 import {
   createLayoutItem,
@@ -539,6 +544,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     loadSession,
     deleteSession,
     renameSession,
+    conversationForkLinks,
+    beginChatTypeFork,
+    undoChatTypeFork,
   } = unifiedSession ?? legacyChat;
 
   const startNewChatSession = useCallback(async () => {
@@ -1297,6 +1305,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [activeChatType, legacyRef]);
 
+  const forkUndoToastRef = useRef<{ dismiss: () => void } | null>(null);
+
   const handleChatTypeChange = useCallback(
     (next: UnifiedChatType) => {
       setExpandedPromptCard(null);
@@ -1306,9 +1316,66 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       if (next !== "research") {
         setResearchViewOnly(false);
       }
+
+      const prev = activeChatType;
+      if (
+        isUnifiedChatClientEnabled() &&
+        beginChatTypeFork &&
+        shouldForkOnChatTypeChange({
+          previousChatType: prev,
+          nextChatType: next,
+          currentSessionId,
+          messageCount: messages.length,
+        })
+      ) {
+        const fromTitle =
+          chatSessions.find((s) => s.id === currentSessionId)?.title ??
+          "Previous chat";
+        const summary = buildCarryOverContext(messages);
+        beginChatTypeFork(
+          {
+            fromConversationId: currentSessionId!,
+            fromChatType: prev,
+            fromTitle,
+            summary,
+          },
+          prev,
+        );
+        forkUndoToastRef.current?.dismiss();
+        const { dismiss } = toast({
+          title: `Started a new ${formatChatTypeLabel(next)} chat`,
+          description: "Context from your previous conversation was carried over.",
+          action: (
+            <ToastAction
+              altText="Undo chat type switch"
+              onClick={() => {
+                dismiss();
+                const restored = undoChatTypeFork?.();
+                if (restored) {
+                  setActiveChatType(restored.chatType);
+                }
+              }}
+            >
+              Undo
+            </ToastAction>
+          ),
+          duration: 8000,
+        });
+        forkUndoToastRef.current = { dismiss };
+      }
+
       setActiveChatType(next);
     },
-    [setActiveChatType],
+    [
+      activeChatType,
+      beginChatTypeFork,
+      chatSessions,
+      currentSessionId,
+      messages,
+      setActiveChatType,
+      toast,
+      undoChatTypeFork,
+    ],
   );
 
   useEffect(() => {
@@ -2226,7 +2293,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             : "border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/50 dark:bg-slate-900/50",
       )}
     >
-      {activeChatType === "workbench" && workbenchEditingWidget && (
+      {workbenchEditingWidget &&
+        (activeChatType === "workbench" ||
+          isMyDashboardCanvasPath(pathname)) && (
         <div className="flex items-center justify-between gap-2 mb-2 px-2 py-1.5 rounded-lg bg-violet-50/90 dark:bg-indigo-950/40 border border-violet-100 dark:border-indigo-900/50">
           <span className="text-xs font-medium text-indigo-800 dark:text-indigo-200 truncate">
             Editing: {workbenchEditingWidget.title}
@@ -2247,6 +2316,16 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           </Button>
         </div>
       )}
+      {isUnifiedChatClientEnabled() && conversationForkLinks && (
+        <ConversationForkChips
+          links={conversationForkLinks}
+          conversationTitles={Object.fromEntries(
+            chatSessions.map((s) => [s.id, s.title]),
+          )}
+          onNavigate={(id) => void handleLoadSession(id)}
+          className="px-1 pb-1"
+        />
+      )}
       {isUnifiedChatClientEnabled() && (
         <>
           <BackgroundChatRunsBadge activeConversationId={currentSessionId} />
@@ -2257,14 +2336,19 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           />
         </>
       )}
-      <div className="flex gap-2 items-end" data-tour="unified-chat-composer">
+      <div
+        className="flex flex-wrap sm:flex-nowrap gap-2 items-end w-full min-w-0"
+        data-tour="unified-chat-composer"
+      >
         {isUnifiedChatClientEnabled() && (
           <ChatTypeSelect
             value={activeChatType}
             onChange={handleChatTypeChange}
             allowedTypes={allowedChatTypes}
+            className="w-full sm:w-[140px]"
           />
         )}
+        <div className="flex flex-1 min-w-0 basis-full sm:basis-auto gap-2 items-end">
         <Button
           variant={isListening ? "destructive" : "outline"}
           size="icon"
@@ -2322,6 +2406,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Send className="w-4 h-4" />
           )}
         </Button>
+        </div>
       </div>
       {showDatasetAttach && !researchViewOnly && (
         <DatasetAttachPanel

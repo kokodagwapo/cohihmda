@@ -1,0 +1,226 @@
+[
+  {
+    "id": "add-volume-by-branch",
+    "question": "Add volume by branch chart to the dashboard.",
+    "canvas": { "totalItems": 2, "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-units__0", "name": "Total Units" }] }] },
+    "expect": ["add_registry_volume_branch"]
+  },
+  {
+    "id": "period-l6m",
+    "question": "Switch the dashboard to last 6 months.",
+    "canvas": {
+      "totalItems": 4,
+      "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-units__0", "name": "Total Units" }] }]
+    },
+    "expect": ["modify_group_set_period"]
+  },
+  {
+    "id": "remove-funded-volume",
+    "question": "Remove the funded volume widget from the dashboard.",
+    "canvas": {
+      "totalItems": 2,
+      "groups": [
+        {
+          "groupId": "grp-1",
+          "widgets": [
+            { "id": "company-scorecard-volume__0", "name": "Total Volume" },
+            { "id": "company-scorecard-units__0", "name": "Total Units" }
+          ]
+        }
+      ]
+    },
+    "expect": ["modify_group_remove"]
+  },
+  {
+    "id": "restore-pull-through",
+    "question": "Add pull-through rate back to the dashboard.",
+    "canvas": { "totalItems": 1, "groups": [{ "groupId": "grp-1", "widgets": [] }] },
+    "expect": ["add_registry_pullthrough"]
+  },
+  {
+    "id": "chart-line",
+    "question": "Change pull-through by branch chart to a line chart.",
+    "canvas": {
+      "totalItems": 3,
+      "groups": [
+        {
+          "groupId": "grp-1",
+          "widgets": [
+            {
+              "id": "company-scorecard-pullthrough-by-branch__2",
+              "name": "Pull-Through by Branch"
+            }
+          ]
+        }
+      ]
+    },
+    "expect": ["chart_type_line"]
+  },
+  {
+    "id": "all-time-kpi",
+    "question": "Show funded volume as an all-time KPI.",
+    "canvas": {
+      "totalItems": 3,
+      "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-volume__0", "name": "Total Volume" }] }]
+    },
+    "expect": ["all_time_or_modify"]
+  },
+  {
+    "id": "analytical-only",
+    "question": "Why is pull-through lower than last month?",
+    "canvas": {
+      "totalItems": 4,
+      "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "sales-scorecard-pull-through__0", "name": "Pull-Through Rate" }] }]
+    },
+    "expect": ["no_create"]
+  },
+  {
+    "id": "add-wac",
+    "question": "Add weighted average coupon WAC widget to the dashboard.",
+    "canvas": { "totalItems": 2, "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-units__0", "name": "Total Units" }] }] },
+    "expect": ["add_registry_wac"]
+  },
+  {
+    "id": "chart-bar",
+    "question": "Change pull-through by branch chart to a bar chart.",
+    "canvas": {
+      "totalItems": 3,
+      "groups": [
+        {
+          "groupId": "grp-1",
+          "widgets": [
+            { "id": "company-scorecard-pullthrough-by-branch__0", "name": "Pull-Through by Branch" }
+          ]
+        }
+      ]
+    },
+    "expect": ["chart_type_bar"]
+  },
+  {
+    "id": "remove-units",
+    "question": "Remove the funded units widget from the dashboard.",
+    "canvas": {
+      "totalItems": 2,
+      "groups": [
+        {
+          "groupId": "grp-1",
+          "widgets": [
+            { "id": "company-scorecard-units__0", "name": "Total Units" },
+            { "id": "company-scorecard-volume__0", "name": "Total Volume" }
+          ]
+        }
+      ]
+    },
+    "expect": ["modify_group_remove_units"]
+  },
+  {
+    "id": "period-py",
+    "question": "Switch dashboard to prior year.",
+    "canvas": {
+      "totalItems": 4,
+      "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-units__0", "name": "Total Units" }] }]
+    },
+    "expect": ["modify_group_set_period"]
+  },
+  {
+    "id": "remove-pull-through-kpi",
+    "question": "Remove the pull-through rate widget from the dashboard.",
+    "canvas": {
+      "totalItems": 3,
+      "groups": [
+        {
+          "groupId": "grp-1",
+          "widgets": [
+            { "id": "sales-scorecard-pull-through__0", "name": "Pull-Through Rate" },
+            { "id": "company-scorecard-units__0", "name": "Total Units" }
+          ]
+        }
+      ]
+    },
+    "expect": ["modify_group_remove"]
+  },
+  {
+    "id": "add-wa-fico",
+    "question": "Add WA FICO to the dashboard.",
+    "canvas": { "totalItems": 1, "groups": [{ "groupId": "grp-1", "widgets": [] }] },
+    "expect": ["add_registry_wa_fico"]
+  },
+  {
+    "id": "chart-pie",
+    "question": "Change volume by branch to a pie chart.",
+    "canvas": {
+      "totalItems": 3,
+      "groups": [
+        {
+          "groupId": "grp-1",
+          "widgets": [
+            { "id": "company-scorecard-volume-by-branch__1", "name": "Volume by Branch" }
+          ]
+        }
+      ]
+    },
+    "expect": ["chart_type_pie"]
+  },
+  {
+    "id": "all-time-explicit",
+    "question": "Show all-time funded units count.",
+    "canvas": {
+      "totalItems": 2,
+      "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-units__0", "name": "Total Units" }] }]
+    },
+    "expect": ["all_time_or_modify"]
+  },
+  {
+    "id": "add-margin",
+    "question": "Add margin widget to the dashboard.",
+    "canvas": { "totalItems": 1, "groups": [{ "groupId": "grp-1", "widgets": [] }] },
+    "expect": ["add_registry_margin"]
+  },
+  {
+    "id": "remove-wac",
+    "question": "Remove the WAC widget from the dashboard.",
+    "canvas": {
+      "totalItems": 2,
+      "groups": [
+        {
+          "groupId": "grp-1",
+          "widgets": [
+            { "id": "company-scorecard-wac__0", "name": "WAC" },
+            { "id": "company-scorecard-units__0", "name": "Total Units" }
+          ]
+        }
+      ]
+    },
+    "expect": ["modify_group_remove"]
+  },
+  {
+    "id": "period-mtd",
+    "question": "Set dashboard period to month to date.",
+    "canvas": {
+      "totalItems": 4,
+      "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-volume__0", "name": "Total Volume" }] }]
+    },
+    "expect": ["modify_group_set_period"]
+  },
+  {
+    "id": "add-fico-distribution",
+    "question": "Add FICO distribution chart to the dashboard.",
+    "canvas": { "totalItems": 2, "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-units__0", "name": "Total Units" }] }] },
+    "expect": ["add_registry_fico_dist"]
+  },
+  {
+    "id": "analytical-trend",
+    "question": "What is driving the trend in funded volume?",
+    "canvas": {
+      "totalItems": 3,
+      "groups": [{ "groupId": "grp-1", "widgets": [{ "id": "company-scorecard-volume__0", "name": "Total Volume" }] }]
+    },
+    "expect": ["no_create"]
+  },
+  {
+    "id": "add-cycle-time",
+    "question": "Add average turn time widget to the dashboard.",
+    "canvas": { "totalItems": 1, "groups": [{ "groupId": "grp-1", "widgets": [] }] },
+    "expect": ["add_registry_turn_time"]
+  }
+]

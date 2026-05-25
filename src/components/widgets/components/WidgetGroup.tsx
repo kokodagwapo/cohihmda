@@ -53,6 +53,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
+  COHI_WORKBENCH_STOP_EDITING_EVENT,
+  dispatchWorkbenchEditingWidgetState,
+} from "@/lib/workbench/workbenchChatHandoff";
+import {
   DatePeriodPicker,
   type DateRange,
   type PeriodSelection,
@@ -5979,6 +5983,15 @@ export function WidgetGroup({
                       onOpenEditDialog={
                         item.kind === "cohi"
                           ? () => {
+                              const cohiItem = item as Extract<
+                                GroupWidgetItem,
+                                { kind: "cohi" }
+                              >;
+                              const widgetId = `cohi__${cohiItem.id}__${idx}`;
+                              dispatchWorkbenchEditingWidgetState({
+                                widgetId,
+                                widgetTitle: cohiItem.title ?? "Cohi widget",
+                              });
                               setEditingItemIdx(idx);
                               setEditDialogOpen(true);
                             }
@@ -6117,7 +6130,18 @@ export function WidgetGroup({
           open={editDialogOpen}
           onOpenChange={(open) => {
             setEditDialogOpen(open);
-            if (!open) setEditingItemIdx(null);
+            if (!open) {
+              setEditingItemIdx(null);
+              dispatchWorkbenchEditingWidgetState({
+                widgetId: null,
+                widgetTitle: null,
+              });
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent(COHI_WORKBENCH_STOP_EDITING_EVENT),
+                );
+              }
+            }
           }}
           item={
             items[editingItemIdx] as Extract<GroupWidgetItem, { kind: "cohi" }>

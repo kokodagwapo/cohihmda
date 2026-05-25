@@ -192,6 +192,7 @@ e2e/.auth/
 playwright-report/
 test-results/
 blob-report/
+server/node_modules/.vite/
 
 # Misc
 .cache/

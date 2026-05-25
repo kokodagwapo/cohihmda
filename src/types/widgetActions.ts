@@ -116,6 +116,13 @@ export type GroupOperation =
       title: string;
       vizConfig: VisualizationConfig;
       gridPosition?: { x: number; y: number; w: number; h: number };
+      /** When filterable is false, group date filters are not injected into SQL. */
+      filterConfig?: {
+        filterable?: boolean;
+        dateColumn?: string;
+        defaultPreset?: string | null;
+      };
+      allowLowSamplePullThrough?: boolean;
     }
   | { op: 'remove'; widgetId: string }
   | { op: 'resize'; widgetId: string; w: number; h: number }

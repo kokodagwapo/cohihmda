@@ -47,9 +47,18 @@ export function ChatShellPageGrid({
   const pagePaneRef = useRef<HTMLDivElement>(null);
   const layoutRootRef = useRef<HTMLDivElement>(null);
   const [splitPagePercent, setSplitPagePercent] = useState(readSplitPagePercent);
+  const [compactSplit, setCompactSplit] = useState(false);
   const dragStateRef = useRef<{ startX: number; startPercent: number } | null>(
     null,
   );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1100px)");
+    const onChange = () => setCompactSplit(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     if (!isDashboardChatShellRoute(location.pathname)) return;
@@ -147,7 +156,9 @@ export function ChatShellPageGrid({
         style={
           isSplitLayout
             ? {
-                gridTemplateColumns: `minmax(0, ${splitPagePercent}fr) 6px minmax(260px, ${100 - splitPagePercent}fr)`,
+                gridTemplateColumns: compactSplit
+                  ? `minmax(0, ${splitPagePercent}fr) 6px minmax(0, ${100 - splitPagePercent}fr)`
+                  : `minmax(0, ${splitPagePercent}fr) 6px minmax(260px, ${100 - splitPagePercent}fr)`,
               }
             : undefined
         }

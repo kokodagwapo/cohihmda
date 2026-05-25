@@ -52,10 +52,12 @@ export async function selectUnifiedChatType(
   await dismissBlockingOverlays(page);
   const selector = page.getByRole("combobox", { name: "Chat type" });
   await expect(selector).toBeVisible({ timeout: 15_000 });
-  await selector.click({ force: true });
-  const option = page.getByRole("option", { name: label, exact: true });
+  await selector.click();
+  const listbox = page.getByRole("listbox");
+  await expect(listbox).toBeVisible({ timeout: 10_000 });
+  const option = listbox.getByRole("option", { name: label, exact: true });
   await expect(option).toBeVisible({ timeout: 10_000 });
-  await option.click({ force: true });
+  await option.click();
 }
 
 export const UNIFIED_CHAT_STUB_TEXT =
@@ -96,11 +98,34 @@ export async function gotoWithUnifiedChatShell(
   options?: { timeout?: number },
 ): Promise<void> {
   const timeout = shellReadyTimeout(options);
-  await page.goto(path, { waitUntil: "domcontentloaded" });
-  await dismissBlockingOverlays(page);
-  await expect(page.getByTestId("unified-chat-shell")).toBeVisible({ timeout });
-  await expect(unifiedChatMessageInput(page)).toBeVisible({ timeout });
-  await resetUnifiedChatShellToCompact(page);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.goto(path, { waitUntil: "domcontentloaded" });
+    await dismissBlockingOverlays(page);
+    const login = await page
+      .getByText(/Sign in to access your dashboard/i)
+      .isVisible()
+      .catch(() => false);
+    if (login) {
+      throw new Error(
+        "E2E auth expired — run: npx tsx e2e/manual-auth-setup.ts",
+      );
+    }
+    try {
+      await expect(page.getByTestId("unified-chat-shell")).toBeVisible({
+        timeout,
+      });
+      await expect(unifiedChatMessageInput(page)).toBeVisible({ timeout });
+      await resetUnifiedChatShellToCompact(page);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt === 0) {
+        await page.waitForTimeout(2000);
+      }
+    }
+  }
+  throw lastError;
 }
 
 /** Workbench hub pages (favorites, shared-with-me) with unified shell + v1 hub query. */

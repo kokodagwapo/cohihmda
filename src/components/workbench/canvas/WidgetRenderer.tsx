@@ -76,13 +76,19 @@ const CHART_TYPE_OPTIONS: {
 
 function ChartWidget({
   payload,
+  onTypeChange,
 }: {
   payload: Extract<CanvasWidgetPayload, { type: "chart" }>;
+  onTypeChange?: (type: string) => void;
 }) {
-  const [chartType, setChartType] = useState<string | null>(null);
+  const config = payload.config as { type?: string };
+  const [chartType, setChartType] = useState<string | null>(config?.type ?? null);
+
+  useEffect(() => {
+    setChartType(config?.type ?? null);
+  }, [config?.type]);
 
   if (payload.type !== "chart" || !payload.config) return null;
-  const config = payload.config as any;
   const effectiveConfig = chartType ? { ...config, type: chartType } : config;
 
   return (
@@ -110,7 +116,10 @@ function ChartWidget({
                 ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
                 : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
             }`}
-            onClick={() => setChartType(type)}
+            onClick={() => {
+              setChartType(type);
+              onTypeChange?.(type);
+            }}
           >
             <Icon className="w-3 h-3 mr-0.5" />
             {label}
@@ -1085,7 +1094,19 @@ export function WidgetRenderer({
   if (type === "chart" && payload.type === "chart")
     return (
       <div style={style}>
-        <ChartWidget payload={payload} />
+        <ChartWidget
+          payload={payload}
+          onTypeChange={
+            canEdit && onUpdatePayload
+              ? (nextType) =>
+                  onUpdatePayload({
+                    ...payload,
+                    type: "chart",
+                    config: { ...(payload.config as object), type: nextType },
+                  })
+              : undefined
+          }
+        />
       </div>
     );
   if (type === "kpi" && payload.type === "kpi")

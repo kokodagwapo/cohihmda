@@ -4,8 +4,11 @@ import {
   deliverWorkbenchWidgetActions,
   EXECUTABLE_WORKBENCH_ACTION_TYPES,
   filterExecutableWorkbenchActions,
+  gateWorkbenchActionsForUserQuestion,
   describeWorkbenchActionsApplied,
   shouldForceNewWorkbenchConversation,
+  buildCarryOverContext,
+  shouldForkOnChatTypeChange,
   generateWorkbenchDraftScopeId,
   isMyDashboardCanvasPath,
   setActiveWorkbenchDraftScope,
@@ -20,6 +23,48 @@ import { registerWorkbenchCanvasBridge } from "./workbenchCanvasBridge";
 import type { WidgetAction } from "@/types/widgetActions";
 
 describe("workbenchChatHandoff", () => {
+  it("buildCarryOverContext summarizes recent turns with cap", () => {
+    expect(buildCarryOverContext([])).toBe("");
+    expect(
+      buildCarryOverContext([
+        { role: "user", content: "Build MTD dashboard" },
+        { role: "assistant", content: "Here is your dashboard." },
+      ]),
+    ).toContain("Build MTD dashboard");
+    const long = buildCarryOverContext(
+      [{ role: "user", content: "x".repeat(2000) }],
+      { maxChars: 100 },
+    );
+    expect(long.length).toBeLessThanOrEqual(100);
+  });
+
+  it("shouldForkOnChatTypeChange when session has messages", () => {
+    expect(
+      shouldForkOnChatTypeChange({
+        previousChatType: "workbench",
+        nextChatType: "chat",
+        currentSessionId: "abc",
+        messageCount: 2,
+      }),
+    ).toBe(true);
+    expect(
+      shouldForkOnChatTypeChange({
+        previousChatType: "chat",
+        nextChatType: "chat",
+        currentSessionId: "abc",
+        messageCount: 2,
+      }),
+    ).toBe(false);
+    expect(
+      shouldForkOnChatTypeChange({
+        previousChatType: "workbench",
+        nextChatType: "chat",
+        currentSessionId: null,
+        messageCount: 2,
+      }),
+    ).toBe(false);
+  });
+
   it("shouldForceNewWorkbenchConversation only on first compact turn", () => {
     expect(
       shouldForceNewWorkbenchConversation({

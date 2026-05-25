@@ -53,9 +53,12 @@ export async function waitForWorkbenchCanvasPopulated(
     .toBeGreaterThan(0);
 }
 
-export async function waitForChatInputReady(page: Page): Promise<void> {
+export async function waitForChatInputReady(
+  page: Page,
+  options?: { timeoutMs?: number },
+): Promise<void> {
   const input = unifiedChatMessageInput(page);
-  await expect(input).toBeEnabled({ timeout: 120_000 });
+  await expect(input).toBeEnabled({ timeout: options?.timeoutMs ?? 120_000 });
 }
 
 export async function sendWorkbenchChatTurn(
