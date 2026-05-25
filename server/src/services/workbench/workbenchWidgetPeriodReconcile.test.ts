@@ -496,6 +496,21 @@ describe("workbenchWidgetPeriodReconcile", () => {
     ).toMatch(/funded volume/i);
   });
 
+  it("removes Funded Volume widget on funded volume ask (deterministic title)", () => {
+    const target = findGroupWidgetRemoveTarget(
+      "Remove the funded volume widget from the dashboard.",
+      {
+        groups: [
+          {
+            groupId: "g1",
+            widgets: [{ id: "w-vol", title: "Funded Volume", kind: "registry" }],
+          },
+        ],
+      },
+    );
+    expect(target?.widgetId).toBe("w-vol");
+  });
+
   it("findGroupWidgetRemoveTarget matches Total Volume from phrase only", () => {
     const hit = findGroupWidgetRemoveTarget(
       "Remove the funded volume widget from the dashboard",
