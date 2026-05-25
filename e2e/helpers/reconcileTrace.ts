@@ -1,0 +1,47 @@
+import type { APIRequestContext } from "@playwright/test";
+
+type TraceEntry = {
+  ts: string;
+  question: string;
+  actions: Array<{
+    type?: string;
+    groupId?: string;
+    widgetId?: string;
+    chartType?: string;
+    op?: string;
+  }>;
+};
+
+/**
+ * Fetch last reconcile pipeline entries from the backend (requires WORKBENCH_RECONCILE_DEBUG=1).
+ */
+export async function captureReconcileTrace(
+  request: APIRequestContext,
+  prompt: string,
+  options?: { baseURL?: string; limit?: number },
+): Promise<string> {
+  const base = (options?.baseURL ?? process.env.E2E_BASE_URL ?? "http://localhost:5000").replace(
+    /\/$/,
+    "",
+  );
+  const limit = options?.limit ?? 12;
+  const needle = prompt.trim().slice(0, 40).toLowerCase();
+  if (!needle) return "";
+
+  try {
+    const res = await request.get(
+      `${base}/api/cohi-chat/workbench/reconcile-trace?n=${limit}`,
+    );
+    if (!res.ok()) return "";
+    const body = (await res.json()) as { entries?: TraceEntry[] };
+    const entries = body.entries ?? [];
+    const match =
+      [...entries].reverse().find((e) =>
+        e.question.toLowerCase().includes(needle),
+      ) ?? entries[entries.length - 1];
+    if (!match) return "";
+    return JSON.stringify(match.actions);
+  } catch {
+    return "";
+  }
+}

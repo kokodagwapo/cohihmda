@@ -18,6 +18,7 @@ import {
   assertVisibleAfterHover,
   widgetGroupCollapseToggle,
 } from "../helpers/responsiveControls";
+import { captureReconcileTrace } from "../helpers/reconcileTrace";
 
 const OUT = path.join("test-results", "unique-live");
 const REPORT = path.join(OUT, "REPORT.md");
@@ -26,13 +27,19 @@ type Row = { id: string; name: string; status: string; observed: string };
 
 const rows: Row[] = [];
 
-function record(r: Row) {
-  rows.push(r);
-  fs.appendFileSync(
-    REPORT,
-    `| ${r.id} | ${r.name} | ${r.status} | ${r.observed.replace(/\|/g, "/")} |\n`,
-  );
-  console.log(`\n[${r.id}] ${r.name}: ${r.status}\n  → ${r.observed}`);
+async function record(
+  page: import("@playwright/test").Page,
+  r: Row,
+  tracePrompt?: string,
+) {
+  let observed = r.observed.replace(/\|/g, "/");
+  if ((r.status === "broken" || r.status === "rough") && tracePrompt) {
+    const trace = await captureReconcileTrace(page.request, tracePrompt);
+    if (trace) observed += ` | trace=${trace}`;
+  }
+  rows.push({ ...r, observed });
+  fs.appendFileSync(REPORT, `| ${r.id} | ${r.name} | ${r.status} | ${observed} |\n`);
+  console.log(`\n[${r.id}] ${r.name}: ${r.status}\n  → ${observed}`);
 }
 
 async function sendTurn(page: import("@playwright/test").Page, message: string) {
@@ -76,7 +83,7 @@ test.describe("Unique live workbench @manual-live", () => {
     await sendTurn(page, 'Rename the pull-through rate widget title to "PT Rate".');
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const ok = /PT Rate/i.test(canvas);
-    record({
+    await record(page, {
       id: "U01",
       name: "Rename widget title",
       status: ok ? "works" : "rough",
@@ -88,18 +95,23 @@ test.describe("Unique live workbench @manual-live", () => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Change pull-through by branch chart to a line chart.");
+    await waitForChatInputReady(page);
     await page.waitForTimeout(2000);
     const hasLine = await page
       .locator("#workbench-canvas-root .recharts-line-curve")
       .first()
       .isVisible({ timeout: 15_000 })
       .catch(() => false);
-    record({
-      id: "U02",
-      name: "Chart type line",
-      status: hasLine ? "works" : "rough",
-      observed: `lineCurve=${hasLine}`,
-    });
+    await record(
+      page,
+      {
+        id: "U02",
+        name: "Chart type line",
+        status: hasLine ? "works" : "rough",
+        observed: `lineCurve=${hasLine}`,
+      },
+      "Change pull-through by branch chart to a line chart.",
+    );
   });
 
   test("U03 collapse group then expand manually", async ({ page }) => {
@@ -109,7 +121,7 @@ test.describe("Unique live workbench @manual-live", () => {
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-label", "Expand group");
     await toggle.click();
-    record({
+    await record(page, {
       id: "U03",
       name: "Manual collapse/expand",
       status: "works",
@@ -128,7 +140,7 @@ test.describe("Unique live workbench @manual-live", () => {
     await dup.click();
     await page.waitForTimeout(2000);
     const countAfter = await group.locator(".group\\/widget").count();
-    record({
+    await record(page, {
       id: "U04",
       name: "Toolbar duplicate units",
       status: countAfter > countBefore ? "works" : "broken",
@@ -143,7 +155,7 @@ test.describe("Unique live workbench @manual-live", () => {
       "Give me an executive summary of pipeline health for leadership.",
     );
     const ok = /pipeline|executive|health|fund/i.test(main);
-    record({
+    await record(page, {
       id: "U05",
       name: "Executive summary ask",
       status: ok ? "works" : "rough",
@@ -162,7 +174,7 @@ test.describe("Unique live workbench @manual-live", () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await waitForChatInputReady(page);
     const enabled = await input.isEnabled();
-    record({
+    await record(page, {
       id: "U06",
       name: "Resize during stream",
       status: enabled ? "works" : "broken",
@@ -179,19 +191,29 @@ test.describe("Unique live workbench @manual-live", () => {
         ? ((await footers.last().textContent()) ?? "")
         : "";
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
+    const periodChip = page.locator('[data-testid="group-period-chip"]').first();
+    const chipText = (await periodChip.textContent().catch(() => "")) ?? "";
+    const chipAria = (await periodChip.getAttribute("aria-label").catch(() => "")) ?? "";
     const footerOk = /period|L6M|6 month|Updated/i.test(last);
-    const canvasOk = /L6M|last 6 months|6 month/i.test(canvas);
+    const canvasOk =
+      /L6M|last 6 months|6 month/i.test(canvas) ||
+      /L6M|last 6 months|6 month/i.test(chipText) ||
+      /L6M|last 6 months|6 month/i.test(chipAria);
     const works = footerOk && canvasOk;
-    record({
-      id: "U07",
-      name: "L6M period switch",
-      status: works ? "works" : footerOk ? "broken" : "broken",
-      observed: works
-        ? last.slice(0, 80)
-        : footerOk
-          ? "footer-only"
-          : last.slice(0, 80) || "no-footer",
-    });
+    await record(
+      page,
+      {
+        id: "U07",
+        name: "L6M period switch",
+        status: works ? "works" : footerOk ? "broken" : "broken",
+        observed: works
+          ? last.slice(0, 80)
+          : footerOk
+            ? `footer-only chip=${chipText.slice(0, 30)}`
+            : last.slice(0, 80) || "no-footer",
+      },
+      "Switch the dashboard to last 6 months.",
+    );
   });
 
   test("U08 remove funded volume only", async ({ page }) => {
@@ -200,7 +222,7 @@ test.describe("Unique live workbench @manual-live", () => {
     await sendTurn(page, "Remove the funded volume widget from the dashboard.");
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const gone = !/Total Volume|funded volume/i.test(canvas);
-    record({
+    await record(page, {
       id: "U08",
       name: "Remove funded volume",
       status: gone ? "works" : "broken",
@@ -217,7 +239,7 @@ test.describe("Unique live workbench @manual-live", () => {
     await sendTurn(page, "Add pull-through rate back to the dashboard.");
     const afterAdd = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const back = /pull[- ]?through/i.test(afterAdd);
-    record({
+    await record(page, {
       id: "U09",
       name: "Pull-through remove + re-add",
       status: gone && back ? "works" : gone ? "rough" : "broken",
@@ -232,7 +254,7 @@ test.describe("Unique live workbench @manual-live", () => {
     const widgets = group.locator(".group\\/widget");
     const before = await widgets.count();
     if (before < 2) {
-      record({
+      await record(page, {
         id: "U10",
         name: "Duplicate non-first widget",
         status: "skipped",
@@ -246,7 +268,7 @@ test.describe("Unique live workbench @manual-live", () => {
     await dup.click();
     await page.waitForTimeout(2000);
     const after = await widgets.count();
-    record({
+    await record(page, {
       id: "U10",
       name: "Duplicate non-first widget",
       status: after > before ? "works" : "broken",

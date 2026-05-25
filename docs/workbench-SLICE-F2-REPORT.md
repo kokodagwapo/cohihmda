@@ -50,4 +50,39 @@ Gitignored runtime copy: `test-results/more-live/SLICE-F2-REPORT.md`
 
 ## Reconcile pipeline log
 
-_Not captured (enable `WORKBENCH_RECONCILE_DEBUG=1` if M24 still fails after F3)._
+Set on the **backend** before live runs:
+
+```powershell
+$env:WORKBENCH_RECONCILE_DEBUG="1"
+cd server; npm run dev
+```
+
+Broken/rough rows in this report append `trace=[...]` from `GET /api/cohi-chat/workbench/reconcile-trace?n=12` via [e2e/helpers/reconcileTrace.ts](e2e/helpers/reconcileTrace.ts).
+
+## Post-G1–G6 (slice G)
+
+| Slice | Change |
+|-------|--------|
+| G1 | Ring buffer `pushReconcileTraceEntry`, `GET /reconcile-trace`, e2e `captureReconcileTrace` on broken/rough rows |
+| G2 | `augmentAllTimeStripPeriodOnlyActions` chains `augmentAllTimeCreateWidgetFromQuestion`; WAC regex expanded |
+| G3 | `augmentPeriodSwitchActions` injects `set_period` on teach-only; `group-period-chip` visible label |
+| G4 | U02 `waitForChatInputReady` + 2s; M11 viewport 1440px; M23 canvas match includes full WAC phrase |
+| G5 | Extracted `WorkbenchCanvasSurface`, `WorkbenchEmptyState`, `WorkbenchSaveDialog`, `WorkbenchShareDialog` (`WorkbenchCanvas.tsx` ~4.5k lines; items layer still inline) |
+| G6 | Re-run live suites with `WORKBENCH_RECONCILE_DEBUG=1` after backend restart |
+
+### Expected after backend reload
+
+| ID | Expected | Notes |
+|----|----------|-------|
+| M21 | works | All-time create seeded after period-only strip |
+| M23 | works | `add_registry` for WAC / weighted average coupon |
+| U07 | works | Footer + `group-period-chip` "Last 6 Months" |
+| U02 | works | Same wait pattern as M17 |
+| M11 | works | PPT at 1440px viewport |
+
+```powershell
+$env:WORKBENCH_RECONCILE_DEBUG="1"
+cd server; npm run dev
+# separate shell
+npx playwright test e2e/manual/workbench-more-live.spec.ts e2e/manual/workbench-unique-live.spec.ts --config=playwright.manual-live.config.ts
+```

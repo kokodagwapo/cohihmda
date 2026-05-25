@@ -62,6 +62,7 @@ import {
   type PeriodSelection,
   type PeriodPreset,
   computePresetDateRange,
+  getPeriodPresetMeta,
 } from "@/components/ui/DatePeriodPicker";
 import { Button } from "@/components/ui/button";
 import {
@@ -3131,6 +3132,20 @@ export function WidgetGroup({
     );
   }, [effectiveFilterSync, filters.periodSelection?.preset, items]);
 
+  const groupPeriodChipLabel = useMemo(() => {
+    const ps = filters.periodSelection;
+    if (ps?.type === "preset" && ps.preset) {
+      return getPeriodPresetMeta(ps.preset).title;
+    }
+    if (ps?.type === "year" && ps.year != null) {
+      return String(ps.year);
+    }
+    if (ps?.type === "custom" && ps.dateRange) {
+      return `${ps.dateRange.start} – ${ps.dateRange.end}`;
+    }
+    return null;
+  }, [filters.periodSelection]);
+
   // ─── Build dimension filters (branch, loan officer, dynamic, etc.) for cohi widgets ───
   const groupDimensionFilters = useMemo<DimensionFilter[] | null>(() => {
     const dims: DimensionFilter[] = [];
@@ -3989,6 +4004,16 @@ export function WidgetGroup({
             >
               {title}
             </h3>
+          )}
+
+          {groupPeriodChipLabel && !collapsed && (
+            <span
+              data-testid="group-period-chip"
+              aria-label={groupPeriodChipLabel}
+              className="inline-flex items-center h-5 px-1.5 rounded text-[9px] font-medium shrink-0 text-slate-600 dark:text-slate-300 bg-slate-100/90 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-600/80"
+            >
+              {groupPeriodChipLabel}
+            </span>
           )}
 
           {/* Rename pencil — only on hover */}

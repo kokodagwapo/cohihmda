@@ -98,6 +98,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { WidgetRenderer } from "@/components/workbench/canvas/WidgetRenderer";
 import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
 import { WorkbenchTopToolbar } from "@/components/workbench/canvas/WorkbenchTopToolbar";
+import { WorkbenchCanvasSurface } from "@/components/workbench/canvas/WorkbenchCanvasSurface";
+import { WorkbenchEmptyState } from "@/components/workbench/canvas/WorkbenchEmptyState";
+import { WorkbenchSaveDialog } from "@/components/workbench/canvas/WorkbenchSaveDialog";
+import { WorkbenchShareDialog } from "@/components/workbench/canvas/WorkbenchShareDialog";
 import {
   createLayoutItem,
   type CanvasLayoutItem,
@@ -3857,35 +3861,9 @@ export function WorkbenchCanvas({
                 </div>
               </div>
             )}
-            <style>{`
-            .canvas-freeform .react-resizable-handle {
-              opacity: 0;
-              z-index: 20;
-              width: 14px;
-              height: 14px;
-            }
-            .canvas-freeform .canvas-item:hover .react-resizable-handle {
-              opacity: 1;
-            }
-            .canvas-freeform .react-resizable-handle-se::after,
-            .canvas-freeform .react-resizable-handle-sw::after,
-            .canvas-freeform .react-resizable-handle-ne::after,
-            .canvas-freeform .react-resizable-handle-nw::after {
-              right: 2px;
-              bottom: 2px;
-              width: 7px;
-              height: 7px;
-              border-right-width: 2px;
-              border-bottom-width: 2px;
-              border-color: rgba(100, 116, 139, 0.6);
-            }
-          `}</style>
-            <div
-              className="relative"
-              style={{
-                width: canvasContentWidth,
-                minHeight: canvasContentHeight,
-              }}
+            <WorkbenchCanvasSurface
+              canvasContentWidth={canvasContentWidth}
+              canvasContentHeight={canvasContentHeight}
             >
               {hasItems ? (
                 itemsForRender.map((displayItem, index) => {
@@ -4271,153 +4249,12 @@ export function WorkbenchCanvas({
                   );
                 })
               ) : (
-                <div className="flex items-center justify-center p-8 min-h-[400px]">
-                  <div className="text-center max-w-2xl w-full">
-                    {!embeddedCohiHidden ? (
-                      <>
-                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
-                          <Sparkles className="w-7 h-7 text-white" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
-                          What would you like to review?
-                        </h3>
-                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                          Ask Cohi to prepare dashboards, analyze performance,
-                          or build executive presentations.
-                        </p>
-
-                        {/* Primary: Natural language input */}
-                        <div className="max-w-lg mx-auto mb-6">
-                          <button
-                            type="button"
-                            onClick={() => setShowCohiPanel(true)}
-                            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-lg transition-all group text-left"
-                          >
-                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
-                              <Sparkles className="h-4 w-4 text-white" />
-                            </div>
-                            <span className="flex-1 text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
-                              &ldquo;Prepare a board-ready overview of monthly
-                              performance&rdquo;
-                            </span>
-                            <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 shrink-0 group-hover:text-violet-500 transition-colors" />
-                          </button>
-                        </div>
-
-                        {/* Quick executive prompts */}
-                        <div className="flex flex-wrap gap-2 justify-center mb-6">
-                          {[
-                            {
-                              label: "Executive Dashboard",
-                              prompt:
-                                "Build me a comprehensive executive dashboard with key KPIs, production trends, and pull-through analysis",
-                            },
-                            {
-                              label: "Monthly Performance",
-                              prompt:
-                                "Prepare a monthly performance overview with funded volume, pull-through, turn times, and highlights",
-                            },
-                            {
-                              label: "Pipeline Review",
-                              prompt:
-                                "Show me a pipeline review dashboard with active loans by stage, aging analysis, and fallout risk",
-                            },
-                            {
-                              label: "Board Presentation",
-                              prompt:
-                                "Create a board-ready presentation with executive summary, key metrics, trends, and recommendations",
-                            },
-                          ].map((q) => (
-                            <button
-                              key={q.label}
-                              type="button"
-                              onClick={() => {
-                                setShowCohiPanel(true);
-                                setTimeout(
-                                  () => cohiSendMessage(q.prompt),
-                                  300,
-                                );
-                              }}
-                              className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
-                            >
-                              {q.label}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                          <LayoutDashboard className="w-7 h-7 text-slate-500 dark:text-slate-400" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
-                          Your canvas is empty
-                        </h3>
-                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                          Add widgets from the library or browse templates
-                          below.
-                        </p>
-                      </>
-                    )}
-
-                    {/* Secondary: Browse library */}
-                    <div className="flex items-center justify-center gap-4">
-                      <div className="h-px flex-1 max-w-[60px] bg-slate-200 dark:bg-slate-700" />
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                        or browse templates
-                      </span>
-                      <div className="h-px flex-1 max-w-[60px] bg-slate-200 dark:bg-slate-700" />
-                    </div>
-                    <div className="flex gap-2 justify-center mt-3">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="gap-2 text-slate-500 dark:text-slate-400 text-xs"
-                          >
-                            <LayoutDashboard className="h-3.5 w-3.5" />
-                            Dashboard Library
-                            <ChevronDown className="h-3 w-3" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="center"
-                          className="w-72 max-h-80 overflow-y-auto"
-                        >
-                          {DASHBOARD_SECTION_GROUPS.map((group, gi) => (
-                            <React.Fragment key={group.label}>
-                              {gi > 0 && <DropdownMenuSeparator />}
-                              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-slate-400">
-                                {group.label}
-                              </DropdownMenuLabel>
-                              {group.items.map((section) => {
-                                const Icon = section.icon;
-                                return (
-                                  <DropdownMenuItem
-                                    key={section.id}
-                                    onClick={() =>
-                                      addDashboardSection(
-                                        section.id,
-                                        section.title,
-                                      )
-                                    }
-                                    className="gap-2"
-                                  >
-                                    <Icon
-                                      className={`h-4 w-4 ${section.iconClass ?? "text-slate-500"}`}
-                                    />
-                                    <span>{section.title}</span>
-                                  </DropdownMenuItem>
-                                );
-                              })}
-                            </React.Fragment>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                </div>
+                <WorkbenchEmptyState
+                  embeddedCohiHidden={embeddedCohiHidden}
+                  onOpenCohi={() => setShowCohiPanel(true)}
+                  onQuickPrompt={(prompt) => cohiSendMessage(prompt)}
+                  onAddDashboardSection={addDashboardSection}
+                />
               )}
               {annotations.length > 0 && (
                 <svg
@@ -4532,7 +4369,7 @@ export function WorkbenchCanvas({
                   </g>
                 </svg>
               )}
-            </div>
+            </WorkbenchCanvasSurface>
           </div>
         </div>
 
@@ -4572,459 +4409,51 @@ export function WorkbenchCanvas({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        <WorkbenchShareDialog
+          open={shareDialogOpen}
+          onOpenChange={setShareDialogOpen}
+          canvasVisibility={canvasVisibility}
+          setCanvasVisibility={setCanvasVisibility}
+          userRole={user?.role}
+          tenantUsers={tenantUsers}
+          tenantUsersLoaded={tenantUsersLoaded}
+          tenantGroups={tenantGroups}
+          tenantGroupsLoaded={tenantGroupsLoaded}
+          canvasShares={canvasShares}
+          toggleSharedUser={toggleSharedUser}
+          toggleSharedGroup={toggleSharedGroup}
+          setSharePermission={setSharePermission}
+          canTransferOwnership={canTransferOwnership}
+          transferOwnershipUserId={transferOwnershipUserId}
+          setTransferOwnershipUserId={setTransferOwnershipUserId}
+          transferOwnershipSaving={transferOwnershipSaving}
+          handleTransferOwnership={handleTransferOwnership}
+          handleSaveVisibility={handleSaveVisibility}
+          visibilitySaving={visibilitySaving}
+          hasItems={hasItems}
+          onOpenReportBuilder={() => {
+            setShowReportBuilder(true);
+            setShareDialogOpen(false);
+          }}
+          onEmailScreenshot={() => {
+            handleEmailScreenshot();
+            setShareDialogOpen(false);
+          }}
+          onCopyShareLink={handleCopyShareLink}
+          onEmailLink={handleEmailLink}
+          shareFavorited={shareFavorited}
+          onToggleFavorite={handleToggleFavorite}
+          favoriteLoading={favoriteLoading}
+        />
 
-        <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Share2 className="h-5 w-5 text-slate-500" />
-                Share canvas
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              {/* Visibility selector */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Visibility
-                </label>
-                <div className="space-y-1.5">
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
-                      canvasVisibility === "private"
-                        ? "border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800",
-                    )}
-                    onClick={() => setCanvasVisibility("private")}
-                  >
-                    <Lock className="h-4 w-4 text-slate-500 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-slate-700 dark:text-slate-200">
-                        Private
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Only you can view and edit
-                      </div>
-                    </div>
-                    {canvasVisibility === "private" && (
-                      <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
-                      canvasVisibility === "shared"
-                        ? "border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800",
-                    )}
-                    onClick={() => setCanvasVisibility("shared")}
-                  >
-                    <Users className="h-4 w-4 text-slate-500 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-slate-700 dark:text-slate-200">
-                        Specific people
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Share with selected users (read-only)
-                      </div>
-                    </div>
-                    {canvasVisibility === "shared" && (
-                      <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
-                    )}
-                  </button>
-                  {/* Global option — only for admins */}
-                  {(
-                    ["super_admin", "platform_admin", "tenant_admin"] as const
-                  ).includes(user?.role as any) && (
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
-                        canvasVisibility === "global"
-                          ? "border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30"
-                          : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800",
-                      )}
-                      onClick={() => setCanvasVisibility("global")}
-                    >
-                      <Globe className="h-4 w-4 text-slate-500 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-slate-700 dark:text-slate-200">
-                          Global (entire tenant)
-                        </div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                          All users in this organization can view
-                        </div>
-                      </div>
-                      {canvasVisibility === "global" && (
-                        <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Users + Groups with permission — shown when visibility is 'shared' */}
-              {canvasVisibility === "shared" && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Users
-                    </label>
-                    {tenantUsers.length > 0 ? (
-                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
-                        {tenantUsers.map((u) => {
-                          const shareEntry = canvasShares.find(
-                            (s) => s.userId === u.id,
-                          );
-                          const selected = !!shareEntry;
-                          return (
-                            <div
-                              key={u.id}
-                              className={cn(
-                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-                                selected
-                                  ? "bg-violet-50 dark:bg-violet-900/20"
-                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                              )}
-                            >
-                              <button
-                                type="button"
-                                className="flex items-center gap-2.5 flex-1 min-w-0"
-                                onClick={() => toggleSharedUser(u.id)}
-                              >
-                                <div
-                                  className={cn(
-                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
-                                    selected
-                                      ? "bg-violet-600 border-violet-600 text-white"
-                                      : "border-slate-300 dark:border-slate-600",
-                                  )}
-                                >
-                                  {selected && <Check className="h-3 w-3" />}
-                                </div>
-                                <div className="flex-1 min-w-0 truncate">
-                                  <span className="text-slate-700 dark:text-slate-200">
-                                    {u.full_name || u.email}
-                                  </span>
-                                  {u.full_name && (
-                                    <span className="ml-1.5 text-xs text-slate-400">
-                                      {u.email}
-                                    </span>
-                                  )}
-                                </div>
-                              </button>
-                              {selected && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 gap-1 text-xs shrink-0"
-                                    >
-                                      {shareEntry.permission === "editor"
-                                        ? "Editor"
-                                        : "Viewer"}
-                                      <ChevronDown className="h-3 w-3" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          u.id,
-                                          "user",
-                                          "viewer",
-                                        )
-                                      }
-                                    >
-                                      Viewer
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          u.id,
-                                          "user",
-                                          "editor",
-                                        )
-                                      }
-                                    >
-                                      Editor
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
-                        {tenantUsersLoaded
-                          ? "No users found in this tenant."
-                          : "Loading users..."}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Groups
-                    </label>
-                    {tenantGroupsLoaded && tenantGroups.length > 0 ? (
-                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
-                        {tenantGroups.map((g) => {
-                          const shareEntry = canvasShares.find(
-                            (s) => s.groupId === g.id,
-                          );
-                          const selected = !!shareEntry;
-                          return (
-                            <div
-                              key={g.id}
-                              className={cn(
-                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-                                selected
-                                  ? "bg-violet-50 dark:bg-violet-900/20"
-                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                              )}
-                            >
-                              <button
-                                type="button"
-                                className="flex items-center gap-2.5 flex-1 min-w-0"
-                                onClick={() => toggleSharedGroup(g.id)}
-                              >
-                                <div
-                                  className={cn(
-                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
-                                    selected
-                                      ? "bg-violet-600 border-violet-600 text-white"
-                                      : "border-slate-300 dark:border-slate-600",
-                                  )}
-                                >
-                                  {selected && <Check className="h-3 w-3" />}
-                                </div>
-                                <span className="text-slate-700 dark:text-slate-200 truncate">
-                                  {g.name}
-                                </span>
-                              </button>
-                              {selected && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 gap-1 text-xs shrink-0"
-                                    >
-                                      {shareEntry.permission === "editor"
-                                        ? "Editor"
-                                        : "Viewer"}
-                                      <ChevronDown className="h-3 w-3" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          g.id,
-                                          "group",
-                                          "viewer",
-                                        )
-                                      }
-                                    >
-                                      Viewer
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          g.id,
-                                          "group",
-                                          "editor",
-                                        )
-                                      }
-                                    >
-                                      Editor
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
-                        {tenantGroupsLoaded
-                          ? "No groups. Admins can create groups in Admin → Groups."
-                          : "Loading groups..."}
-                      </p>
-                    )}
-                  </div>
-                  {canvasShares.length > 0 && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {canvasShares.length} share
-                      {canvasShares.length !== 1 ? "s" : ""} (Viewer =
-                      read-only, Editor = can edit)
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {canTransferOwnership && (
-                <div className="rounded-lg border border-amber-200/80 dark:border-amber-800/50 bg-amber-50/40 dark:bg-amber-950/20 p-3 space-y-2">
-                  <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                    Transfer ownership
-                  </label>
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
-                    Make another user the canvas owner. You keep edit access as
-                    an editor. Use this when a client should own a canvas you
-                    created (e.g. after moving off a platform admin account).
-                  </p>
-                  <Select
-                    value={transferOwnershipUserId || "__none__"}
-                    onValueChange={(v) =>
-                      setTransferOwnershipUserId(v === "__none__" ? "" : v)
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose new owner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Choose user…</SelectItem>
-                      {tenantUsers.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.full_name
-                            ? `${u.full_name} (${u.email})`
-                            : u.email}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full border-amber-300/80"
-                    disabled={
-                      !transferOwnershipUserId ||
-                      transferOwnershipSaving ||
-                      !tenantUsersLoaded
-                    }
-                    onClick={handleTransferOwnership}
-                  >
-                    {transferOwnershipSaving
-                      ? "Transferring…"
-                      : "Transfer ownership"}
-                  </Button>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex flex-col gap-2 pt-1">
-                <Button
-                  onClick={handleSaveVisibility}
-                  disabled={visibilitySaving}
-                  className="w-full"
-                >
-                  {visibilitySaving ? "Saving..." : "Save sharing settings"}
-                </Button>
-              </div>
-              <div className="h-px bg-slate-200 dark:bg-slate-700" />
-              <div className="space-y-2">
-                <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-0.5">
-                  Export canvas
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowReportBuilder(true);
-                      setShareDialogOpen(false);
-                    }}
-                    disabled={!hasItems}
-                    className="w-full gap-2"
-                  >
-                    <Presentation className="h-4 w-4" />
-                    PowerPoint Editor
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      handleEmailScreenshot();
-                      setShareDialogOpen(false);
-                    }}
-                    className="w-full gap-2"
-                  >
-                    <Mail className="h-4 w-4" />
-                    Copy image for email
-                  </Button>
-                </div>
-              </div>
-              <div className="h-px bg-slate-200 dark:bg-slate-700" />
-              <div className="flex flex-col gap-2">
-                <Button
-                  variant="outline"
-                  onClick={handleCopyShareLink}
-                  className="w-full gap-2"
-                >
-                  <LinkIcon className="h-4 w-4" />
-                  Copy link
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleEmailLink}
-                  className="w-full gap-2"
-                >
-                  <Mail className="h-4 w-4" />
-                  Email link
-                </Button>
-                <Button
-                  variant={shareFavorited ? "secondary" : "outline"}
-                  onClick={handleToggleFavorite}
-                  className="w-full"
-                  disabled={favoriteLoading}
-                >
-                  {shareFavorited
-                    ? "Remove from bookmarks"
-                    : "Add to bookmarks"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Save className="h-5 w-5 text-slate-500" />
-                Save canvas
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Title
-                </label>
-                <Input
-                  placeholder="Untitled canvas"
-                  value={saveTitle}
-                  onChange={(e) => setSaveTitle(e.target.value)}
-                  className="mt-2"
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => setSaveDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleSaveConfirm} disabled={isSaving}>
-                  {isSaving ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <WorkbenchSaveDialog
+          open={saveDialogOpen}
+          onOpenChange={setSaveDialogOpen}
+          saveTitle={saveTitle}
+          setSaveTitle={setSaveTitle}
+          onConfirm={handleSaveConfirm}
+          isSaving={isSaving}
+        />
 
         <Dialog open={aiBackgroundOpen} onOpenChange={setAiBackgroundOpen}>
           <DialogContent className="sm:max-w-md">

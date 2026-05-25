@@ -283,16 +283,36 @@ export function augmentPeriodSwitchActions(
   const wholeDashboard = /\b(whole|entire|full)\s+dashboard\b/.test(q);
   const targetGroups = wholeDashboard ? groups : [groups[0]];
 
-  const kept = typed.filter(
-    (a) => a.type !== "create_widget" && a.type !== "create_dashboard",
-  );
-
   const periodActions: MutableWorkbenchActionLike[] = targetGroups.map((g) => ({
     type: "modify_group",
     groupId: g.groupId,
     operations: [{ op: "set_period", preset: period }],
     explanation: `Set dashboard period to ${period}`,
   }));
+
+  const WORKBENCH_MUTATION_TYPES = new Set([
+    "modify_group",
+    "create_widget",
+    "create_dashboard",
+    "modify_widget",
+    "delete_widget",
+    "add_registry",
+    "remove_widget",
+    "restore_widget",
+  ]);
+  const hasWorkbenchMutations = typed.some((a) =>
+    WORKBENCH_MUTATION_TYPES.has(String(a.type ?? "")),
+  );
+
+  if (!hasRecreate && !hasWorkbenchMutations) {
+    actions.length = 0;
+    actions.push(...periodActions);
+    return;
+  }
+
+  const kept = typed.filter(
+    (a) => a.type !== "create_widget" && a.type !== "create_dashboard",
+  );
 
   actions.length = 0;
   actions.push(...periodActions, ...kept);
@@ -344,7 +364,13 @@ function inferAllTimeKpiTitle(userQuestion: string): string {
 /** Drop period-only modify_group ops mis-routed for all-time KPI asks. */
 export function augmentAllTimeStripPeriodOnlyActions(
   actions: unknown[],
-  options?: { userQuestion?: string },
+  options?: {
+    userQuestion?: string;
+    canvasState?: {
+      totalItems?: number;
+      groups?: Array<{ groupId: string }>;
+    };
+  },
 ): void {
   if (!isAllTimeRequest(options?.userQuestion)) return;
   const typed = actions as MutableWorkbenchActionLike[];
@@ -357,6 +383,12 @@ export function augmentAllTimeStripPeriodOnlyActions(
   if (filtered.length === typed.length) return;
   actions.length = 0;
   actions.push(...filtered);
+  if (options?.canvasState) {
+    augmentAllTimeCreateWidgetFromQuestion(actions, {
+      userQuestion: options.userQuestion,
+      canvasState: options.canvasState,
+    });
+  }
 }
 
 /**
@@ -949,7 +981,8 @@ export function augmentAddRegistryWidgetFromQuestion(
 
   const additions: Array<{ pattern: RegExp; defId: string; label: string }> = [
     {
-      pattern: /\b(wac|weighted average coupon)\b/i,
+      pattern:
+        /\b(wac|weighted[- ]?average[- ]?coupon|average[- ]?coupon)\b/i,
       defId: "company-scorecard-wac",
       label: "WAC",
     },
@@ -1236,4 +1269,84 @@ function reconcileCohiDashboardWidget(
   if (fc.filterable === false && preset) {
     fc.filterable = true;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reconcile trace ring buffer (for WORKBENCH_RECONCILE_DEBUG + live e2e)
+// ---------------------------------------------------------------------------
+
+export type ReconcileTraceActionSummary = {
+  type?: string;
+  groupId?: string;
+  widgetId?: string;
+  chartType?: string;
+  op?: string;
+};
+
+export type ReconcileTraceEntry = {
+  ts: string;
+  question: string;
+  actions: ReconcileTraceActionSummary[];
+};
+
+const RECONCILE_TRACE_MAX = 32;
+const reconcileTraceBuffer: ReconcileTraceEntry[] = [];
+
+export function summarizeActionsForReconcileTrace(
+  actions: unknown[],
+): ReconcileTraceActionSummary[] {
+  const out: ReconcileTraceActionSummary[] = [];
+  for (const raw of actions) {
+    if (!raw || typeof raw !== "object") continue;
+    const a = raw as {
+      type?: string;
+      groupId?: string;
+      widgetId?: string;
+      instanceId?: string;
+      configOverrides?: { chartType?: string };
+      operations?: Array<{ op?: string; preset?: string }>;
+    };
+    const summary: ReconcileTraceActionSummary = {
+      type: a.type,
+      groupId: a.groupId,
+      widgetId: a.widgetId ?? a.instanceId,
+      chartType: a.configOverrides?.chartType,
+    };
+    if (a.type === "modify_group" && Array.isArray(a.operations)) {
+      const ops = a.operations.map((o) => o.op).filter(Boolean);
+      if (ops.length) summary.op = ops.join(",");
+      const periodOp = a.operations.find((o) => o.op === "set_period");
+      if (periodOp?.preset) {
+        summary.op = `set_period:${periodOp.preset}`;
+      }
+    }
+    out.push(summary);
+  }
+  return out;
+}
+
+/** Record a post-reconcile action list (always writes; HTTP endpoint gated separately). */
+export function pushReconcileTraceEntry(
+  question: string | undefined,
+  actions: unknown[],
+): void {
+  const q = (question ?? "").trim();
+  if (!q) return;
+  reconcileTraceBuffer.push({
+    ts: new Date().toISOString(),
+    question: q.slice(0, 200),
+    actions: summarizeActionsForReconcileTrace(actions),
+  });
+  while (reconcileTraceBuffer.length > RECONCILE_TRACE_MAX) {
+    reconcileTraceBuffer.shift();
+  }
+}
+
+export function getReconcileTraceBuffer(limit = 10): ReconcileTraceEntry[] {
+  const n = Math.max(1, Math.min(limit, RECONCILE_TRACE_MAX));
+  return reconcileTraceBuffer.slice(-n);
+}
+
+export function clearReconcileTraceBuffer(): void {
+  reconcileTraceBuffer.length = 0;
 }

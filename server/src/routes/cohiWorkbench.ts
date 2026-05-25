@@ -74,6 +74,8 @@ import {
   isPeriodSwitchOnlyRequest,
   isAnalyticalOnlyRequest,
   shouldBuildExecutiveDashboardOnEmptyCanvas,
+  pushReconcileTraceEntry,
+  getReconcileTraceBuffer,
   type WorkbenchLlmPreset,
 } from "../services/workbench/workbenchWidgetPeriodReconcile.js";
 import {
@@ -1439,6 +1441,21 @@ When replacing a catalog widget with a SQL-backed widget, use the tenant schema 
  * GET /api/cohi-chat/workbench/personas
  * Returns the available agent personas for the workbench panel UI.
  */
+/**
+ * GET /api/cohi-chat/workbench/reconcile-trace?n=10
+ * Last reconcile pipeline snapshots (local/e2e only when WORKBENCH_RECONCILE_DEBUG=1).
+ */
+router.get("/reconcile-trace", authenticateToken, (req, res) => {
+  if (process.env.WORKBENCH_RECONCILE_DEBUG !== "1") {
+    return res.status(404).json({ error: "Reconcile trace disabled" });
+  }
+  const n = Math.min(
+    32,
+    Math.max(1, parseInt(String(req.query.n ?? "10"), 10) || 10),
+  );
+  res.json({ entries: getReconcileTraceBuffer(n) });
+});
+
 router.get("/personas", authenticateToken, (_req, res) => {
   res.json({
     personas: Object.values(AGENT_PERSONAS).map((p) => ({
@@ -1822,6 +1839,12 @@ export async function runWorkbenchChatTurn(
       });
       augmentAllTimeStripPeriodOnlyActions(validActions, {
         userQuestion: question,
+        canvasState: canvasState
+          ? {
+              totalItems: canvasState.totalItems,
+              groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
+            }
+          : undefined,
       });
       augmentAllTimeCreateWidgetFromQuestion(validActions, {
         userQuestion: question,
@@ -1885,6 +1908,7 @@ export async function runWorkbenchChatTurn(
         rewriteGroupedDeleteWidgetActions(validActions, canvasRefs);
         normalizeWorkbenchWidgetIds(validActions, canvasRefs);
 
+        pushReconcileTraceEntry(question, validActions);
         if (process.env.WORKBENCH_RECONCILE_DEBUG === "1") {
           console.log(
             `[CohiWorkbench] reconcile pipeline question=${JSON.stringify(question?.slice(0, 80))} actions=${JSON.stringify(

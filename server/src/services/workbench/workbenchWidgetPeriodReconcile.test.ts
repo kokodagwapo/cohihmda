@@ -144,6 +144,23 @@ describe("workbenchWidgetPeriodReconcile", () => {
     expect(actions[0].type).toBe("teach");
   });
 
+  it("seeds create_widget after stripping period-only on all-time", () => {
+    const actions = [
+      {
+        type: "modify_group",
+        groupId: "grp-1",
+        operations: [{ op: "set_period", preset: "YTD" }],
+      },
+    ];
+    augmentAllTimeStripPeriodOnlyActions(actions, {
+      userQuestion: "Show funded volume as an all-time KPI",
+      canvasState: { totalItems: 3, groups: [{ groupId: "grp-1" }] },
+    });
+    expect(actions.some((a) => (a as { type: string }).type === "create_widget")).toBe(
+      true,
+    );
+  });
+
   it("stamps filterable false on LLM modify_group add_cohi for all-time", () => {
     const actions = [
       {
@@ -225,6 +242,19 @@ describe("workbenchWidgetPeriodReconcile", () => {
     expect(actions.some((a) => a.type === "create_widget")).toBe(false);
     expect(actions[0].type).toBe("modify_group");
     expect(actions[0].operations?.[0]).toEqual({ op: "set_period", preset: "YTD" });
+  });
+
+  it("injects set_period from teach-only on period switch", () => {
+    const actions = [{ type: "teach", message: "Switching period for you." }];
+    augmentPeriodSwitchActions(actions, {
+      userQuestion: "Switch the dashboard to last 6 months.",
+      canvasState: { totalItems: 4, groups: [{ groupId: "g1" }] },
+    });
+    expect(actions).toHaveLength(1);
+    expect(actions[0].type).toBe("modify_group");
+    expect(
+      (actions[0] as { operations: Array<{ op: string; preset: string }> }).operations[0],
+    ).toEqual({ op: "set_period", preset: "L6M" });
   });
 
   it("replaces recreate widgets with modify_group set_period on switch-only", () => {

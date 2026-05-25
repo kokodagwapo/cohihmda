@@ -22,6 +22,7 @@ import {
   assertVisibleAfterHover,
   widgetGroupCollapseToggle,
 } from "../helpers/responsiveControls";
+import { captureReconcileTrace } from "../helpers/reconcileTrace";
 
 const OUT = path.join("test-results", "more-live");
 const REPORT = path.join(OUT, "REPORT.md");
@@ -32,14 +33,23 @@ type Row = { id: string; name: string; status: Status; observed: string };
 
 const rows: Row[] = [];
 
-function record(r: Row) {
+async function record(
+  page: import("@playwright/test").Page,
+  r: Row,
+  tracePrompt?: string,
+) {
+  let observed = r.observed.replace(/\|/g, "/");
+  if ((r.status === "broken" || r.status === "rough") && tracePrompt) {
+    const trace = await captureReconcileTrace(page.request, tracePrompt);
+    if (trace) observed += ` | trace=${trace}`;
+  }
   fs.mkdirSync(OUT, { recursive: true });
-  rows.push(r);
+  rows.push({ ...r, observed });
   fs.appendFileSync(
     REPORT,
-    `| ${r.id} | ${r.name} | **${r.status}** | ${r.observed.replace(/\|/g, "/")} |\n`,
+    `| ${r.id} | ${r.name} | **${r.status}** | ${observed} |\n`,
   );
-  console.log(`\n[${r.id}] ${r.name}: ${r.status}\n  → ${r.observed}`);
+  console.log(`\n[${r.id}] ${r.name}: ${r.status}\n  → ${observed}`);
 }
 
 async function skipIfLoggedOut(page: import("@playwright/test").Page) {
@@ -88,7 +98,7 @@ test.describe("More live workbench @manual-live", () => {
     const suggestions = page.getByTestId("unified-chat-suggestions");
     const visible = await suggestions.isVisible({ timeout: 8_000 }).catch(() => false);
     if (!visible) {
-      record({
+      await record(page, {
         id: "M01",
         name: "Suggested prompt cards",
         status: "skipped",
@@ -97,7 +107,7 @@ test.describe("More live workbench @manual-live", () => {
       return;
     }
     const count = await suggestions.locator("button").count();
-    record({
+    await record(page, {
       id: "M01",
       name: "Suggested prompt cards",
       status: count > 0 ? "works" : "broken",
@@ -116,7 +126,7 @@ test.describe("More live workbench @manual-live", () => {
     await expect(listbox).toBeVisible({ timeout: 10_000 });
     const chatOpt = listbox.getByRole("option", { name: "Chat", exact: true });
     if (!(await chatOpt.isVisible().catch(() => false))) {
-      record({
+      await record(page, {
         id: "M02",
         name: "Workbench → Chat fork",
         status: "skipped",
@@ -128,7 +138,7 @@ test.describe("More live workbench @manual-live", () => {
     await page.waitForTimeout(2000);
     const fork = await page.getByTestId("conversation-fork-chips").isVisible().catch(() => false);
     const toast = await page.getByText(/fork|branched|new conversation/i).isVisible().catch(() => false);
-    record({
+    await record(page, {
       id: "M02",
       name: "Workbench → Chat fork",
       status: fork || toast ? "works" : "rough",
@@ -149,7 +159,7 @@ test.describe("More live workbench @manual-live", () => {
       .isVisible()
       .catch(() => false);
     if (open) await page.keyboard.press("Escape");
-    record({
+    await record(page, {
       id: "M03",
       name: "Share canvas dialog",
       status: open && hasShareCopy ? "works" : open ? "rough" : "broken",
@@ -177,7 +187,7 @@ test.describe("More live workbench @manual-live", () => {
     );
     const ok = await stop.first().isVisible({ timeout: 5_000 }).catch(() => false);
     if (ok) await stop.click({ force: true });
-    record({
+    await record(page, {
       id: "M04",
       name: "Edit widget → Stop editing",
       status: ok ? "works" : "broken",
@@ -197,7 +207,7 @@ test.describe("More live workbench @manual-live", () => {
     const dialog = page.getByRole("dialog");
     const open = await dialog.isVisible({ timeout: 10_000 }).catch(() => false);
     if (open) await page.keyboard.press("Escape");
-    record({
+    await record(page, {
       id: "M05",
       name: "Maximize widget dialog",
       status: open ? "works" : "broken",
@@ -211,7 +221,7 @@ test.describe("More live workbench @manual-live", () => {
     await sendTurn(page, "Remove the funded volume widget from the dashboard.");
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const gone = !/Total Volume|funded volume/i.test(canvas);
-    record({
+    await record(page, {
       id: "M06",
       name: "Remove funded volume",
       status: gone ? "works" : "broken",
@@ -227,7 +237,7 @@ test.describe("More live workbench @manual-live", () => {
       "Switch the dashboard to prior year (last year).",
     );
     const ok = /period|prior|last year|PY|Updated/i.test(actionSummary);
-    record({
+    await record(page, {
       id: "M07",
       name: "PY period switch",
       status: ok ? "works" : "rough",
@@ -251,7 +261,7 @@ test.describe("More live workbench @manual-live", () => {
     const answered = /because|driver|lower|volume|month/i.test(
       `${canvas} ${(await page.getByTestId("cohi-chat-panel").textContent()) ?? ""}`,
     );
-    record({
+    await record(page, {
       id: "M08",
       name: "Analytical why — no extra build",
       status: noExtraGroup && answered ? "works" : noExtraGroup ? "rough" : "broken",
@@ -265,7 +275,7 @@ test.describe("More live workbench @manual-live", () => {
     await sendTurn(page, 'Rename the dashboard group title to "Board KPIs".');
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const ok = /Board KPIs/i.test(canvas);
-    record({
+    await record(page, {
       id: "M09",
       name: "Rename group title",
       status: ok ? "works" : "rough",
@@ -287,7 +297,7 @@ test.describe("More live workbench @manual-live", () => {
       .isVisible()
       .catch(() => false);
     const inputOk = await unifiedChatMessageInput(page).isEnabled().catch(() => false);
-    record({
+    await record(page, {
       id: "M10",
       name: "Research chat type",
       status: workspace || researchPlaceholder || inputOk ? "works" : "rough",
@@ -296,7 +306,7 @@ test.describe("More live workbench @manual-live", () => {
   });
 
   test("M11 PowerPoint editor opens", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const ppt = page
@@ -304,7 +314,7 @@ test.describe("More live workbench @manual-live", () => {
       .or(page.getByTitle(/PowerPoint deck/i));
     const pptVisible = await ppt.first().isVisible({ timeout: 10_000 }).catch(() => false);
     if (!pptVisible) {
-      record({
+      await record(page, {
         id: "M11",
         name: "PowerPoint editor entry",
         status: "skipped",
@@ -316,7 +326,7 @@ test.describe("More live workbench @manual-live", () => {
     const dialog = page.getByRole("dialog");
     const builder = await dialog.isVisible({ timeout: 15_000 }).catch(() => false);
     if (builder) await page.keyboard.press("Escape");
-    record({
+    await record(page, {
       id: "M11",
       name: "PowerPoint editor entry",
       status: builder ? "works" : "broken",
@@ -334,7 +344,7 @@ test.describe("More live workbench @manual-live", () => {
     await waitForWorkbenchCanvasPopulated(page, { timeoutMs: 120_000 }).catch(() => {});
     const afterAdd = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const back = /pull[- ]?through/i.test(afterAdd);
-    record({
+    await record(page, {
       id: "M12",
       name: "Pull-through remove + re-add",
       status: gone && back ? "works" : gone ? "rough" : "broken",
@@ -353,7 +363,7 @@ test.describe("More live workbench @manual-live", () => {
     await expect(listbox).toBeVisible({ timeout: 10_000 });
     const ib = listbox.getByRole("option", { name: "Insight builder", exact: true });
     if (!(await ib.isVisible().catch(() => false))) {
-      record({
+      await record(page, {
         id: "M13",
         name: "Insight builder switch",
         status: "skipped",
@@ -364,7 +374,7 @@ test.describe("More live workbench @manual-live", () => {
     await ib.click();
     await page.waitForTimeout(2500);
     const fork = await page.getByTestId("conversation-fork-chips").isVisible().catch(() => false);
-    record({
+    await record(page, {
       id: "M13",
       name: "Insight builder switch",
       status: fork ? "works" : "rough",
@@ -381,7 +391,7 @@ test.describe("More live workbench @manual-live", () => {
     const panel = page.getByTestId("cohi-chat-panel");
     const shell = page.getByTestId("unified-chat-shell");
     const ok = (await panel.isVisible().catch(() => false)) || (await shell.isVisible());
-    record({
+    await record(page, {
       id: "M14",
       name: "Chat panel in insights split",
       status: ok ? "works" : "broken",
@@ -395,7 +405,7 @@ test.describe("More live workbench @manual-live", () => {
     await sendTurn(page, "Remove the funded units widget from the dashboard.");
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const gone = !/Total Units|Funded Units/i.test(canvas);
-    record({
+    await record(page, {
       id: "M16",
       name: "Remove funded units",
       status: gone ? "works" : "broken",
@@ -414,16 +424,20 @@ test.describe("More live workbench @manual-live", () => {
     const lineCurve = page.locator("#workbench-canvas-root .recharts-line-curve").first();
     const hasLine = await lineCurve.isVisible({ timeout: 15_000 }).catch(() => false);
     const footerOk = /line|chart|pull[- ]?through/i.test(actionSummary);
-    record({
-      id: "M17",
-      name: "Chart type line",
-      status: hasLine ? "works" : footerOk ? "broken" : "broken",
-      observed: hasLine
-        ? `lineCurve=true`
-        : footerOk
-          ? `footer-only`
-          : `lineCurve=false footer=false`,
-    });
+    await record(
+      page,
+      {
+        id: "M17",
+        name: "Chart type line",
+        status: hasLine ? "works" : footerOk ? "broken" : "broken",
+        observed: hasLine
+          ? `lineCurve=true`
+          : footerOk
+            ? `footer-only`
+            : `lineCurve=false footer=false`,
+      },
+      "Change pull-through by branch chart to a line chart.",
+    );
   });
 
   test("M18 duplicate widget toolbar", async ({ page }) => {
@@ -437,7 +451,7 @@ test.describe("More live workbench @manual-live", () => {
     await dup.click();
     await page.waitForTimeout(2000);
     const countAfter = await group.locator(".group\\/widget").count();
-    record({
+    await record(page, {
       id: "M18",
       name: "Duplicate widget",
       status: countAfter > countBefore ? "works" : "rough",
@@ -450,7 +464,7 @@ test.describe("More live workbench @manual-live", () => {
     await skipIfLoggedOut(page);
     const card = page.getByText("Workbench", { exact: true }).first();
     const visible = await card.isVisible().catch(() => false);
-    record({
+    await record(page, {
       id: "M19",
       name: "Workbench prompt card",
       status: visible ? "works" : "rough",
@@ -464,7 +478,7 @@ test.describe("More live workbench @manual-live", () => {
     await sendTurn(page, 'Rename pull-through widget title to "PT %".');
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const ok = /PT\s*%|PT %/i.test(canvas);
-    record({
+    await record(page, {
       id: "M20",
       name: "Rename pull-through title",
       status: ok ? "works" : "broken",
@@ -485,12 +499,16 @@ test.describe("More live workbench @manual-live", () => {
     const ok =
       /all[- ]?time|all time|since inception|lifetime|Added all-time KPI/i.test(last) ||
       /all[- ]?time|since inception/i.test(canvas);
-    record({
-      id: "M21",
-      name: "All-time KPI",
-      status: ok ? "works" : "broken",
-      observed: last.slice(0, 80) || canvas.slice(0, 40),
-    });
+    await record(
+      page,
+      {
+        id: "M21",
+        name: "All-time KPI",
+        status: ok ? "works" : "broken",
+        observed: last.slice(0, 80) || canvas.slice(0, 40),
+      },
+      "Show funded volume as an all-time KPI.",
+    );
   });
 
   test("M22 remove pull-through only", async ({ page }) => {
@@ -499,7 +517,7 @@ test.describe("More live workbench @manual-live", () => {
     await sendTurn(page, "Remove the pull-through rate widget from the dashboard.");
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     const gone = !/pull[- ]?through/i.test(canvas);
-    record({
+    await record(page, {
       id: "M22",
       name: "Remove pull-through",
       status: gone ? "works" : "broken",
@@ -522,7 +540,7 @@ test.describe("More live workbench @manual-live", () => {
           async () => {
             const canvas =
               (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-            return /\bWAC\b/i.test(canvas);
+            return /\bWAC\b|weighted average coupon/i.test(canvas);
           },
           { timeout: 60_000, intervals: [2000, 3000] },
         )
@@ -531,12 +549,16 @@ test.describe("More live workbench @manual-live", () => {
     } catch {
       ok = /\bWAC\b/i.test(actionSummary);
     }
-    record({
-      id: "M23",
-      name: "WAC on board-ready",
-      status: ok ? "works" : "broken",
-      observed: `wac=${ok}`,
-    });
+    await record(
+      page,
+      {
+        id: "M23",
+        name: "WAC on board-ready",
+        status: ok ? "works" : "broken",
+        observed: `wac=${ok}`,
+      },
+      "Add weighted average coupon WAC widget to the dashboard.",
+    );
   });
 
   test("M24 switch chart to bar via chat", async ({ page }) => {
@@ -551,16 +573,20 @@ test.describe("More live workbench @manual-live", () => {
     const barRect = page.locator("#workbench-canvas-root .recharts-bar-rectangle").first();
     const hasBar = await barRect.isVisible({ timeout: 25_000 }).catch(() => false);
     const footerOk = /bar|chart|pull[- ]?through/i.test(actionSummary);
-    record({
-      id: "M24",
-      name: "Chart type bar",
-      status: hasBar ? "works" : footerOk ? "broken" : "broken",
-      observed: hasBar
-        ? `barRect=true`
-        : footerOk
-          ? `footer-only`
-          : `barRect=false footer=false`,
-    });
+    await record(
+      page,
+      {
+        id: "M24",
+        name: "Chart type bar",
+        status: hasBar ? "works" : footerOk ? "broken" : "broken",
+        observed: hasBar
+          ? `barRect=true`
+          : footerOk
+            ? `footer-only`
+            : `barRect=false footer=false`,
+      },
+      "Change pull-through by branch chart to a bar chart.",
+    );
   });
 
   test("M25 readonly share link banner", async ({ page }) => {
@@ -569,7 +595,7 @@ test.describe("More live workbench @manual-live", () => {
     const shareBtn = page.getByRole("button", { name: /share/i }).first();
     const visible = await shareBtn.isVisible({ timeout: 10_000 }).catch(() => false);
     if (!visible) {
-      record({
+      await record(page, {
         id: "M25",
         name: "Share button visible",
         status: "rough",
@@ -581,7 +607,7 @@ test.describe("More live workbench @manual-live", () => {
     const dialog = page.getByRole("dialog");
     const opened = await dialog.isVisible({ timeout: 8_000 }).catch(() => false);
     if (opened) await page.keyboard.press("Escape");
-    record({
+    await record(page, {
       id: "M25",
       name: "Share dialog",
       status: opened ? "works" : "rough",
@@ -599,7 +625,7 @@ test.describe("More live workbench @manual-live", () => {
     await expect(toggle).toBeVisible({ timeout: 20_000 });
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-label", "Expand group");
-    record({
+    await record(page, {
       id: "M15",
       name: "Collapse after mobile→desktop resize",
       status: "works",
