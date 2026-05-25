@@ -31,6 +31,7 @@ import {
 } from "@/lib/workbench/workbenchChatHandoff";
 import {
   activeContextToScopeRef,
+  scopeRefsEqual,
   dispatchWorkbenchScopeMismatchActions,
   getLatestWorkbenchActiveContext,
   isWorkbenchChatScopeSyncEnabled,
@@ -339,6 +340,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     useState<WorkbenchActiveContext | null>(null);
   const [scopeMismatchActions, setScopeMismatchActions] =
     useState<WorkbenchScopeMismatchActionsDetail | null>(null);
+  const lastSyncedWorkbenchScopeKeyRef = useRef<string | null>(null);
+  /** When set, sync must not auto-load the latest thread for this scope (user chose New chat). */
+  const workbenchFreshThreadScopeKeyRef = useRef<string | null>(null);
 
   const setWorkbenchChatScopeRef = useCallback((scope: WorkbenchChatScopeRef | null) => {
     setWorkbenchChatScope(scope);
@@ -525,6 +529,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           : undefined;
       const hasDatasetOnly = !!datasetIds && !question.trim();
       if (!question.trim() && !hasDatasetOnly) return;
+
+      if (chatType === "workbench") {
+        workbenchFreshThreadScopeKeyRef.current = null;
+      }
 
       const forceNew = options?.forceNewConversation ?? false;
       const carryOver =
@@ -1308,53 +1316,82 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   // ===========================================================================
 
   /**
-   * Fetch the list of saved chat sessions
+   * Fetch workbench sessions linked to the active canvas scope.
    */
-  const fetchSessions = useCallback(async () => {
+  const fetchWorkbenchCanvasSessions = useCallback(async () => {
     setIsLoadingSessions(true);
     try {
       const effectiveTenantId = await getEffectiveTenantId();
       if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
         const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
-        let rows: UnifiedConversationSummary[] = [];
-        if (chatType === "workbench") {
-          const draftScopeId = resolveWorkbenchDraftScopeId();
-          const bridge = getWorkbenchCanvasBridge();
-          const canvasId =
-            workbenchSavedCanvasId ??
-            getConnectedWorkbenchCanvasId() ??
-            (bridge?.isActive ? bridge.canvasId : null) ??
-            getWorkbenchCanvasIdForDraft(draftScopeId);
-          const lists = await Promise.all([
-            client.listConversations({
-              scope_type: "draft",
-              scope_key: draftScopeId,
-              chat_type: "workbench",
-              limit: 50,
-            }),
-            ...(canvasId
-              ? [
-                  client.listConversations({
-                    scope_type: "canvas",
-                    scope_key: canvasId,
-                    chat_type: "workbench",
-                    limit: 50,
-                  }),
-                ]
-              : []),
-          ]);
-          const byId = new Map<string, UnifiedConversationSummary>();
-          for (const r of lists.flat()) byId.set(r.id, r);
-          rows = [...byId.values()].sort(
-            (a, b) =>
-              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-          );
-        } else {
-          rows = await client.listConversations({
-            scope_type: "global_session",
+        const draftScopeId = resolveWorkbenchDraftScopeId();
+        const bridge = getWorkbenchCanvasBridge();
+        const canvasId =
+          workbenchSavedCanvasId ??
+          getConnectedWorkbenchCanvasId() ??
+          (bridge?.isActive ? bridge.canvasId : null) ??
+          getWorkbenchCanvasIdForDraft(draftScopeId);
+        const lists = await Promise.all([
+          client.listConversations({
+            scope_type: "draft",
+            scope_key: draftScopeId,
+            chat_type: "workbench",
             limit: 50,
-          });
-        }
+          }),
+          ...(canvasId
+            ? [
+                client.listConversations({
+                  scope_type: "canvas",
+                  scope_key: canvasId,
+                  chat_type: "workbench",
+                  limit: 50,
+                }),
+              ]
+            : []),
+        ]);
+        const byId = new Map<string, UnifiedConversationSummary>();
+        for (const r of lists.flat()) byId.set(r.id, r);
+        const rows = [...byId.values()].sort(
+          (a, b) =>
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+        );
+        setChatSessions(
+          rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            messageCount: 0,
+            lastMessageAt: r.updated_at,
+            createdAt: r.created_at ?? r.updated_at,
+          })),
+        );
+        return;
+      }
+      setChatSessions([]);
+    } catch (error) {
+      console.error("[CohiChat] Failed to fetch workbench sessions:", error);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, [getEffectiveTenantId, tenantId, workbenchSavedCanvasId]);
+
+  /**
+   * Fetch the list of saved chat sessions
+   */
+  const fetchSessions = useCallback(async () => {
+    if (chatType === "workbench") {
+      await fetchWorkbenchCanvasSessions();
+      return;
+    }
+
+    setIsLoadingSessions(true);
+    try {
+      const effectiveTenantId = await getEffectiveTenantId();
+      if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+        const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+        const rows = await client.listConversations({
+          scope_type: "global_session",
+          limit: 50,
+        });
         setChatSessions(
           rows.map((r) => ({
             id: r.id,
@@ -1378,7 +1415,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     } finally {
       setIsLoadingSessions(false);
     }
-  }, [getEffectiveTenantId, tenantId, chatType, workbenchSavedCanvasId]);
+  }, [chatType, fetchWorkbenchCanvasSessions, getEffectiveTenantId, tenantId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1569,6 +1606,23 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const syncWorkbenchChatToActiveContext = useCallback(
     async (ctx: WorkbenchActiveContext) => {
       const scopeRef = activeContextToScopeRef(ctx);
+      const scopeKey = `${scopeRef.type}:${scopeRef.id}`;
+      if (
+        workbenchFreshThreadScopeKeyRef.current &&
+        workbenchFreshThreadScopeKeyRef.current !== scopeKey
+      ) {
+        workbenchFreshThreadScopeKeyRef.current = null;
+      }
+      if (
+        lastSyncedWorkbenchScopeKeyRef.current === scopeKey &&
+        sessionId &&
+        scopeRefsEqual(workbenchChatScope, scopeRef)
+      ) {
+        return;
+      }
+      const skipAutoLoad =
+        workbenchFreshThreadScopeKeyRef.current === scopeKey;
+      lastSyncedWorkbenchScopeKeyRef.current = scopeKey;
       setWorkbenchChatScopeRef(scopeRef);
       setWorkbenchScopePinned(false);
       setPendingScopeSwitchTarget(null);
@@ -1590,15 +1644,24 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         return;
       }
 
+      if (skipAutoLoad) {
+        viewingSessionRef.current = null;
+        setSessionId(null);
+        setMessages([]);
+        setConversationForkLinks(null);
+        void fetchSessions();
+        return;
+      }
+
       try {
         const effectiveTenantId = await getEffectiveTenantId();
         const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
         const scopeType = ctx.isSavedCanvas && ctx.canvasId ? "canvas" : "draft";
-        const scopeKey =
+        const scopeApiKey =
           ctx.isSavedCanvas && ctx.canvasId ? ctx.canvasId : ctx.draftScopeId;
         const rows = await client.listConversations({
           scope_type: scopeType,
-          scope_key: scopeKey,
+          scope_key: scopeApiKey,
           chat_type: "workbench",
           limit: 1,
         });
@@ -1610,6 +1673,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           setMessages([]);
           setConversationForkLinks(null);
         }
+        void fetchSessions();
       } catch (err) {
         console.warn("[useCohiChat] syncWorkbenchChatToActiveContext:", err);
         viewingSessionRef.current = null;
@@ -1617,7 +1681,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setMessages([]);
       }
     },
-    [getEffectiveTenantId, tenantId, loadSession, setWorkbenchChatScopeRef],
+    [
+      getEffectiveTenantId,
+      tenantId,
+      loadSession,
+      setWorkbenchChatScopeRef,
+      fetchSessions,
+      sessionId,
+      workbenchChatScope,
+    ],
   );
 
   const pinWorkbenchChatScope = useCallback(() => {
@@ -1737,6 +1809,20 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     viewingSessionRef.current = null;
     setSessionId(null);
     setIsLoading(false);
+    lastSyncedWorkbenchScopeKeyRef.current = null;
+    if (chatType === "workbench") {
+      const ctx = getLatestWorkbenchActiveContext();
+      if (ctx) {
+        const scopeRef = activeContextToScopeRef(ctx);
+        workbenchFreshThreadScopeKeyRef.current = `${scopeRef.type}:${scopeRef.id}`;
+        lastSyncedWorkbenchScopeKeyRef.current =
+          workbenchFreshThreadScopeKeyRef.current;
+      } else {
+        workbenchFreshThreadScopeKeyRef.current = null;
+      }
+    } else {
+      workbenchFreshThreadScopeKeyRef.current = null;
+    }
     resetWorkbenchChatSession();
     if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
       return;
@@ -1758,7 +1844,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     } catch (error) {
       console.error("[CohiChat] Failed to create new session:", error);
     }
-  }, [clearMessages, fetchSessions, getEffectiveTenantId, resetWorkbenchChatSession]);
+  }, [
+    clearMessages,
+    fetchSessions,
+    getEffectiveTenantId,
+    resetWorkbenchChatSession,
+    chatType,
+  ]);
 
   const isSessionRunning = useUnifiedChatRunStore((s) =>
     sessionId ? !!s.runs[sessionId] : false,
@@ -1780,6 +1872,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     isLoadingSessions,
     isLoadingSession,
     fetchSessions,
+    fetchWorkbenchCanvasSessions,
     loadSession,
     deleteSession,
     renameSession,

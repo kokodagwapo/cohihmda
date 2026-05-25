@@ -2,34 +2,59 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   activeContextToScopeRef,
   buildActiveContextFromTab,
+  detectGreenfieldWorkbenchPrompt,
   detectNewCanvasIntent,
   getWorkbenchScopeSyncTelemetryCounts,
   isWorkbenchChatScopeSyncEnabled,
   scopeRefsEqual,
+  shouldConfirmNewCanvasBeforeSend,
   trackWorkbenchScopeSyncEvent,
 } from "./workbenchChatScopeSync";
 
 describe("workbenchChatScopeSync", () => {
-  beforeEach(() => {
-    localStorage.setItem("cohi_workbench_chat_scope_sync", "1");
+  it("isWorkbenchChatScopeSyncEnabled follows unified chat", async () => {
+    const { isUnifiedChatClientEnabled } = await import(
+      "@/lib/unifiedChatEnvelope"
+    );
+    expect(isWorkbenchChatScopeSyncEnabled()).toBe(
+      isUnifiedChatClientEnabled(),
+    );
   });
 
-  afterEach(() => {
-    localStorage.removeItem("cohi_workbench_chat_scope_sync");
-  });
-
-  it("isWorkbenchChatScopeSyncEnabled respects storage override", () => {
-    expect(isWorkbenchChatScopeSyncEnabled()).toBe(true);
-    localStorage.setItem("cohi_workbench_chat_scope_sync", "0");
-    expect(isWorkbenchChatScopeSyncEnabled()).toBe(false);
-  });
-
-  it("detectNewCanvasIntent matches explicit phrases", () => {
+  it("detectGreenfieldWorkbenchPrompt matches starters and explicit new-canvas phrases", () => {
     expect(detectNewCanvasIntent("put this on a new canvas")).toBe(true);
     expect(detectNewCanvasIntent("create a separate canvas for sales")).toBe(
       true,
     );
+    expect(
+      detectGreenfieldWorkbenchPrompt(
+        "Build an executive dashboard with key KPIs",
+      ),
+    ).toBe(true);
+    expect(
+      detectGreenfieldWorkbenchPrompt(
+        "Prepare a board-ready overview of this month's performance",
+      ),
+    ).toBe(true);
     expect(detectNewCanvasIntent("show me a new view of revenue")).toBe(false);
+    expect(
+      detectGreenfieldWorkbenchPrompt("Summarize pipeline health trends"),
+    ).toBe(false);
+  });
+
+  it("shouldConfirmNewCanvasBeforeSend after new chat on populated canvas", () => {
+    expect(
+      shouldConfirmNewCanvasBeforeSend("Build an executive dashboard with key KPIs", {
+        firstTurnAfterNewChat: true,
+        canvasHasContent: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldConfirmNewCanvasBeforeSend(
+        "What needs my attention right now?",
+        { firstTurnAfterNewChat: true, canvasHasContent: true },
+      ),
+    ).toBe(false);
   });
 
   it("scopeRefsEqual compares type and id", () => {

@@ -16,6 +16,7 @@ import {
   PAGE_CONTENT_GUTTER,
 } from "@/components/cohi/pageContentStyles";
 import { isTopTieringDashboardRoute } from "@/lib/dashboardChatShellRoutes";
+import { isMyDashboardCanvasPath } from "@/lib/workbench/workbenchChatHandoff";
 import {
   CHAT_SHELL_VIEW_TRANSITION,
   useChatShellAnimatedHeight,
@@ -90,7 +91,7 @@ export function UnifiedChatShell({ tenantId, className }: UnifiedChatShellProps)
             isOpen
             tenantId={tenantId}
             onClose={() => {}}
-            hideInPanelHistory
+            hideInPanelHistory={!isMyDashboardCanvasPath(pathname)}
             className={
               mode === "compact"
                 ? "shrink-0 flex-none"

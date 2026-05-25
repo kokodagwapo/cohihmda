@@ -759,6 +759,66 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
+  test("@COHI-398 M29 new chat + default dashboard starter prompts new canvas", async ({
+    page,
+  }) => {
+    await skipIfLoggedOut(page);
+    let status: Status = "works";
+    let observed = "";
+    const starterPrompt = "Build an executive dashboard with key KPIs";
+    try {
+      await seedDeterministicBoard(page);
+      await selectUnifiedChatType(page, "Workbench");
+      await page
+        .getByRole("button", { name: /New chat thread on this canvas/i })
+        .click();
+      await waitForChatInputReady(page);
+      const suggestions = page.locator('[data-tour="unified-chat-suggestions"]');
+      const cardsVisible = await suggestions
+        .isVisible({ timeout: 8_000 })
+        .catch(() => false);
+      if (cardsVisible) {
+        const workbenchCard = suggestions.getByRole("button", {
+          name: /^Workbench$/i,
+        });
+        if (await workbenchCard.isVisible().catch(() => false)) {
+          await workbenchCard.click();
+        }
+        const starterBtn = suggestions.getByRole("button", {
+          name: new RegExp(starterPrompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+        });
+        if (await starterBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await starterBtn.click();
+        } else {
+          const input = unifiedChatMessageInput(page);
+          await input.fill(starterPrompt);
+          await input.press("Enter");
+        }
+      } else {
+        const input = unifiedChatMessageInput(page);
+        await input.fill(starterPrompt);
+        await input.press("Enter");
+      }
+      const dialog = page.getByTestId("workbench-new-canvas-intent-dialog");
+      await expect(dialog).toBeVisible({ timeout: 15_000 });
+      await expect(
+        dialog.getByTestId("workbench-new-canvas-dismiss"),
+      ).toBeVisible();
+      await dialog.getByRole("button", { name: "Use current canvas" }).click();
+      observed =
+        "new chat → executive dashboard starter → dialog with Cancel → use current canvas";
+    } catch (e) {
+      status = "broken";
+      observed = e instanceof Error ? e.message : String(e);
+    }
+    await record(page, {
+      id: "M29",
+      name: "New chat + dashboard starter → new canvas prompt",
+      status,
+      observed,
+    });
+  });
+
   test("@COHI-398 M28 workbench chat scope chip visible", async ({ page }) => {
     await forceWorkbenchChatScopeSync(page);
     await skipIfLoggedOut(page);
@@ -777,6 +837,105 @@ test.describe("More live workbench @manual-live", () => {
     await record(page, {
       id: "M28",
       name: "Chat scope chip",
+      status,
+      observed,
+    });
+  });
+
+  test("@COHI-398 M30 history toggle visible on dashboard canvas", async ({ page }) => {
+    await skipIfLoggedOut(page);
+    let status: Status = "works";
+    let observed = "";
+    try {
+      await seedDeterministicBoard(page);
+      await selectUnifiedChatType(page, "Workbench");
+      const historyBtn = page.getByTestId("cohi-chat-history-toggle");
+      await expect(historyBtn).toBeVisible({ timeout: 20_000 });
+      const threadsBtn = page.getByTestId("workbench-chat-scope-chip");
+      await expect(threadsBtn).toBeVisible({ timeout: 20_000 });
+      observed = "history clock + canvas threads control visible on open";
+    } catch (e) {
+      status = "broken";
+      observed = e instanceof Error ? e.message : String(e);
+    }
+    await record(page, {
+      id: "M30",
+      name: "History visible on canvas open",
+      status,
+      observed,
+    });
+  });
+
+  test("@COHI-398 M31 new chat stays empty (no auto-reload loop)", async ({ page }) => {
+    await skipIfLoggedOut(page);
+    let status: Status = "works";
+    let observed = "";
+    const marker = `new-chat-empty-${Date.now()}`;
+    try {
+      await seedDeterministicBoard(page);
+      await selectUnifiedChatType(page, "Workbench");
+      await sendTurn(page, marker);
+      await page.waitForTimeout(2000);
+      await page
+        .getByRole("button", { name: /New chat thread on this canvas/i })
+        .click();
+      await page.waitForTimeout(2500);
+      await expect(
+        page.getByTestId("workbench-new-canvas-intent-dialog"),
+      ).not.toBeVisible();
+      await expect(page.getByText(marker)).not.toBeVisible({ timeout: 5_000 });
+      observed = "new chat cleared prior turn; no new-canvas dialog auto-open";
+    } catch (e) {
+      status = "broken";
+      observed = e instanceof Error ? e.message : String(e);
+    }
+    await record(page, {
+      id: "M31",
+      name: "New chat empty state stable",
+      status,
+      observed,
+    });
+  });
+
+  test("@COHI-398 M32 canvas history excludes global chat sessions", async ({ page }) => {
+    await skipIfLoggedOut(page);
+    let status: Status = "works";
+    let observed = "";
+    const convoRequests: string[] = [];
+    page.on("request", (req) => {
+      const url = req.url();
+      if (url.includes("/api/chat/v1/conversations")) {
+        convoRequests.push(url);
+      }
+    });
+    try {
+      await seedDeterministicBoard(page);
+      await selectUnifiedChatType(page, "Chat");
+      const before = convoRequests.length;
+      await page.getByTestId("cohi-chat-history-toggle").click();
+      await expect(page.getByTestId("chat-history-sidebar")).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect
+        .poll(() => convoRequests.length, { timeout: 20_000 })
+        .toBeGreaterThan(before);
+      const recent = convoRequests.slice(before);
+      const hasScopedFetch = recent.some(
+        (u) =>
+          (u.includes("scope_type=draft") || u.includes("scope_type=canvas")) &&
+          u.includes("chat_type=workbench"),
+      );
+      const hasGlobalFetch = recent.some((u) => u.includes("scope_type=global_session"));
+      expect(hasScopedFetch).toBe(true);
+      expect(hasGlobalFetch).toBe(false);
+      observed = "history fetch on dashboard uses canvas scope (draft/canvas), not global_session";
+    } catch (e) {
+      status = "broken";
+      observed = e instanceof Error ? e.message : String(e);
+    }
+    await record(page, {
+      id: "M32",
+      name: "Canvas history excludes global sessions",
       status,
       observed,
     });

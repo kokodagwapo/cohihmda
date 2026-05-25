@@ -1,13 +1,14 @@
 /**
  * Workbench chat ↔ active canvas tab scope coupling (COHI-398 follow-up).
- * Feature flag: VITE_WORKBENCH_CHAT_SCOPE_SYNC=true or localStorage/sessionStorage overrides.
+ * On whenever unified chat is on. Set VITE_WORKBENCH_CHAT_SCOPE_SYNC=false to disable.
  */
 
 import type { WidgetAction } from "@/types/widgetActions";
+import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
+import { getWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
 import { draftScopeIdForCanvasTab } from "@/lib/workbench/workbenchChatHandoff";
 
 const FLAG_ENV_KEY = "VITE_WORKBENCH_CHAT_SCOPE_SYNC";
-const FLAG_STORAGE_KEY = "cohi_workbench_chat_scope_sync";
 const CONVERSATION_SCOPE_STORAGE_KEY = "cohi_workbench_conversation_scope";
 
 export const COHI_WORKBENCH_ACTIVE_CONTEXT_EVENT =
@@ -53,42 +54,18 @@ export interface WorkbenchScopeMismatchActionsDetail {
 
 let latestActiveContext: WorkbenchActiveContext | null = null;
 
-function isForceUnifiedChatEnabledInStorage(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return (
-      window.sessionStorage?.getItem("cohi_force_unified_chat") === "1" ||
-      window.localStorage?.getItem("cohi_force_unified_chat") === "1"
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function isWorkbenchChatScopeSyncEnabled(): boolean {
-  if (typeof window !== "undefined") {
-    try {
-      if (window.sessionStorage?.getItem(FLAG_STORAGE_KEY) === "0") {
-        return false;
-      }
-      if (isForceUnifiedChatEnabledInStorage()) {
-        return true;
-      }
-      if (
-        window.sessionStorage?.getItem(FLAG_STORAGE_KEY) === "1" ||
-        window.localStorage?.getItem(FLAG_STORAGE_KEY) === "1"
-      ) {
-        return true;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  try {
-    return import.meta.env[FLAG_ENV_KEY] === "true";
-  } catch {
+  if (!isUnifiedChatClientEnabled()) {
     return false;
   }
+  try {
+    if (import.meta.env[FLAG_ENV_KEY] === "false") {
+      return false;
+    }
+  } catch {
+    /* ignore */
+  }
+  return true;
 }
 
 export function getLatestWorkbenchActiveContext(): WorkbenchActiveContext | null {
@@ -183,19 +160,71 @@ export function dispatchWorkbenchActiveContext(
   );
 }
 
-/** Explicit phrases for confirm-first new canvas flow. */
-export function detectNewCanvasIntent(message: string): boolean {
+/** Greenfield layout prompts (default starters) that should not silently reuse a populated canvas. */
+export function detectGreenfieldWorkbenchPrompt(message: string): boolean {
   const normalized = message.trim().toLowerCase();
   if (!normalized) return false;
   const patterns = [
+    /\bboard[- ]?ready\b/,
+    /\bbuild\s+(?:an?\s+)?(?:executive\s+)?dashboard\b/,
+    /\bprepare\s+(?:a\s+)?(?:board|dashboard)\b/,
+    /\bcreate\s+(?:a\s+)?(?:new\s+)?(?:dashboard|board)\b/,
     /\bnew\s+canvas\b/,
     /\bseparate\s+canvas\b/,
     /\bdifferent\s+canvas\b/,
     /\banother\s+canvas\b/,
-    /\bon\s+a\s+new\s+(?:dashboard|board)\b/,
-    /\bnew\s+(?:dashboard|board)\b/,
+    /\bon\s+a\s+new\s+(?:dashboard|board|canvas)\b/,
+    /\bnew\s+(?:dashboard|board|canvas)\b/,
   ];
   return patterns.some((re) => re.test(normalized));
+}
+
+/** @deprecated Use detectGreenfieldWorkbenchPrompt — kept as alias. */
+export function detectNewCanvasIntent(message: string): boolean {
+  return detectGreenfieldWorkbenchPrompt(message);
+}
+
+export function isWorkbenchCanvasPopulated(): boolean {
+  const bridge = getWorkbenchCanvasBridge();
+  if (!bridge?.isActive) return false;
+  const snap = bridge.getCanvasSnapshot();
+  return (
+    (snap.totalItems ?? 0) > 0 ||
+    snap.groups.length > 0 ||
+    snap.standaloneWidgets.length > 0
+  );
+}
+
+let pendingFirstSendAfterNewChat = false;
+
+/** Call when user starts a new chat thread in workbench mode (not a new canvas tab). */
+export function markWorkbenchNewChatPendingFirstSend(): void {
+  pendingFirstSendAfterNewChat = true;
+}
+
+export function consumeWorkbenchNewChatPendingFirstSend(): boolean {
+  const pending = pendingFirstSendAfterNewChat;
+  pendingFirstSendAfterNewChat = false;
+  return pending;
+}
+
+/** Whether to show confirm-first new canvas dialog before streaming. */
+export function shouldConfirmNewCanvasBeforeSend(
+  message: string,
+  options?: { firstTurnAfterNewChat?: boolean; canvasHasContent?: boolean },
+): boolean {
+  if (detectGreenfieldWorkbenchPrompt(message)) {
+    return true;
+  }
+  if (options?.firstTurnAfterNewChat && options.canvasHasContent) {
+    const normalized = message.trim().toLowerCase();
+    const analyticalOnly =
+      /\b(summarize|summary|what needs my attention|pipeline health|pull- through|overview of this month)/i.test(
+        normalized,
+      ) && !/\b(build|board[- ]?ready|dashboard|create)\b/i.test(normalized);
+    return !analyticalOnly;
+  }
+  return false;
 }
 
 export function isWorkbenchScopeAlignedWithActiveTab(
@@ -249,6 +278,7 @@ export type WorkbenchScopeSyncTelemetryEvent =
   | "new_canvas_intent_prompt_shown"
   | "new_canvas_intent_confirmed"
   | "new_canvas_intent_cancelled"
+  | "new_canvas_intent_dismissed"
   | "action_apply_blocked_mismatch"
   | "action_apply_mismatch_resolved_active"
   | "action_apply_mismatch_resolved_conversation";

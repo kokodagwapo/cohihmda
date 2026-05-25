@@ -99,6 +99,10 @@ import {
   buildCarryOverContext,
   shouldForkOnChatTypeChange,
 } from "@/lib/workbench/workbenchChatHandoff";
+import {
+  getLatestWorkbenchActiveContext,
+  markWorkbenchNewChatPendingFirstSend,
+} from "@/lib/workbench/workbenchChatScopeSync";
 import { ConversationForkChips } from "@/components/cohi/ConversationForkChips";
 import { useWorkbenchChatScopeGuard } from "@/components/cohi/WorkbenchChatScopeGuard";
 import { formatChatTypeLabel } from "@/lib/unifiedChatTypeStyles";
@@ -542,6 +546,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     isLoadingSessions,
     isLoadingSession,
     fetchSessions,
+    fetchWorkbenchCanvasSessions = async () => {},
     loadSession,
     deleteSession,
     renameSession,
@@ -556,22 +561,67 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     scopeMismatchActions = null,
     acceptPendingWorkbenchScopeSwitch = async () => {},
     cancelPendingWorkbenchScopeSwitch = () => {},
+    syncWorkbenchChatToActiveContext = async () => {},
     resolveScopeMismatchActions = () => {},
   } = unifiedSession ?? legacyChat;
+
+  const activeChatType = unifiedSession?.chatType ?? chatType;
+
+  const workbenchCanvasThreadCount =
+    activeChatType === "workbench" ? chatSessions.length : 0;
+
+  const workbenchCanvasDisplayLabel =
+    workbenchChatScope?.label ??
+    getLatestWorkbenchActiveContext()?.tabTitle ??
+    null;
+
+  const workbenchHistoryScopeSubtitle =
+    activeChatType === "workbench" && workbenchCanvasDisplayLabel
+      ? `Threads for ${workbenchCanvasDisplayLabel}${
+          workbenchCanvasThreadCount > 0
+            ? ` (${workbenchCanvasThreadCount})`
+            : ""
+        }`
+      : null;
+
+  const showWorkbenchCanvasThreadsControl =
+    activeChatType === "workbench" &&
+    isMyDashboardCanvasPath(pathname) &&
+    !!workbenchCanvasDisplayLabel;
+
+  const shouldScopeHistoryToActiveCanvas =
+    isMyDashboardCanvasPath(pathname) &&
+    isUnifiedChatClientEnabled();
 
   const startNewChatSession = useCallback(async () => {
     setResearchViewOnly(false);
     setAttachedUploadIds([]);
     setExpandedPromptCard(null);
+    const type = unifiedSession?.chatType ?? chatType;
+    if (type === "workbench") {
+      markWorkbenchNewChatPendingFirstSend();
+    }
     await newSession();
-  }, [newSession]);
+  }, [newSession, unifiedSession?.chatType, chatType]);
 
-  const activeChatType = unifiedSession?.chatType ?? chatType;
   const setActiveChatType = unifiedSession?.setChatType ?? setChatType;
   const activeResearchDeepAnalysis =
     unifiedSession?.researchDeepAnalysis ?? researchDeepAnalysis;
   const setActiveResearchDeepAnalysis =
     unifiedSession?.setResearchDeepAnalysis ?? setResearchDeepAnalysis;
+
+  const fetchHistoryForCurrentView = useCallback(() => {
+    if (shouldScopeHistoryToActiveCanvas) {
+      void fetchWorkbenchCanvasSessions();
+      return;
+    }
+    void fetchSessions();
+  }, [fetchSessions, fetchWorkbenchCanvasSessions, shouldScopeHistoryToActiveCanvas]);
+
+  const openWorkbenchCanvasThreads = useCallback(() => {
+    fetchHistoryForCurrentView();
+    setShowHistory(true);
+  }, [fetchHistoryForCurrentView]);
 
   const workbenchScopeGuard = useWorkbenchChatScopeGuard({
     activeChatType,
@@ -583,9 +633,21 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     scopeMismatchActions,
     acceptPendingWorkbenchScopeSwitch,
     cancelPendingWorkbenchScopeSwitch,
+    syncChatToActiveCanvas: syncWorkbenchChatToActiveContext,
     resolveScopeMismatchActions,
     sendMessage,
+    onNewCanvasPreflightDismiss: (message) => setInput(message),
   });
+
+  useEffect(() => {
+    if (
+      activeChatType === "workbench" &&
+      isMyDashboardCanvasPath(pathname) &&
+      isUnifiedChatClientEnabled()
+    ) {
+      void fetchWorkbenchCanvasSessions();
+    }
+  }, [activeChatType, pathname, fetchWorkbenchCanvasSessions, workbenchChatScope?.id]);
 
   const { uploads: availableUploads, listUploads: listAvailableUploads } =
     useResearchUploads(tenantId);
@@ -2527,25 +2589,52 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 >
                   AI
                 </Badge>
-                {workbenchScopeGuard.scopeChip}
               </div>
+              {showWorkbenchCanvasThreadsControl ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-1 h-7 max-w-full self-start px-2.5 text-[10px] font-normal pointer-events-auto relative z-[1]"
+                  title="View chat threads linked to this canvas"
+                  data-testid="workbench-chat-scope-chip"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openWorkbenchCanvasThreads();
+                  }}
+                >
+                  <MessageSquare className="w-3 h-3 mr-1.5 shrink-0 opacity-70" />
+                  <span className="truncate">
+                    {workbenchCanvasDisplayLabel}
+                    {workbenchCanvasThreadCount > 0
+                      ? ` · ${workbenchCanvasThreadCount} thread${workbenchCanvasThreadCount === 1 ? "" : "s"}`
+                      : " · no threads yet"}
+                  </span>
+                </Button>
+              ) : null}
               <p className="text-[11px] sm:text-xs text-slate-600/90 dark:text-slate-400/90 font-normal mt-0.5 leading-snug line-clamp-2 sm:line-clamp-1 sm:truncate">
                 Ask about your pipeline & performance
               </p>
             </div>
           </div>
           <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-            {!hideInPanelHistory && (
+            {(!hideInPanelHistory || showWorkbenchCanvasThreadsControl) && (
               <Button
                 variant="ghost"
                 size="icon"
                 data-chat-history-toggle="true"
+                data-testid="cohi-chat-history-toggle"
                 className={cn(
-                  "h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors",
+                  "h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors",
                   showHistory && "bg-violet-100/80 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300"
                 )}
                 onClick={() => setShowHistory((prev) => !prev)}
-                title="Chat history"
+                title={
+                  activeChatType === "workbench"
+                    ? "Chat threads for this canvas"
+                    : "Chat history"
+                }
                 aria-pressed={showHistory}
               >
                 <Clock className="w-4 h-4" />
@@ -2678,7 +2767,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
         {workbenchScopeGuard.pinnedBanner}
 
-        {!hideInPanelHistory && (
+        {(!hideInPanelHistory || showWorkbenchCanvasThreadsControl) && (
         <ChatHistorySidebar
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
@@ -2686,11 +2775,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           activeSessionId={currentSessionId}
           isLoading={isLoadingSessions}
           isLoadingSession={isLoadingSession}
-          onFetchSessions={fetchSessions}
+          onFetchSessions={fetchHistoryForCurrentView}
           onLoadSession={handleLoadSession}
           onDeleteSession={deleteSession}
           onRenameSession={renameSession}
           onNewSession={startNewChatSession}
+          scopeSubtitle={workbenchHistoryScopeSubtitle}
         />
         )}
 
