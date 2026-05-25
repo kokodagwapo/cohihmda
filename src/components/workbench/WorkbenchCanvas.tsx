@@ -128,8 +128,13 @@ import type {
   ModifyGroupAction,
   GroupOperation,
   ModifyRegistryWidgetAction,
+  ModifyWidgetAction,
   CanvasStateSnapshot,
 } from "@/types/widgetActions";
+import {
+  isRegistryModifyAction,
+  normalizeRegistryModifyAction,
+} from "@/lib/workbench/normalizeModifyWidgetAction";
 import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
 import {
   applyModifyGroupOperations,
@@ -1511,60 +1516,62 @@ export function WorkbenchCanvas({
           }
           break;
         }
-        case "modify_registry_widget": {
-          const regAction = action as ModifyRegistryWidgetAction;
-          const loose = regAction as ModifyRegistryWidgetAction & {
-            chartType?: string;
-          };
-          const configOverrides =
-            regAction.configOverrides ??
-            (loose.chartType
-              ? { chartType: loose.chartType }
-              : undefined);
-          const groupIdx = resolveWidgetGroupIndex(items, regAction.groupId);
-          if (groupIdx < 0) {
+        case "modify_registry_widget":
+        case "modify_widget": {
+          const modifyAction = action as
+            | ModifyWidgetAction
+            | ModifyRegistryWidgetAction;
+          if (isRegistryModifyAction(modifyAction)) {
+            const regAction = normalizeRegistryModifyAction(modifyAction);
+            const groupIdx = resolveWidgetGroupIndex(items, regAction.groupId);
+            if (groupIdx < 0) {
+              toast({
+                title: "Group not found",
+                description: `No dashboard group with id ${regAction.groupId}`,
+                variant: "destructive",
+              });
+              break;
+            }
+            const layoutItem = items[groupIdx];
+            const payload = layoutItem.payload as WidgetGroupPayloadShape;
+            const { payload: nextPayload, found, isRegistry } =
+              applyModifyRegistryWidget(payload, regAction);
+            if (!found) {
+              toast({
+                title: "Widget not found",
+                description: `No registry widget "${regAction.widgetId}" in that group`,
+                variant: "destructive",
+              });
+              break;
+            }
+            if (!isRegistry) {
+              toast({
+                title: "Not a registry widget",
+                description:
+                  "Registry modify only applies to pre-built catalog widgets",
+                variant: "destructive",
+              });
+              break;
+            }
+            setItemsWithHistory((prev) =>
+              prev.map((it, i) =>
+                i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
+              ),
+            );
             toast({
-              title: "Group not found",
-              description: `No dashboard group with id ${regAction.groupId}`,
-              variant: "destructive",
-            });
-            break;
-          }
-          const layoutItem = items[groupIdx];
-          const payload = layoutItem.payload as WidgetGroupPayloadShape;
-          const { payload: nextPayload, found, isRegistry } =
-            applyModifyRegistryWidget(payload, {
-              ...regAction,
-              configOverrides: configOverrides ?? regAction.configOverrides ?? {},
-            });
-          if (!found) {
-            toast({
-              title: "Widget not found",
-              description: `No registry widget "${regAction.widgetId}" in that group`,
-              variant: "destructive",
-            });
-            break;
-          }
-          if (!isRegistry) {
-            toast({
-              title: "Not a registry widget",
+              title: "Widget config updated",
               description:
-                "modify_registry_widget only applies to pre-built catalog widgets",
-              variant: "destructive",
+                regAction.explanation?.substring(0, 80) ||
+                "Config patch applied",
             });
             break;
           }
-          setItemsWithHistory((prev) =>
-            prev.map((it, i) =>
-              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
-            ),
+          if (action.type !== "modify_widget") break;
+          commitWidgetActionReducerOutcome(
+            applyModifyWidget(items, action, { editingWidgetId }),
+            setItemsWithHistory,
+            toast,
           );
-          toast({
-            title: "Widget config updated",
-            description:
-              regAction.explanation?.substring(0, 80) ||
-              "Config overrides applied",
-          });
           break;
         }
         case "convert_to_sql_widget": {
@@ -1677,14 +1684,6 @@ export function WorkbenchCanvas({
               });
             }
           })();
-          break;
-        }
-        case "modify_widget": {
-          commitWidgetActionReducerOutcome(
-            applyModifyWidget(items, action, { editingWidgetId }),
-            setItemsWithHistory,
-            toast,
-          );
           break;
         }
         default:

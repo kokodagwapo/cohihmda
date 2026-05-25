@@ -1076,9 +1076,9 @@ Each action in the "actions" array must be one of:
    Use modify_group when the user asks to add/remove widgets in a dashboard section, reorder them, resize, change the section title, switch period, or rename a widget in the group.
    For **chart type / viz changes on a SQL widget inside a group**, use **modify_widget** with that widget's \`cohi__id__idx\` from the canvas list — do NOT use create_widget.
 
-6a. **modify_registry_widget**: Change config on a pre-built catalog widget inside a group
-   {"type": "modify_registry_widget", "groupId": "<groupId>", "widgetId": "<widget id from group list, e.g. company-scorecard-units__0>", "configOverrides": {"format": "currency", "chartType": "line"}, "explanation": "What changed"}
-   Use when the user wants to change how a catalog widget displays (e.g. number format, chart type) without converting it to SQL. The widgetId is the stable id shown in the canvas state for that widget (e.g. company-scorecard-units__0 or cohi__abc__1). Only keys that the widget supports (e.g. format, chartType) will take effect.
+6a. **modify_widget** (target registry): Change config on a pre-built catalog widget inside a group
+   {"type": "modify_widget", "target": "registry", "groupId": "<groupId>", "widgetId": "<widget id from group list, e.g. company-scorecard-units__0>", "configPatch": {"format": "currency", "chartType": "line"}, "explanation": "What changed"}
+   Legacy alias modify_registry_widget with configOverrides is still accepted. Use when the user wants to change how a catalog widget displays (e.g. number format, chart type) without converting it to SQL. The widgetId is the stable id shown in the canvas state for that widget (e.g. company-scorecard-units__0 or cohi__abc__1). Only keys that the widget supports (e.g. format, chartType) will take effect.
 
 6b. **create_dashboard**: Build an entirely new dashboard from scratch (mix of catalog widgets and SQL widgets)
    {"type": "create_dashboard", "title": "My Dashboard", "groups": [{"title": "Section Title", "sectionType": "company-scorecard", "widgets": [{"kind": "registry", "defId": "company-scorecard-units"}, {"kind": "cohi", "sql": "SELECT ...", "title": "Custom Chart", "vizConfig": {...}}], "canvasPosition": {"x": 20, "y": 20, "w": 1000, "h": 800}}], "standaloneWidgets": [{"kind": "cohi", "sql": "SELECT ...", "title": "Standalone", "vizConfig": {...}}], "explanation": "What this dashboard shows"}
@@ -1689,7 +1689,7 @@ export async function runWorkbenchChatTurn(
         (canvasState?.totalItems ?? 0) > 0 &&
         isChartTypeChangeRequest(question, ...historyTexts)
       ) {
-        personaSupplement += `\n\n## Chart type change (CRITICAL)\nFor catalog/chart widgets (e.g. pull-through by branch, volume by branch), use **modify_registry_widget** with configOverrides.chartType (bar|line|pie|area) and the widget's stable id from CANVAS STATE (e.g. company-scorecard-pullthrough-by-branch__N). For cohi SQL widgets use **modify_widget** with changes.type. Do NOT use create_widget.`;
+        personaSupplement += `\n\n## Chart type change (CRITICAL)\nFor catalog/chart widgets (e.g. pull-through by branch, volume by branch), use **modify_widget** with target registry and configPatch.chartType (bar|line|pie|area) and the widget's stable id from CANVAS STATE (e.g. company-scorecard-pullthrough-by-branch__N). For cohi SQL widgets use **modify_widget** with changes.type. Do NOT use create_widget.`;
       }
 
       if (isAllTimeRequest(question, ...historyTexts)) {

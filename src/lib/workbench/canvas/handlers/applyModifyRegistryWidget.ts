@@ -2,7 +2,7 @@
  * Pure reducer for modify_registry_widget on a widget_group payload.
  */
 import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
-import type { ModifyRegistryWidgetAction } from "@/types/widgetActions";
+import type { RegistryModifyWidgetAction } from "@/types/widgetActions";
 import { groupWidgetItemKey } from "@/lib/workbench/resolveGroupWidgetItem";
 
 export type RegistryGroupPayloadShape = {
@@ -46,7 +46,7 @@ export function applyModifyRegistryWidget(
           ...it,
           config: {
             ...(it.config ?? {}),
-            ...action.configOverrides,
+            ...action.configPatch,
           },
         }
       : it,

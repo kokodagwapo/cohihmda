@@ -1,9 +1,11 @@
 export type WorkbenchActionLike = {
   type?: string;
+  target?: string;
   groupId?: string;
   widgetId?: string;
   operations?: Array<{ op?: string; defId?: string; widgetId?: string }>;
   configOverrides?: Record<string, unknown>;
+  configPatch?: Record<string, unknown>;
 };
 
 export function expectActionType(
@@ -20,13 +22,18 @@ export function expectChartType(
   actions: WorkbenchActionLike[],
   chartType: string,
 ): void {
-  const hit = actions.find(
-    (a) =>
-      a.type === "modify_registry_widget" &&
-      a.configOverrides?.chartType === chartType,
-  );
+  const patch = (a: WorkbenchActionLike) =>
+    a.configPatch ?? a.configOverrides;
+  const hit = actions.find((a) => {
+    const isReg =
+      a.type === "modify_registry_widget" ||
+      (a.type === "modify_widget" && a.target === "registry");
+    return isReg && patch(a)?.chartType === chartType;
+  });
   if (!hit) {
-    throw new Error(`Expected modify_registry_widget chartType=${chartType}`);
+    throw new Error(
+      `Expected registry modify_widget chartType=${chartType}`,
+    );
   }
 }
 

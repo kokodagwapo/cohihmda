@@ -6,6 +6,7 @@ import type { NavigateFunction } from "react-router-dom";
 import type { WidgetAction } from "@/types/widgetActions";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
 import { getWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
+import { normalizeWidgetActionsForExecution } from "@/lib/workbench/normalizeModifyWidgetAction";
 
 export const WORKBENCH_CHAT_HANDOFF_STATE_KEY = "workbenchChatHandoff";
 
@@ -82,7 +83,10 @@ export function filterExecutableWorkbenchActions(
   actions: WidgetAction[] | undefined,
 ): WidgetAction[] {
   if (!actions?.length) return [];
-  return actions.filter((a) => EXECUTABLE_WORKBENCH_ACTION_TYPES.has(a.type));
+  const filtered = actions.filter((a) =>
+    EXECUTABLE_WORKBENCH_ACTION_TYPES.has(a.type),
+  );
+  return normalizeWidgetActionsForExecution(filtered);
 }
 
 import {

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { applyModifyRegistryWidget } from "./applyModifyRegistryWidget";
+import { normalizeRegistryModifyAction } from "@/lib/workbench/normalizeModifyWidgetAction";
 
 describe("applyModifyRegistryWidget", () => {
-  it("merges configOverrides on matching registry widget", () => {
+  it("merges configPatch on matching registry widget", () => {
     const payload = {
       type: "widget_group" as const,
       groupId: "g1",
@@ -15,8 +16,12 @@ describe("applyModifyRegistryWidget", () => {
       ],
     };
     const { payload: next, found, isRegistry } = applyModifyRegistryWidget(payload, {
+      type: "modify_widget",
+      target: "registry",
+      groupId: "g1",
       widgetId: "company-scorecard-pullthrough-by-branch__0",
-      configOverrides: { chartType: "line" },
+      configPatch: { chartType: "line" },
+      explanation: "line chart",
     });
     expect(found).toBe(true);
     expect(isRegistry).toBe(true);
@@ -33,9 +38,25 @@ describe("applyModifyRegistryWidget", () => {
       items: [{ kind: "registry" as const, defId: "company-scorecard-units" }],
     };
     const { found } = applyModifyRegistryWidget(payload, {
+      type: "modify_widget",
+      target: "registry",
+      groupId: "g1",
       widgetId: "missing__9",
-      configOverrides: { chartType: "bar" },
+      configPatch: { chartType: "bar" },
+      explanation: "test",
     });
     expect(found).toBe(false);
+  });
+
+  it("legacy modify_registry_widget normalizes to configPatch", () => {
+    const normalized = normalizeRegistryModifyAction({
+      type: "modify_registry_widget",
+      groupId: "g1",
+      widgetId: "w__0",
+      configOverrides: { chartType: "pie" },
+      explanation: "pie",
+    });
+    expect(normalized.target).toBe("registry");
+    expect(normalized.configPatch).toEqual({ chartType: "pie" });
   });
 });

@@ -623,7 +623,7 @@ describe("workbenchWidgetPeriodReconcile", () => {
     expect(hit?.widgetId).toBe("company-scorecard-pullthrough-by-branch__3");
   });
 
-  it("augmentChartTypeFromQuestion injects modify_registry_widget line", () => {
+  it("augmentChartTypeFromQuestion injects modify_widget registry line", () => {
     const actions: unknown[] = [{ type: "teach", message: "ok" }];
     augmentChartTypeFromQuestion(actions, {
       userQuestion: "Change pull-through by branch chart to a line chart",
@@ -643,8 +643,9 @@ describe("workbenchWidgetPeriodReconcile", () => {
       },
     });
     expect(actions[0]).toMatchObject({
-      type: "modify_registry_widget",
-      configOverrides: { chartType: "line" },
+      type: "modify_widget",
+      target: "registry",
+      configPatch: { chartType: "line" },
     });
   });
 

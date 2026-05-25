@@ -35,9 +35,11 @@ type MutableGroupOperationLike = {
 
 type MutableWorkbenchActionLike = {
   type?: string;
+  target?: string;
   groupId?: string;
   widgetId?: string;
   instanceId?: string;
+  configPatch?: Record<string, unknown>;
   explanation?: string;
   configOverrides?: Record<string, unknown>;
   operations?: MutableGroupOperationLike[];
@@ -913,7 +915,13 @@ export function stripBuildActionsForChartTypeChange(
   actions.push(...filtered);
 }
 
-/** Inject modify_registry_widget when the model omitted chart type overrides. */
+function registryChartConfig(
+  action: MutableWorkbenchActionLike,
+): Record<string, unknown> | undefined {
+  return action.configPatch ?? action.configOverrides;
+}
+
+/** Inject modify_widget (target registry) when the model omitted chart type overrides. */
 export function augmentChartTypeFromQuestion(
   actions: unknown[],
   options?: {
@@ -932,12 +940,17 @@ export function augmentChartTypeFromQuestion(
   if (!target) return;
 
   const typed = actions as MutableWorkbenchActionLike[];
-  const already = typed.some(
-    (a) =>
-      a.type === "modify_registry_widget" &&
+  const already = typed.some((a) => {
+    const isReg =
+      a.type === "modify_registry_widget" ||
+      (a.type === "modify_widget" && a.target === "registry");
+    const patch = registryChartConfig(a);
+    return (
+      isReg &&
       a.widgetId === target.widgetId &&
-      a.configOverrides?.chartType === chartType,
-  );
+      patch?.chartType === chartType
+    );
+  });
   if (already) return;
 
   const filtered = typed.filter(
@@ -951,10 +964,11 @@ export function augmentChartTypeFromQuestion(
   actions.length = 0;
   actions.push(
     {
-      type: "modify_registry_widget",
+      type: "modify_widget",
+      target: "registry",
       groupId: target.groupId,
       widgetId: target.widgetId,
-      configOverrides: { chartType },
+      configPatch: { chartType },
       explanation: `Changed ${target.label} to ${chartType} chart`,
     },
     ...withoutTeach,
@@ -1193,7 +1207,11 @@ export function normalizeWorkbenchWidgetIds(
       continue;
     }
 
-    if (action.type === "modify_registry_widget" && action.widgetId) {
+    if (
+      (action.type === "modify_registry_widget" ||
+        (action.type === "modify_widget" && action.target === "registry")) &&
+      action.widgetId
+    ) {
       const group = canvasState.groups?.find((g) => g.groupId === action.groupId);
       const pool = group?.widgets?.length ? group.widgets : allGroupWidgets;
       const resolved = resolveCanvasWidgetKey(pool, action.widgetId);
