@@ -1,0 +1,79 @@
+name: Workbench live critical
+
+on:
+  pull_request:
+    paths:
+      - "server/src/services/workbench/**"
+      - "server/src/routes/cohiWorkbench.ts"
+      - "src/components/workbench/**"
+      - "src/components/widgets/**"
+      - "src/lib/workbench/**"
+      - "e2e/manual/workbench-*-live.spec.ts"
+      - "e2e/helpers/**"
+      - ".github/workflows/workbench-live-critical.yml"
+  workflow_dispatch:
+
+jobs:
+  live-critical:
+    if: ${{ secrets.E2E_ADMIN_EMAIL != '' && secrets.E2E_ADMIN_PASSWORD != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: coheus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      E2E_BASE_URL: http://localhost:5000
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: coheus
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      WORKBENCH_RECONCILE_DEBUG: "1"
+      WORKBENCH_TEST_SEED_ENABLED: "1"
+      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      E2E_ADMIN_TOTP_SECRET: ${{ secrets.E2E_ADMIN_TOTP_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd server && npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Start backend
+        run: |
+          cd server
+          npm run dev &
+          npx wait-on http-get://localhost:5000/api/health -t 120000
+
+      - name: Refresh e2e auth
+        run: npx tsx e2e/manual-auth-setup.ts
+        env:
+          E2E_BASE_URL: http://localhost:5000
+
+      - name: Run critical live workbench tests
+        run: |
+          npx playwright test e2e/manual/workbench-more-live.spec.ts e2e/manual/workbench-unique-live.spec.ts --grep "M06|M17|M21|M22|M24|U07" --config=playwright.manual-live.config.ts
