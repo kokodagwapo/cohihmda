@@ -19,6 +19,7 @@ import {
   widgetGroupCollapseToggle,
 } from "../helpers/responsiveControls";
 import { captureReconcileTrace } from "../helpers/reconcileTrace";
+import { pollCanvasTextGone } from "../helpers/workbenchLiveAssertions";
 
 const OUT = path.join("test-results", "unique-live");
 const REPORT = path.join(OUT, "REPORT.md");
@@ -252,14 +253,18 @@ test.describe("Unique live workbench @manual-live", () => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the funded volume widget from the dashboard.");
-    const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-    const gone = !/Total Volume|funded volume/i.test(canvas);
-    await record(page, {
-      id: "U08",
-      name: "Remove funded volume",
-      status: gone ? "works" : "broken",
-      observed: `gone=${gone}`,
-    });
+    await waitForChatInputReady(page);
+    const gone = await pollCanvasTextGone(page, /Total Volume|funded volume/i);
+    await record(
+      page,
+      {
+        id: "U08",
+        name: "Remove funded volume",
+        status: gone ? "works" : "broken",
+        observed: `gone=${gone}`,
+      },
+      "Remove the funded volume widget from the dashboard.",
+    );
   });
 
   test("U09 pull-through remove and re-add", async ({ page }) => {

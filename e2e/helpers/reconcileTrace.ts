@@ -45,6 +45,12 @@ export async function captureReconcileTrace(
     const res = await request.get(
       `${base}/api/cohi-chat/workbench/reconcile-trace?n=${limit}`,
     );
+    if (res.status() === 404) {
+      console.warn(
+        "[reconcile-trace] disabled — set WORKBENCH_RECONCILE_DEBUG=1 on the backend process",
+      );
+      return "";
+    }
     if (!res.ok()) return "";
     const body = (await res.json()) as { entries?: TraceEntry[] };
     const entries = body.entries ?? [];

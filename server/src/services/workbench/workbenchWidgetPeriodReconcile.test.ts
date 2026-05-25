@@ -162,6 +162,56 @@ describe("workbenchWidgetPeriodReconcile", () => {
     );
   });
 
+  it("all-time funded volume ends as add_cohi with filterable false", () => {
+    const actions: unknown[] = [
+      {
+        type: "modify_group",
+        groupId: "grp-1",
+        operations: [],
+        explanation: "Updated dashboard group",
+      },
+    ];
+    const canvasState = {
+      totalItems: 5,
+      groups: [
+        {
+          groupId: "grp-1",
+          widgets: [{ id: "w-vol", title: "Funded Volume", kind: "registry" }],
+        },
+      ],
+    };
+    augmentAllTimeStripPeriodOnlyActions(actions, {
+      userQuestion: "Show funded volume as an all-time KPI",
+      canvasState,
+    });
+    augmentAllTimeCreateWidgetFromQuestion(actions, {
+      userQuestion: "Show funded volume as an all-time KPI",
+      canvasState,
+    });
+    augmentAllTimeKpiToGroup(actions, {
+      userQuestion: "Show funded volume as an all-time KPI",
+      canvasState,
+    });
+    const mg = actions.find(
+      (a) =>
+        (a as { type?: string }).type === "modify_group" &&
+        (
+          (a as { operations?: Array<{ op?: string }> }).operations ?? []
+        ).some((o) => o.op === "add_cohi"),
+    ) as {
+      type: string;
+      operations: Array<{
+        op: string;
+        title?: string;
+        filterConfig?: { filterable?: boolean };
+      }>;
+    };
+    expect(mg).toBeDefined();
+    const add = mg.operations.find((o) => o.op === "add_cohi");
+    expect(add?.filterConfig?.filterable).toBe(false);
+    expect(add?.title).toBe("All-time Funded Volume");
+  });
+
   it("seeds create_widget after stripping period-only on all-time", () => {
     const actions = [
       {
