@@ -97,6 +97,7 @@ import { useCanvasPinStore } from "@/stores/canvasPinStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { WidgetRenderer } from "@/components/workbench/canvas/WidgetRenderer";
 import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
+import { WorkbenchTopToolbar } from "@/components/workbench/canvas/WorkbenchTopToolbar";
 import {
   createLayoutItem,
   type CanvasLayoutItem,
@@ -130,6 +131,12 @@ import type {
   CanvasStateSnapshot,
 } from "@/types/widgetActions";
 import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
+import {
+  applyModifyGroupOperations,
+  applyModifyRegistryWidget,
+  applyDeleteWidgetFromItems,
+  type WidgetGroupPayloadShape,
+} from "@/lib/workbench/canvas/handlers/widgetActionDispatch";
 import { buildGroupSavedFiltersFromFilterConfig } from "@/lib/workbench/workbenchPresetMapping";
 import { registerWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
 import { buildCanvasStateSnapshot } from "@/lib/workbench/buildCanvasStateSnapshot";
@@ -283,7 +290,7 @@ async function fetchBlob(endpoint: string, body: object): Promise<Blob> {
   return res.blob();
 }
 
-const UPLOAD_ALLOWED_TYPES = [
+export const UPLOAD_ALLOWED_TYPES = [
   "text/csv",
   "application/pdf",
   "image/png",
@@ -303,7 +310,7 @@ const DEFAULT_BACKGROUND: CanvasBackground = {
 };
 
 /** 10 UGC background templates: gradients and subtle patterns */
-const BACKGROUND_TEMPLATES: {
+export const BACKGROUND_TEMPLATES: {
   id: string;
   label: string;
   style: React.CSSProperties;
@@ -400,7 +407,7 @@ const TEMPLATE_SCALE = 0.75;
 const TEMPLATE_MIN_SIZE = { w: 260, h: 180 };
 
 /** Predefined canvas templates (layout + optional background) */
-const CANVAS_TEMPLATES: {
+export const CANVAS_TEMPLATES: {
   id: string;
   label: string;
   description: string;
@@ -1705,149 +1712,11 @@ export function WorkbenchCanvas({
             break;
           }
           const layoutItem = items[groupIdx];
-          const payload = layoutItem.payload as {
-            type: "widget_group";
-            groupId: string;
-            title: string;
-            sectionType: SectionType;
-            widgetIds: string[];
-            items?: GroupWidgetItem[];
-            widgetLayouts?: Record<
-              string,
-              { x: number; y: number; w: number; h: number }
-            >;
-            layoutVersion?: number;
-            savedFilters?: Record<string, unknown>;
-          };
-          const LAYOUT_VERSION = 8;
-          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry")
-              return `${groupItem.defId}__${idx}`;
-            return `cohi__${groupItem.id}__${idx}`;
-          }
-          let itemsList: GroupWidgetItem[] = Array.isArray(payload.items)
-            ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({
-                kind: "registry" as const,
-                defId,
-              }));
-          let layouts: Record<
-            string,
-            { x: number; y: number; w: number; h: number }
-          > = { ...(payload.widgetLayouts ?? {}) };
-          let groupTitle = payload.title;
-          let savedFilters = payload.savedFilters
-            ? { ...payload.savedFilters }
-            : undefined;
-          let removeMissed = false;
-
-          for (const op of groupAction.operations) {
-            if (op.op === "add_registry") {
-              const newItem: GroupWidgetItem = {
-                kind: "registry",
-                defId: op.defId,
-              };
-              const idx = itemsList.length;
-              itemsList.push(newItem);
-              if (op.gridPosition)
-                layouts[itemKey(newItem, idx)] = op.gridPosition;
-            } else if (op.op === "add_cohi") {
-              const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-              const newItem: GroupWidgetItem = {
-                kind: "cohi",
-                id,
-                sql: op.sql,
-                title: op.title,
-                vizConfig: op.vizConfig,
-              };
-              const idx = itemsList.length;
-              itemsList.push(newItem);
-              if (op.gridPosition)
-                layouts[itemKey(newItem, idx)] = op.gridPosition;
-            } else if (op.op === "remove") {
-              const idx = resolveGroupWidgetItemIndex(
-                itemsList,
-                op.widgetId ?? "",
-              );
-              if (idx < 0) {
-                removeMissed = true;
-              }
-              if (idx >= 0) {
-                const oldKeys = itemsList.map((it, i) => itemKey(it, i));
-                itemsList = itemsList.filter((_, i) => i !== idx);
-                const nextLayouts: Record<
-                  string,
-                  { x: number; y: number; w: number; h: number }
-                > = {};
-                itemsList.forEach((it, i) => {
-                  const newKey = itemKey(it, i);
-                  const oldKey = i < idx ? oldKeys[i] : oldKeys[i + 1];
-                  if (layouts[oldKey]) nextLayouts[newKey] = layouts[oldKey];
-                });
-                layouts = nextLayouts;
-              }
-            } else if (op.op === "resize") {
-              if (layouts[op.widgetId]) {
-                layouts = {
-                  ...layouts,
-                  [op.widgetId]: { ...layouts[op.widgetId], w: op.w, h: op.h },
-                };
-              }
-            } else if (op.op === "reorder") {
-              const keyToItem = new Map<string | undefined, GroupWidgetItem>();
-              itemsList.forEach((it, i) => keyToItem.set(itemKey(it, i), it));
-              const reordered = op.widgetIds
-                .map((k) => keyToItem.get(k))
-                .filter(Boolean) as GroupWidgetItem[];
-              if (reordered.length === itemsList.length) {
-                itemsList = reordered;
-                const nextLayouts: Record<
-                  string,
-                  { x: number; y: number; w: number; h: number }
-                > = {};
-                itemsList.forEach((it, i) => {
-                  const newKey = itemKey(it, i);
-                  const oldKey = op.widgetIds[i];
-                  if (layouts[oldKey]) nextLayouts[newKey] = layouts[oldKey];
-                });
-                layouts = nextLayouts;
-              }
-            } else if (op.op === "set_title") {
-              groupTitle = op.title;
-            } else if (op.op === "set_filters") {
-              savedFilters = { ...(savedFilters ?? {}), ...(op.filters ?? {}) };
-            } else if (op.op === "set_period") {
-              const built = buildGroupSavedFiltersFromFilterConfig({
-                filterable: true,
-                dateColumn: "application_date",
-                defaultPreset: op.preset,
-              });
-              if (built) {
-                savedFilters = {
-                  ...(savedFilters ?? {}),
-                  ...built,
-                  year: undefined,
-                };
-              }
-            } else if (op.op === "set_widget_title") {
-              const idx = itemsList.findIndex(
-                (it, i) => itemKey(it, i) === op.widgetId,
-              );
-              if (idx >= 0 && itemsList[idx].kind === "cohi") {
-                itemsList[idx] = { ...itemsList[idx], title: op.title };
-              }
-            }
-          }
-
-          const nextPayload = {
-            ...payload,
-            title: groupTitle,
-            savedFilters,
-            items: itemsList,
-            widgetLayouts:
-              Object.keys(layouts).length > 0 ? layouts : undefined,
-            layoutVersion: LAYOUT_VERSION,
-          } as typeof layoutItem.payload;
+          const payload = layoutItem.payload as WidgetGroupPayloadShape;
+          const { payload: nextPayload, removeMissed } = applyModifyGroupOperations(
+            payload,
+            groupAction.operations,
+          );
           setItemsWithHistory((prev) =>
             prev.map((it, i) =>
               i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
@@ -1881,36 +1750,10 @@ export function WorkbenchCanvas({
             break;
           }
           const layoutItem = items[groupIdx];
-          const payload = layoutItem.payload as {
-            type: "widget_group";
-            groupId: string;
-            title: string;
-            sectionType: SectionType;
-            widgetIds: string[];
-            items?: GroupWidgetItem[];
-            widgetLayouts?: Record<
-              string,
-              { x: number; y: number; w: number; h: number }
-            >;
-          };
-          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry")
-              return `${groupItem.defId}__${idx}`;
-            return `cohi__${groupItem.id}__${idx}`;
-          }
-          const itemsList = Array.isArray(payload.items)
-            ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({
-                kind: "registry" as const,
-                defId,
-              }));
-          const targetIdx = itemsList.findIndex(
-            (it, i) =>
-              it.kind === "registry" &&
-              (itemKey(it, i) === regAction.widgetId ||
-                it.defId === regAction.widgetId),
-          );
-          if (targetIdx < 0) {
+          const payload = layoutItem.payload as WidgetGroupPayloadShape;
+          const { payload: nextPayload, found, isRegistry } =
+            applyModifyRegistryWidget(payload, regAction);
+          if (!found) {
             toast({
               title: "Widget not found",
               description: `No registry widget "${regAction.widgetId}" in that group`,
@@ -1918,8 +1761,7 @@ export function WorkbenchCanvas({
             });
             break;
           }
-          const target = itemsList[targetIdx];
-          if (target.kind !== "registry") {
+          if (!isRegistry) {
             toast({
               title: "Not a registry widget",
               description:
@@ -1928,21 +1770,6 @@ export function WorkbenchCanvas({
             });
             break;
           }
-          const updatedItems = itemsList.map((it, i) =>
-            i === targetIdx && it.kind === "registry"
-              ? {
-                  ...it,
-                  configOverrides: {
-                    ...(it.configOverrides ?? {}),
-                    ...regAction.configOverrides,
-                  },
-                }
-              : it,
-          );
-          const nextPayload = {
-            ...payload,
-            items: updatedItems,
-          } as typeof layoutItem.payload;
           setItemsWithHistory((prev) =>
             prev.map((it, i) =>
               i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
@@ -2146,8 +1973,20 @@ export function WorkbenchCanvas({
           break;
         }
         case "delete_widget": {
-          setItemsWithHistory(items.filter((it) => it.i !== action.instanceId));
-          toast({ title: "Widget removed" });
+          const { items: nextItems, removed } = applyDeleteWidgetFromItems(
+            items,
+            action.instanceId,
+          );
+          if (removed) {
+            setItemsWithHistory(nextItems);
+            toast({ title: "Widget removed" });
+          } else {
+            toast({
+              title: "Widget not found",
+              description: `No widget matching "${action.instanceId}"`,
+              variant: "destructive",
+            });
+          }
           break;
         }
         case "create_canvas": {
@@ -2312,16 +2151,20 @@ export function WorkbenchCanvas({
           break;
         }
         case "modify_widget": {
-          if (editingWidgetId && action.instanceId !== editingWidgetId) {
+          const targetIdx = items.findIndex((it) => it.i === action.instanceId);
+          if (
+            editingWidgetId &&
+            action.instanceId !== editingWidgetId &&
+            targetIdx < 0
+          ) {
             toast({
               title: "Wrong widget",
               description:
-                "Cohi tried to modify a different widget. Only the widget you're editing (with the ring) can be modified. Click 'Stop editing' or select the correct widget and use Edit with Cohi.",
+                "Cohi tried to modify a widget that isn't on this canvas. Select the widget and use Edit with Cohi, or ask using its title.",
               variant: "destructive",
             });
             break;
           }
-          const targetIdx = items.findIndex((it) => it.i === action.instanceId);
           const hasSql = !!(action.sql && String(action.sql).trim());
           const hasChanges =
             action.changes && Object.keys(action.changes).length > 0;
@@ -4428,564 +4271,48 @@ export function WorkbenchCanvas({
             </div>
           )}
           {/* Canvas toolbar — hidden while the report builder is active */}
-          <div
-            className={cn(
-              "flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-1.5 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[44px] sticky top-0 z-20",
-              showReportBuilder && "hidden",
-            )}
-          >
-            <div className="flex items-center gap-1 flex-wrap md:flex-nowrap shrink-0">
-              {!showReportBuilder && (
-                <>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                        onClick={() => undo()}
-                        disabled={!canUndo || !isOwner}
-                      >
-                        <Undo2 className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Undo (Ctrl+Z)</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                        onClick={() => redo()}
-                        disabled={!canRedo || !isOwner}
-                      >
-                        <Redo2 className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      Redo (Ctrl+Shift+Z)
-                    </TooltipContent>
-                  </Tooltip>
-                  <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                  {/* Inline editable canvas name */}
-                  <input
-                    data-testid="workbench-canvas-title-input"
-                    type="text"
-                    value={saveTitle}
-                    onChange={(e) => isOwner && setSaveTitle(e.target.value)}
-                    readOnly={!isOwner}
-                    onBlur={() => {
-                      if (!saveTitle.trim()) setSaveTitle("Untitled canvas");
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter")
-                        (e.target as HTMLInputElement).blur();
-                    }}
-                    className={cn(
-                      "h-8 min-w-[120px] max-w-[260px] px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-200 bg-transparent border border-transparent rounded-md outline-none transition-colors truncate",
-                      isOwner
-                        ? "hover:border-slate-300 dark:hover:border-slate-600 focus:border-blue-400 dark:focus:border-blue-500 focus:ring-1 focus:ring-blue-400/30"
-                        : "cursor-default",
-                    )}
-                    placeholder="Canvas name…"
-                    title={isOwner ? "Click to rename this canvas" : saveTitle}
-                  />
-                  {isOwner && (
-                    <>
-                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            data-testid="workbench-save-button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                            onClick={canvasId ? handleSaveConfirm : handleSaveClick}
-                            // Also disable while the canvas is still loading: clicking
-                            // save before the load resolves would read `canvasId === null`
-                            // and take the "new canvas" branch, which (a) opens the Save
-                            // dialog unexpectedly and (b) risks overwriting the real
-                            // canvas content with a blank payload once load completes.
-                            disabled={isSaving || canvasLoading}
-                          >
-                            <Save className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">Save</TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
-                  <div className="min-w-[104px] flex items-center justify-end">
-                    {saveIndicator && (
-                      <span className={saveIndicator.className}>
-                        {saveIndicator.icon}
-                        {saveIndicator.label}
-                      </span>
-                    )}
-                  </div>
-                  {isOwner && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          data-testid="workbench-share-button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                          onClick={handleShareClick}
-                        >
-                          <Share2 className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Share</TooltipContent>
-                    </Tooltip>
-                  )}
-                  {isOwner && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                          onClick={() =>
-                            navigate(
-                              canvasId
-                                ? `/workbench/distributions?canvas=${canvasId}`
-                                : "/workbench/distributions",
-                            )
-                          }
-                        >
-                          <Mail className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        Schedule distribution
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  {canEdit && (
-                    <>
-                      <input
-                        ref={backgroundImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleBackgroundImageChange}
-                        className="hidden"
-                        aria-hidden
-                      />
-                      <DropdownMenu>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                              >
-                                <Palette className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            Background
-                          </TooltipContent>
-                        </Tooltip>
-                        <DropdownMenuContent align="start" className="w-64">
-                          <div className="px-2 py-2 flex items-center gap-2">
-                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                              Color
-                            </span>
-                            <input
-                              type="color"
-                              value={
-                                canvasBackground.type === "color"
-                                  ? canvasBackground.value
-                                  : "#ffffff"
-                              }
-                              onChange={(e) =>
-                                setCanvasBackground({
-                                  type: "color",
-                                  value: e.target.value,
-                                })
-                              }
-                              className="h-8 w-12 cursor-pointer rounded border border-slate-200 dark:border-slate-600 bg-transparent"
-                            />
-                          </div>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() =>
-                              backgroundImageInputRef.current?.click()
-                            }
-                            className="gap-2"
-                          >
-                            <Image className="h-4 w-4" /> Upload image
-                          </DropdownMenuItem>
-                          {/* AI background generation hidden until backend endpoint is implemented */}
-                          <DropdownMenuSeparator />
-                          <div className="px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-                            Templates
-                          </div>
-                          {BACKGROUND_TEMPLATES.map((t) => (
-                            <DropdownMenuItem
-                              key={t.id}
-                              onClick={() =>
-                                setCanvasBackground({
-                                  type: "template",
-                                  value: t.id,
-                                })
-                              }
-                              className="gap-2"
-                            >
-                              <span
-                                className="h-5 w-8 rounded border border-slate-200 dark:border-slate-600 shrink-0"
-                                style={t.style}
-                              />
-                              {t.label}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept={
-                          UPLOAD_ALLOWED_TYPES.join(",") +
-                          ",.csv,.xlsx,.xls,.pptx,.ppt"
-                        }
-                        onChange={handleFileChange}
-                        className="hidden"
-                        aria-hidden
-                      />
-                      <input
-                        ref={logoInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleLogoChange}
-                        className="hidden"
-                        aria-hidden
-                      />
-                      {/* Upload file button hidden – not ready for release
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400 relative" disabled={isUploading}>
-                      <Upload className="h-4 w-4" />
-                      {uploads.length > 0 && <span className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] rounded-full bg-slate-500 text-[10px] text-white flex items-center justify-center px-1">{uploads.length}</span>}
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{isUploading ? 'Uploading…' : 'Upload file'}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="start" className="w-72">
-                <DropdownMenuItem onClick={handleUploadClick} disabled={isUploading} className="gap-2">
-                  <Upload className="h-4 w-4" /> Upload CSV / Excel / PDF / image…
-                </DropdownMenuItem>
-                {uploads.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <div className="px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                      <Clock className="h-3.5 w-3.5" /> Recent uploads
-                    </div>
-                    {uploads.slice(0, 10).map((u) => (
-                      <DropdownMenuItem key={u.id} disabled className="gap-2 py-2 cursor-default">
-                        <span className="shrink-0">{getUploadIcon(u.filename)}</span>
-                        <span className="truncate flex-1" title={u.filename}>{u.filename}</span>
-                        <span className="text-xs text-slate-400 shrink-0">{formatUploadTime(u.uploadedAt)}</span>
-                      </DropdownMenuItem>
-                    ))}
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            */}
-                      {/* Image-to-Dashboard button hidden until feature is ready for release
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/30"
-                  onClick={() => setImageToDashboardOpen(true)}
-                >
-                  <Camera className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
-            </Tooltip>
-            */}
-                    </>
-                  )}
-                  {canEdit && (
-                    <>
-                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                      <DropdownMenu>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300"
-                              >
-                                <PlusCircle className="h-4 w-4" />
-                                <span className="text-xs font-medium">Add</span>
-                                <ChevronDown className="h-3.5 w-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            Add widget or template
-                          </TooltipContent>
-                        </Tooltip>
-                        <DropdownMenuContent
-                          align="start"
-                          className="w-[620px] p-0 overflow-hidden border-0 shadow-lg"
-                        >
-                          <div className="grid grid-cols-[160px_1fr] gap-0">
-                            <div className="space-y-0.5 p-2.5 bg-gradient-to-b from-slate-50/90 to-slate-100/60 dark:from-slate-800/40 dark:to-slate-900/50 rounded-l-lg border-r border-slate-200/60 dark:border-slate-700/50">
-                              {DASHBOARD_SECTION_GROUPS.map((group) => (
-                                <button
-                                  key={group.label}
-                                  type="button"
-                                  onClick={() => setActiveAddGroup(group.label)}
-                                  className={`w-full text-left rounded-lg px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-all duration-200 ${
-                                    activeAddGroup === group.label
-                                      ? "bg-violet-100 text-violet-700 shadow-sm dark:bg-violet-500/20 dark:text-violet-300"
-                                      : "text-slate-500 dark:text-slate-400 hover:bg-violet-50/80 dark:hover:bg-violet-500/10 hover:text-slate-700 dark:hover:text-slate-300"
-                                  }`}
-                                >
-                                  {group.label}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="rounded-r-lg bg-gradient-to-br from-rose-50/50 via-white to-violet-50/50 dark:from-slate-900/60 dark:via-slate-900/40 dark:to-indigo-950/30 p-3 border border-l-0 border-slate-200/50 dark:border-slate-700/50 flex flex-col">
-                              <div className="grid grid-cols-2 gap-2">
-                                {(
-                                  DASHBOARD_SECTION_GROUPS.find(
-                                    (g) => g.label === activeAddGroup,
-                                  )?.items ?? []
-                                ).map((section) => {
-                                  const Icon = section.icon;
-                                  return (
-                                    <DropdownMenuItem
-                                      key={section.id}
-                                      onClick={() =>
-                                        addDashboardSection(
-                                          section.id,
-                                          section.title,
-                                        )
-                                      }
-                                      className="gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:shadow-sm border border-transparent hover:border-rose-200/60 dark:hover:border-violet-500/30 transition-all duration-200"
-                                    >
-                                      <Icon
-                                        className={`h-4 w-4 shrink-0 ${section.iconClass ?? "text-slate-500"}`}
-                                      />
-                                      <span className="truncate">
-                                        {section.title}
-                                      </span>
-                                    </DropdownMenuItem>
-                                  );
-                                })}
-                              </div>
-                              <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-600/50">
-                                <DropdownMenuItem
-                                  onClick={addTextBlock}
-                                  className="gap-2.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:text-slate-800 dark:hover:text-slate-100 border-0 focus:bg-white/90 dark:focus:bg-slate-800/60 focus:text-slate-800 dark:focus:text-slate-100 cursor-pointer"
-                                >
-                                  <StickyNote className="h-4 w-4 shrink-0 text-amber-500/80 dark:text-amber-400/80" />
-                                  <span>Text block</span>
-                                </DropdownMenuItem>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="hidden h-px bg-slate-200/70 dark:bg-slate-700/60 my-2" />
-                          <DropdownMenuLabel className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-3">
-                            Templates
-                          </DropdownMenuLabel>
-                          <div className="hidden grid grid-cols-2 gap-2 px-2 py-2">
-                            {CANVAS_TEMPLATES.map((t) => {
-                              const Icon = t.icon;
-                              return (
-                                <DropdownMenuItem
-                                  key={t.id}
-                                  onClick={() => applyTemplate(t)}
-                                  className="gap-3 rounded-lg border border-transparent bg-slate-50/60 p-2.5 transition-colors data-[highlighted]:border-slate-200 data-[highlighted]:bg-slate-100 dark:bg-slate-800/40 dark:data-[highlighted]:border-slate-700 dark:data-[highlighted]:bg-slate-800"
-                                >
-                                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300">
-                                    <Icon className="h-4 w-4" />
-                                  </span>
-                                  <span className="flex flex-col">
-                                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                                      {t.label}
-                                    </span>
-                                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                                      {t.description}
-                                    </span>
-                                  </span>
-                                </DropdownMenuItem>
-                              );
-                            })}
-                          </div>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </>
-                  )}
-                  {/* Logo button hidden – not ready for release
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300"
-                  onClick={() => logoInputRef.current?.click()}
-                >
-                  <Image className="h-4 w-4" />
-                  <span className="text-xs font-medium">Logo</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Add logo</TooltipContent>
-            </Tooltip>
-            */}
-                  {canEdit && selectedWidgetId && (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0"
-                            onClick={() => duplicateWidget(selectedWidgetId)}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          Duplicate selected
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                            onClick={() => removeWidget(selectedWidgetId)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          Delete selected
-                        </TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
-                  {/* Arrange button hidden – not ready for release
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300">
-                      <LayoutGrid className="h-4 w-4" />
-                      <span className="text-xs font-medium">Arrange</span>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Arrange layout</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Auto layout</DropdownMenuLabel>
-                <DropdownMenuItem onClick={applyBestFitLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Best fit — balanced grid
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={applyMasonryLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Masonry — staggered columns
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Manual layouts</DropdownMenuLabel>
-                <DropdownMenuItem onClick={applyRowLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Single row
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={applyColumnLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Single column
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            */}
-                  {canEdit && (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0"
-                            onClick={addRichTextBlock}
-                          >
-                            <Type className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">Rich text</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                            onClick={() => setClearConfirmOpen(true)}
-                            disabled={!hasItems}
-                          >
-                            <Eraser className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          Clear canvas
-                        </TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
-                </>
-              )}
-              {/* --- End canvas-only tools --- */}
-
-              {!embeddedCohiHidden && !showCohiPanel && (
-                <CohiChatDockChip
-                  data-testid="workbench-cohi-toggle"
-                  onClick={() => setShowCohiPanel(true)}
-                  ariaLabel="Open Cohi Assistant"
-                  title="Cohi – Canvas assistant"
-                />
-              )}
-
-              <div className="ml-auto flex items-center gap-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
-                      onClick={() => setShowReportBuilder(true)}
-                      disabled={!hasItems}
-                    >
-                      <Presentation className="h-3.5 w-3.5" />
-                      PowerPoint Editor
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Open the slide builder to preview, edit, and export a
-                    PowerPoint deck from canvas data
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-            {/* Per-widget export is available in each widget's context menu */}
-          </div>
+          <WorkbenchTopToolbar
+            showReportBuilder={showReportBuilder}
+            undo={undo}
+            redo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            isOwner={isOwner}
+            saveTitle={saveTitle}
+            setSaveTitle={setSaveTitle}
+            canvasId={canvasId}
+            handleSaveConfirm={handleSaveConfirm}
+            handleSaveClick={handleSaveClick}
+            isSaving={isSaving}
+            canvasLoading={canvasLoading}
+            saveIndicator={saveIndicator}
+            handleShareClick={handleShareClick}
+            navigate={navigate}
+            canEdit={canEdit}
+            backgroundImageInputRef={backgroundImageInputRef}
+            handleBackgroundImageChange={handleBackgroundImageChange}
+            canvasBackground={canvasBackground}
+            setCanvasBackground={setCanvasBackground}
+            fileInputRef={fileInputRef}
+            handleFileChange={handleFileChange}
+            logoInputRef={logoInputRef}
+            handleLogoChange={handleLogoChange}
+            activeAddGroup={activeAddGroup}
+            setActiveAddGroup={setActiveAddGroup}
+            addDashboardSection={addDashboardSection}
+            addTextBlock={addTextBlock}
+            applyTemplate={applyTemplate}
+            selectedWidgetId={selectedWidgetId}
+            duplicateWidget={duplicateWidget}
+            removeWidget={removeWidget}
+            addRichTextBlock={addRichTextBlock}
+            setClearConfirmOpen={setClearConfirmOpen}
+            hasItems={hasItems}
+            embeddedCohiHidden={embeddedCohiHidden}
+            showCohiPanel={showCohiPanel}
+            setShowCohiPanel={setShowCohiPanel}
+            setShowReportBuilder={setShowReportBuilder}
+          />
 
           {/* Report Builder — always mounted so it stays in sync with canvas data.
               Hidden when not active to avoid layout interference. */}
