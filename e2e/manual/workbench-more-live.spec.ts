@@ -417,8 +417,12 @@ test.describe("More live workbench @manual-live", () => {
     record({
       id: "M17",
       name: "Chart type line",
-      status: hasLine || footerOk ? "works" : "rough",
-      observed: `lineCurve=${hasLine} footer=${footerOk}`,
+      status: hasLine ? "works" : footerOk ? "broken" : "broken",
+      observed: hasLine
+        ? `lineCurve=true`
+        : footerOk
+          ? `footer-only`
+          : `lineCurve=false footer=false`,
     });
   });
 
@@ -463,7 +467,7 @@ test.describe("More live workbench @manual-live", () => {
     record({
       id: "M20",
       name: "Rename pull-through title",
-      status: ok ? "works" : "rough",
+      status: ok ? "works" : "broken",
       observed: `ptTitle=${ok}`,
     });
   });
@@ -550,8 +554,12 @@ test.describe("More live workbench @manual-live", () => {
     record({
       id: "M24",
       name: "Chart type bar",
-      status: hasBar || footerOk ? "works" : "rough",
-      observed: `barRect=${hasBar} footer=${footerOk}`,
+      status: hasBar ? "works" : footerOk ? "broken" : "broken",
+      observed: hasBar
+        ? `barRect=true`
+        : footerOk
+          ? `footer-only`
+          : `barRect=false footer=false`,
     });
   });
 
