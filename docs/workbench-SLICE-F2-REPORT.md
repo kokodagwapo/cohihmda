@@ -32,9 +32,21 @@ Gitignored runtime copy: `test-results/more-live/SLICE-F2-REPORT.md`
 
 ## F5/F6 regression
 
-- NR01–NR08 + E01–E05: **13/13 passed** after toolbar extract
+- NR01–NR08 + E01–E05: **13/13 passed** (F5 toolbar extract)
+- Full more-live + unique-live: **40/40 Playwright passed** (~25 min)
 - Handler unit tests: **20/20 passed**
-- `WorkbenchCanvas.tsx`: **5096 lines** (target &lt;1500 not met; toolbar + layout still inline)
+- `WorkbenchCanvas.tsx`: **5096 lines** (target &lt;1500 not met; layout/render still inline)
+
+### Recorded failures (tests pass; status in REPORT)
+
+| ID | Status | Note |
+|----|--------|------|
+| M21 | broken | Footer "Updated dashboard group" — **restart backend** to load F3 all-time reconcile |
+| M23 | broken | WAC not on canvas after add turn — verify `augmentAddRegistry` + backend reload |
+| M24 | **works** | barRect=true after F3 wait + backend warm |
+| U02 | rough | lineCurve=false (flaky; M17 works same prompt class) |
+| U07 | broken | footer-only per F4 tighten (canvas Period chip missing L6M text) |
+| M11 | broken | PPT dialog=false |
 
 ## Reconcile pipeline log
 
