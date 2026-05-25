@@ -122,6 +122,26 @@ describe("workbenchChatHandoff", () => {
     expect(filtered[0].type).toBe("create_widget");
   });
 
+  it("filterExecutableWorkbenchActions normalizes modify_registry_widget to modify_widget", () => {
+    const filtered = filterExecutableWorkbenchActions([
+      {
+        type: "modify_registry_widget",
+        groupId: "g1",
+        widgetId: "w__0",
+        configOverrides: { chartType: "line" },
+        explanation: "line",
+      },
+    ] as WidgetAction[]);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]).toMatchObject({
+      type: "modify_widget",
+      target: "registry",
+      groupId: "g1",
+      widgetId: "w__0",
+      configPatch: { chartType: "line" },
+    });
+  });
+
   it("generateWorkbenchDraftScopeId returns non-empty string", () => {
     expect(generateWorkbenchDraftScopeId().length).toBeGreaterThan(8);
   });
