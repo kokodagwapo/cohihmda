@@ -16,7 +16,7 @@ test.describe("Unified chat running history (Cursor-style)", () => {
     await mockV1Permissions(userPage);
   });
 
-  test("@critical shows spinner on in-flight conversation in history", async ({
+  test("@COHI-398 @critical shows spinner on in-flight conversation in history", async ({
     userPage,
   }) => {
     let streamCount = 0;
@@ -81,7 +81,7 @@ test.describe("Unified chat running history (Cursor-style)", () => {
     });
   });
 
-  test("@critical composer stays enabled for new chat while another streams", async ({
+  test("@COHI-398 @critical composer stays enabled for new chat while another streams", async ({
     userPage,
   }) => {
     let streamCount = 0;
@@ -131,7 +131,7 @@ test.describe("Unified chat running history (Cursor-style)", () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("@critical clears history spinner and background badge after run completes", async ({
+  test("@COHI-398 @critical clears history spinner and background badge after run completes", async ({
     userPage,
   }) => {
     let streamCount = 0;
@@ -203,3 +203,5 @@ test.describe("Unified chat running history (Cursor-style)", () => {
     });
   });
 });
+
+

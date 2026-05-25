@@ -16,7 +16,7 @@ test.describe("Workbench all-time KPI scope", () => {
     await mockV1Permissions(userPage);
   });
 
-  test("@critical all-time widget executes SQL without dateFilter injection", async ({
+  test("@COHI-398 @critical all-time widget executes SQL without dateFilter injection", async ({
     userPage,
   }) => {
     const sqlStarts: string[] = [];
@@ -70,3 +70,5 @@ test.describe("Workbench all-time KPI scope", () => {
     expect(sqlStarts).toHaveLength(0);
   });
 });
+
+

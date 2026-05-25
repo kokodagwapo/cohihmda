@@ -39,7 +39,7 @@ const PROBES = [
 test.describe("Workbench explore batch 2 @explore-live", () => {
   test.setTimeout(1_200_000);
 
-  test("batch 2 probes", async ({ userPage }) => {
+  test("@COHI-398 batch 2 probes", async ({ userPage }) => {
     await forceUnifiedChat(userPage);
     for (const probe of PROBES) {
       const sqlStarts: string[] = [];
@@ -96,3 +96,4 @@ test.describe("Workbench explore batch 2 @explore-live", () => {
     expect(true).toBe(true);
   });
 });
+

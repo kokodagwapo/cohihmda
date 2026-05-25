@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures";
 
 test.describe("@critical Admin", () => {
-  test("@smoke admin user can access admin panel and major sections", async ({ adminPage }) => {
+  test("@COHI-398 @smoke admin user can access admin panel and major sections", async ({ adminPage }) => {
     await adminPage.goto("/admin", { waitUntil: "domcontentloaded" });
     await expect(adminPage).toHaveURL(/\/admin/);
     await expect(adminPage.getByRole("button", { name: "Users & Access" }).first()).toBeVisible();
@@ -9,13 +9,13 @@ test.describe("@critical Admin", () => {
     await expect(adminPage.getByRole("button", { name: "Connections" }).first()).toBeVisible();
   });
 
-  test("@smoke admin knowledge-base route loads", async ({ adminPage }) => {
+  test("@COHI-398 @smoke admin knowledge-base route loads", async ({ adminPage }) => {
     await adminPage.goto("/admin/knowledge-base", { waitUntil: "domcontentloaded" });
     await expect(adminPage).toHaveURL(/\/admin\/knowledge-base/);
     await expect(adminPage.getByRole("heading", { name: /Knowledge Base/i })).toBeVisible();
   });
 
-  test("admin can open user management and launch add-user flow", async ({ adminPage }) => {
+  test("@COHI-398 admin can open user management and launch add-user flow", async ({ adminPage }) => {
     await adminPage.goto("/admin", { waitUntil: "domcontentloaded" });
     await adminPage.getByRole("button", { name: "Users & Access" }).click();
     await expect(adminPage.getByRole("heading", { name: "User Management" })).toBeVisible();
@@ -26,7 +26,7 @@ test.describe("@critical Admin", () => {
     await adminPage.getByRole("button", { name: "Cancel" }).click();
   });
 
-  test("organization settings save flow behaves correctly for admins", async ({ adminPage }) => {
+  test("@COHI-398 organization settings save flow behaves correctly for admins", async ({ adminPage }) => {
     await adminPage.goto("/admin", { waitUntil: "domcontentloaded" });
     await adminPage.getByRole("button", { name: "Organization Settings" }).click();
     await expect(adminPage.getByRole("heading", { name: "Organization Settings" })).toBeVisible();
@@ -60,7 +60,7 @@ test.describe("@critical Admin", () => {
     }
   });
 
-  test("non-admin user is blocked from admin route", async ({ userPage }) => {
+  test("@COHI-398 non-admin user is blocked from admin route", async ({ userPage }) => {
     await userPage.goto("/admin", { waitUntil: "domcontentloaded" });
     const deniedTextVisible = await userPage
       .getByText(/access denied|not authorized|permission denied/i)
@@ -75,3 +75,5 @@ test.describe("@critical Admin", () => {
     }
   });
 });
+
+

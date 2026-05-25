@@ -20,7 +20,7 @@ async function assertNoHorizontalOverflow(page: import("@playwright/test").Page)
 }
 
 for (const vp of VIEWPORTS) {
-  test(`responsive shell @ ${vp.name} (${vp.width}x${vp.height})`, async ({
+  test(`@COHI-398 responsive shell @ ${vp.name} (${vp.width}x${vp.height})`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: vp.width, height: vp.height });
@@ -55,7 +55,7 @@ for (const vp of VIEWPORTS) {
   });
 }
 
-test("split resize handle hidden on narrow mobile full layout", async ({
+test("@COHI-398 split resize handle hidden on narrow mobile full layout", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -63,3 +63,4 @@ test("split resize handle hidden on narrow mobile full layout", async ({
   const handle = page.getByTestId("chat-split-resize-handle");
   await expect(handle).toBeHidden();
 });
+

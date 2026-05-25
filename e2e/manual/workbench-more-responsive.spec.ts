@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
   await forceUnifiedChat(page);
 });
 
-test("NR01 split pane drag changes chat column width", async ({ page }) => {
+test("@COHI-398 NR01 split pane drag changes chat column width", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/insights", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -60,7 +60,7 @@ test("NR01 split pane drag changes chat column width", async ({ page }) => {
   expect(after).not.toBe(before);
 });
 
-test("NR02 chat history or Full History @ 1440", async ({ page }) => {
+test("@COHI-398 NR02 chat history or Full History @ 1440", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoWithUnifiedChatShell(page, "/insights", { timeout: 60_000 });
   await skipIfLoggedOut(page);
@@ -72,7 +72,7 @@ test("NR02 chat history or Full History @ 1440", async ({ page }) => {
   expect(visible, "History entry in chat sidebar").toBe(true);
 });
 
-test("NR03 chat panel + composer @ 390 insights stacked", async ({ page }) => {
+test("@COHI-398 NR03 chat panel + composer @ 390 insights stacked", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoWithUnifiedChatShell(page, "/insights", { timeout: 60_000 });
   await skipIfLoggedOut(page);
@@ -80,7 +80,7 @@ test("NR03 chat panel + composer @ 390 insights stacked", async ({ page }) => {
   await assertNoPageHorizontalOverflow(page);
 });
 
-test("NR04 hub Create menu opens @ 1440", async ({ page }) => {
+test("@COHI-398 NR04 hub Create menu opens @ 1440", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/workbench/favorites", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -101,7 +101,7 @@ test("NR04 hub Create menu opens @ 1440", async ({ page }) => {
   expect(opened).toBe(true);
 });
 
-test("NR05 workbench readonly banner not shown for owner", async ({ page }) => {
+test("@COHI-398 NR05 workbench readonly banner not shown for owner", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoWithUnifiedChatShell(page, "/my-dashboard/new", { timeout: 60_000 });
   await skipIfLoggedOut(page);
@@ -116,7 +116,7 @@ test("NR05 workbench readonly banner not shown for owner", async ({ page }) => {
   await expect(readonly).toBeHidden();
 });
 
-test("NR06 Compact then Taller chat band @ 834", async ({ page }) => {
+test("@COHI-398 NR06 Compact then Taller chat band @ 834", async ({ page }) => {
   await page.setViewportSize({ width: 834, height: 1194 });
   await gotoWithUnifiedChatShell(page, "/my-dashboard/new", { timeout: 60_000 });
   await skipIfLoggedOut(page);
@@ -128,7 +128,7 @@ test("NR06 Compact then Taller chat band @ 834", async ({ page }) => {
   expect(box?.height ?? 0).toBeGreaterThan(120);
 });
 
-test("NR07 navigation menu + create on favorites @ 390", async ({ page }) => {
+test("@COHI-398 NR07 navigation menu + create on favorites @ 390", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/workbench/favorites", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -137,7 +137,7 @@ test("NR07 navigation menu + create on favorites @ 390", async ({ page }) => {
   await expect(page.locator("button:has(svg.lucide-plus)").first()).toBeVisible();
 });
 
-test("NR08 duplicate widget button visible on hover @ 1280", async ({ page }) => {
+test("@COHI-398 NR08 duplicate widget button visible on hover @ 1280", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await seedBoardReadyDashboard(page);
   await skipIfLoggedOut(page);
@@ -146,3 +146,4 @@ test("NR08 duplicate widget button visible on hover @ 1280", async ({ page }) =>
   const dup = page.getByRole("button", { name: "Duplicate widget" }).first();
   await assertVisibleAfterHover(page, group, dup, "duplicate");
 });
+

@@ -151,14 +151,14 @@ async function mockResearchWorkbenchSaveSession(page: Page) {
 }
 
 test.describe("@critical Research Lab", () => {
-  test("@smoke research page loads with input and mode toggle", async ({ userPage }) => {
+  test("@COHI-398 @smoke research page loads with input and mode toggle", async ({ userPage }) => {
     await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("heading", { level: 2, name: "Research Lab" })).toBeVisible();
     await expect(userPage.getByPlaceholder(/e\.g\., What's our YTD pull-through/i)).toBeVisible();
     await expect(userPage.getByRole("button", { name: /Deep Analysis/i })).toBeVisible();
   });
 
-  test("@smoke accepts research question input", async ({ userPage }) => {
+  test("@COHI-398 @smoke accepts research question input", async ({ userPage }) => {
     await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
     const prompt = userPage.getByPlaceholder(/e\.g\., What's our YTD pull-through/i);
     await prompt.fill("What are the top 5 conversion bottlenecks this month?");
@@ -428,3 +428,5 @@ test.describe("@critical Research Lab", () => {
     }
   });
 });
+
+

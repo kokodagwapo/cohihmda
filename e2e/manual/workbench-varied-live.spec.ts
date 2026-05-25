@@ -82,7 +82,7 @@ test.describe("Varied live workbench @manual-live", () => {
   });
 
   // --- Gap fixes (must pass after server reconcile) ---
-  test("V01 period YTD no widget recreate", async ({ page }) => {
+  test("@COHI-398 V01 period YTD no widget recreate", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const { actionSummary } = await sendWorkbenchTurn(
       page,
@@ -104,7 +104,7 @@ test.describe("Varied live workbench @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "V01-ytd.png"), fullPage: true });
   });
 
-  test("V02 period back to MTD", async ({ page }) => {
+  test("@COHI-398 V02 period back to MTD", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await sendWorkbenchTurn(page, "Switch the whole dashboard to year-to-date.");
     const { actionSummary } = await sendWorkbenchTurn(
@@ -123,7 +123,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V03 all-time KPI no date filter", async ({ page }) => {
+  test("@COHI-398 V03 all-time KPI no date filter", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const sqlWithFilter: string[] = [];
     const sqlWithoutFilter: string[] = [];
@@ -159,7 +159,7 @@ test.describe("Varied live workbench @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "V03-alltime.png"), fullPage: true });
   });
 
-  test("V04 all-time KPI in same group", async ({ page }) => {
+  test("@COHI-398 V04 all-time KPI in same group", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const before = countDashboardGroups(
       (await page.locator("#workbench-canvas-root").textContent()) ?? "",
@@ -187,13 +187,13 @@ test.describe("Varied live workbench @manual-live", () => {
   });
 
   // --- Varied product use cases ---
-  test("V05 last six months build", async ({ page }) => {
+  test("@COHI-398 V05 last six months build", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const { main, canvas } = await sendWorkbenchTurn(
       page,
       "Show me funded volume for the last six months as a line chart.",
     );
-    const built = /Funded|volume|Applied|widget/i.test(`${main} ${canvas}`);
+    const built = /Funded|volume|Applied|widget/i.test(`@COHI-398 ${main} ${canvas}`);
     record({
       id: "V05",
       name: "L6M line chart build",
@@ -203,7 +203,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V06 rename widget in group", async ({ page }) => {
+  test("@COHI-398 V06 rename widget in group", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const { main } = await sendWorkbenchTurn(
       page,
@@ -221,7 +221,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V07 analytical question no spurious build", async ({ page }) => {
+  test("@COHI-398 V07 analytical question no spurious build", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const widgetsBefore = await page
       .locator("#workbench-canvas-root")
@@ -254,7 +254,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V08 stacked bar chart request", async ({ page }) => {
+  test("@COHI-398 V08 stacked bar chart request", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const { main } = await sendWorkbenchTurn(
       page,
@@ -271,7 +271,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V09 fork to Research mid-thread", async ({ page }) => {
+  test("@COHI-398 V09 fork to Research mid-thread", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await sendWorkbenchTurn(page, "Build funded units MTD only — one KPI.");
     await dismissBlockingOverlays(page);
@@ -299,7 +299,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V10 deck after period change", async ({ page }) => {
+  test("@COHI-398 V10 deck after period change", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await sendWorkbenchTurn(page, "Switch the whole dashboard to year-to-date.");
     const { main } = await sendWorkbenchTurn(
@@ -317,13 +317,13 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V11 add branch table to group", async ({ page }) => {
+  test("@COHI-398 V11 add branch table to group", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const { main, canvas } = await sendWorkbenchTurn(
       page,
       "Add a table showing funded volume by branch for the current dashboard period.",
     );
-    const added = /table|branch|Added|Applied|modify_group/i.test(`${main} ${canvas}`);
+    const added = /table|branch|Added|Applied|modify_group/i.test(`@COHI-398 ${main} ${canvas}`);
     record({
       id: "V11",
       name: "Add branch table in group",
@@ -333,13 +333,13 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V12 empty canvas last quarter", async ({ page }) => {
+  test("@COHI-398 V12 empty canvas last quarter", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const { main, canvas } = await sendWorkbenchTurn(
       page,
       "Build a dashboard for last quarter performance.",
     );
-    const built = /widget|Applied|Funded|dashboard/i.test(`${main} ${canvas}`);
+    const built = /widget|Applied|Funded|dashboard/i.test(`@COHI-398 ${main} ${canvas}`);
     const clarify = /which period|clarif/i.test(main);
     record({
       id: "V12",
@@ -350,7 +350,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V13 triple turn build YTD all-time", async ({ page }) => {
+  test("@COHI-398 V13 triple turn build YTD all-time", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await sendWorkbenchTurn(page, "Build a small MTD dashboard: funded units and funded volume only.");
     await waitForWorkbenchCanvasPopulated(page, { timeoutMs: 180_000 }).catch(() => {});
@@ -360,7 +360,7 @@ test.describe("Varied live workbench @manual-live", () => {
       "Add one all-time total funded loans KPI to this dashboard.",
     );
     const ytdOk = !/Applied \d+ widgets/i.test(actionSummary);
-    const allTime = /all[- ]?time|total funded/i.test(`${actionSummary} ${main}`);
+    const allTime = /all[- ]?time|total funded/i.test(`@COHI-398 ${actionSummary} ${main}`);
     record({
       id: "V13",
       name: "Build → YTD → all-time KPI",
@@ -370,7 +370,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V14 remove then undo via chat add", async ({ page }) => {
+  test("@COHI-398 V14 remove then undo via chat add", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await sendWorkbenchTurn(page, "Remove the pull-through rate widget from the dashboard.");
     const canvasAfterRemove = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
@@ -379,7 +379,7 @@ test.describe("Varied live workbench @manual-live", () => {
       page,
       "Add pull-through rate back to the dashboard.",
     );
-    const back = /pull[- ]?through|Added|Applied/i.test(`${main} ${await page.locator("#workbench-canvas-root").textContent()}`);
+    const back = /pull[- ]?through|Added|Applied/i.test(`@COHI-398 ${main} ${await page.locator("#workbench-canvas-root").textContent()}`);
     record({
       id: "V14",
       name: "Remove then re-add widget",
@@ -389,7 +389,7 @@ test.describe("Varied live workbench @manual-live", () => {
     });
   });
 
-  test("V15 insight builder switch", async ({ page }) => {
+  test("@COHI-398 V15 insight builder switch", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await sendWorkbenchTurn(page, "What KPIs should I track for pipeline health?");
     await dismissBlockingOverlays(page);
@@ -425,3 +425,4 @@ test.describe("Varied live workbench @manual-live", () => {
     );
   });
 });
+

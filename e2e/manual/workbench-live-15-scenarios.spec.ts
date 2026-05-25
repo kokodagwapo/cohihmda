@@ -58,7 +58,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await forceUnifiedChat(page);
   });
 
-  test("01 board-ready MTD on empty canvas", async ({ page }) => {
+  test("@COHI-398 01 board-ready MTD on empty canvas", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Build a board-ready dashboard for this month.");
@@ -91,7 +91,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "01-board-ready.png"), fullPage: true });
   });
 
-  test("02 loose phrasing this month", async ({ page }) => {
+  test("@COHI-398 02 loose phrasing this month", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Show me how we are doing this month.");
@@ -111,7 +111,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "02-this-month.png"), fullPage: true });
   });
 
-  test("03 executive overview", async ({ page }) => {
+  test("@COHI-398 03 executive overview", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Give me an executive overview.");
@@ -131,7 +131,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "03-executive.png"), fullPage: true });
   });
 
-  test("04 period switch to YTD", async ({ page }) => {
+  test("@COHI-398 04 period switch to YTD", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Switch the whole dashboard to year-to-date.");
@@ -161,7 +161,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "04-ytd.png"), fullPage: true });
   });
 
-  test("05 chat change chart to bar", async ({ page }) => {
+  test("@COHI-398 05 chat change chart to bar", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Change the funded volume widget to a bar chart.");
@@ -190,7 +190,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "05-bar-chart.png"), fullPage: true });
   });
 
-  test("06 footer chart-type buttons", async ({ page }) => {
+  test("@COHI-398 06 footer chart-type buttons", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const barBtn = page
       .locator("#workbench-canvas-root")
@@ -216,7 +216,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "06-footer-type.png"), fullPage: true });
   });
 
-  test("07 remove widget by phrase", async ({ page }) => {
+  test("@COHI-398 07 remove widget by phrase", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Remove the pull-through rate widget from the dashboard.");
@@ -244,7 +244,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "07-remove.png"), fullPage: true });
   });
 
-  test("08 board-ready PowerPoint", async ({ page }) => {
+  test("@COHI-398 08 board-ready PowerPoint", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Turn this into a board-ready PowerPoint.");
@@ -271,7 +271,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "08-ppt.png"), fullPage: true });
   });
 
-  test("09 auto-fork Workbench to Chat", async ({ page }) => {
+  test("@COHI-398 09 auto-fork Workbench to Chat", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Build a quick MTD KPI summary.");
@@ -324,7 +324,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "09-fork.png"), fullPage: true });
   });
 
-  test("10 follow-up same conversation", async ({ page }) => {
+  test("@COHI-398 10 follow-up same conversation", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
     const streamPosts: string[] = [];
@@ -367,7 +367,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "10-followup.png"), fullPage: true });
   });
 
-  test("11 all-time KPI", async ({ page }) => {
+  test("@COHI-398 11 all-time KPI", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const input = unifiedChatMessageInput(page);
     let noDateFilter = false;
@@ -402,7 +402,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "11-all-time.png"), fullPage: true });
   });
 
-  test("12 export as deck phrasing", async ({ page }) => {
+  test("@COHI-398 12 export as deck phrasing", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Export this dashboard as a deck for leadership.");
@@ -422,7 +422,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "12-deck.png"), fullPage: true });
   });
 
-  test("13 new conversation while streaming", async ({ page }) => {
+  test("@COHI-398 13 new conversation while streaming", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Build a full MTD executive dashboard with many widgets.");
@@ -451,7 +451,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "13-multi-chat.png"), fullPage: true });
   });
 
-  test("14 suggest not build on empty", async ({ page }) => {
+  test("@COHI-398 14 suggest not build on empty", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("What should I look at first?");
@@ -476,7 +476,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
     await page.screenshot({ path: path.join(OUT, "14-advisory.png"), fullPage: true });
   });
 
-  test("15 YTD plus add chart one turn", async ({ page }) => {
+  test("@COHI-398 15 YTD plus add chart one turn", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const input = unifiedChatMessageInput(page);
     await input.fill("Switch to YTD and add a monthly funded volume trend chart.");
@@ -485,7 +485,7 @@ test.describe("15 live UX scenarios @manual-live", () => {
 
     const main = (await page.locator("main").textContent()) ?? "";
     const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-    const both = /YTD|year|period|volume|chart|Applied/i.test(`${main} ${canvas}`);
+    const both = /YTD|year|period|volume|chart|Applied/i.test(`@COHI-398 ${main} ${canvas}`);
 
     record({
       n: 15,
@@ -507,3 +507,4 @@ test.describe("15 live UX scenarios @manual-live", () => {
     );
   });
 });
+

@@ -28,7 +28,7 @@ test.describe("Live workbench board-ready prompt @live", () => {
     await forceUnifiedChat(userPage);
   });
 
-  test("builds MTD dashboard in one turn on empty canvas", async ({ userPage }) => {
+  test("@COHI-398 builds MTD dashboard in one turn on empty canvas", async ({ userPage }) => {
     const sqlDateFilters: Array<{ start?: string; end?: string; column?: string }> = [];
     let streamCompleted = false;
     let actionCount = 0;
@@ -93,7 +93,7 @@ test.describe("Live workbench board-ready prompt @live", () => {
     await expect(userPage.getByText(/Funded Units MTD|Funded Volume MTD/i)).toHaveCount(0);
   });
 
-  test("switches populated dashboard to YTD without recreating widgets", async ({ userPage }) => {
+  test("@COHI-398 switches populated dashboard to YTD without recreating widgets", async ({ userPage }) => {
     const sqlDateFilters: Array<{ start?: string; end?: string }> = [];
 
     userPage.on("request", (req) => {
@@ -137,7 +137,7 @@ test.describe("Live workbench board-ready prompt @live", () => {
     expect(createWidgetFlood).toBeLessThanOrEqual(1);
   });
 
-  test("generates presentation from populated canvas without asking for live values", async ({
+  test("@COHI-398 generates presentation from populated canvas without asking for live values", async ({
     userPage,
   }) => {
     const watcher = attachPresentationStreamWatcher(userPage);
@@ -185,7 +185,7 @@ test.describe("Live workbench board-ready prompt @live", () => {
     }
   });
 
-  test("all-time KPI runs without date filter injection", async ({ userPage }) => {
+  test("@COHI-398 all-time KPI runs without date filter injection", async ({ userPage }) => {
     const sqlDateFilters: Array<{ start?: string }> = [];
     let noDateFilterCount = 0;
 
@@ -225,3 +225,4 @@ test.describe("Live workbench board-ready prompt @live", () => {
     expect(noDateFilterCount).toBeGreaterThan(0);
   });
 });
+

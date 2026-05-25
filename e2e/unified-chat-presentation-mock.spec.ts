@@ -25,7 +25,7 @@ test.describe("Workbench presentation from chat (mocked)", () => {
     });
   });
 
-  test("@critical streams generate_report and does not ask for live values", async ({
+  test("@COHI-398 @critical streams generate_report and does not ask for live values", async ({
     userPage,
   }) => {
     let sawGenerateReport = false;
@@ -99,3 +99,5 @@ test.describe("Workbench presentation from chat (mocked)", () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 });
+
+

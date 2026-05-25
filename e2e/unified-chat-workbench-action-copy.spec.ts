@@ -16,7 +16,7 @@ test.describe("Workbench chat action summaries", () => {
     await mockV1Permissions(userPage);
   });
 
-  test("@critical shows period-update copy for modify_group not widget-create copy", async ({
+  test("@COHI-398 @critical shows period-update copy for modify_group not widget-create copy", async ({
     userPage,
   }) => {
     await userPage.route(/\/api\/chat\/v1\/messages:stream(?:\?.*)?$/, async (route) => {
@@ -62,3 +62,5 @@ test.describe("Workbench chat action summaries", () => {
     await expect(userPage.getByText(/Applied \d+ widgets to canvas/i)).toHaveCount(0);
   });
 });
+
+

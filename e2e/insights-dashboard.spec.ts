@@ -23,7 +23,7 @@ async function expectInsightsSections(page: Page) {
 }
 
 test.describe("Insights Dashboard", () => {
-  test("@smoke loads core dashboard sections", async ({ userPage }) => {
+  test("@COHI-398 @smoke loads core dashboard sections", async ({ userPage }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(userPage).toHaveURL(/\/insights/);
 
@@ -37,7 +37,7 @@ test.describe("Insights Dashboard", () => {
     await expect(userPage.getByRole("heading").first()).toBeVisible();
   });
 
-  test("@critical insights dropdown navigates within dashboard", async ({ userPage }) => {
+  test("@COHI-398 @critical insights dropdown navigates within dashboard", async ({ userPage }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     const insightsMenu = userPage.getByRole("button", { name: "Insights menu" });
     if ((await insightsMenu.count()) > 0 && (await insightsMenu.first().isVisible().catch(() => false))) {
@@ -64,3 +64,5 @@ test.describe("Insights Dashboard", () => {
     await expectInsightsSections(userPage);
   });
 });
+
+

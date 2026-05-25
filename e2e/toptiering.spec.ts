@@ -25,7 +25,7 @@ const topTieringRoutes = [
 
 test.describe("TopTiering pages", () => {
   for (const route of topTieringRoutes) {
-    test(`@regression renders ${route}`, async ({ userPage }) => {
+    test(`@COHI-398 @regression renders ${route}`, async ({ userPage }) => {
       await userPage.goto(route, { waitUntil: "domcontentloaded" });
       await expect(userPage).toHaveURL(new RegExp(route.replace(/\//g, "\\/")));
       const headingVisible = await userPage.locator("h1, h2").first().isVisible().catch(() => false);
@@ -38,7 +38,7 @@ test.describe("TopTiering pages", () => {
   }
 
   for (const route of topTieringRoutes) {
-    test(`@regression ${route} loads data APIs successfully`, async ({ userPage }) => {
+    test(`@COHI-398 @regression ${route} loads data APIs successfully`, async ({ userPage }) => {
       const apiResponses: Array<{ url: string; status: number }> = [];
       const responseListener = (response: Response) => {
         const url = response.url();
@@ -88,3 +88,5 @@ test.describe("TopTiering pages", () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 });
+
+

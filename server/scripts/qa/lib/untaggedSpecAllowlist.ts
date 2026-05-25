@@ -1,15 +1,2 @@
-export const UNTAGGED_SPEC_ALLOWLIST = new Set([
-  "e2e/admin.spec.ts",
-  "e2e/auth.spec.ts",
-  "e2e/critical-routes.spec.ts",
-  "e2e/dashboard-data.spec.ts",
-  "e2e/distributions.spec.ts",
-  "e2e/help-center.spec.ts",
-  "e2e/insights-dashboard.spec.ts",
-  "e2e/navigation.spec.ts",
-  "e2e/research-lab.spec.ts",
-  "e2e/role-access.spec.ts",
-  "e2e/settings.spec.ts",
-  "e2e/toptiering.spec.ts",
-  "e2e/workbench.spec.ts",
-]);
+/** Spec files exempt from per-test Jira tags (empty — all e2e specs are tagged). */
+export const UNTAGGED_SPEC_ALLOWLIST = new Set<string>([]);

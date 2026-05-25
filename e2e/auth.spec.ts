@@ -5,7 +5,7 @@ import { readProvisionedState } from "./provision-state";
 import { generateTotpCode } from "./totp";
 
 test.describe("Authentication", () => {
-  test("@smoke logs in with valid credentials", async ({ page }) => {
+  test("@COHI-398 @smoke logs in with valid credentials", async ({ page }) => {
     const state = readProvisionedState();
     test.skip(!state, "Missing E2E provisioned users state.");
     if (!state) return;
@@ -77,7 +77,7 @@ test.describe("Authentication", () => {
     await authPage.expectAuthenticated();
   });
 
-  test("@smoke shows error on invalid credentials", async ({ page }) => {
+  test("@COHI-398 @smoke shows error on invalid credentials", async ({ page }) => {
     await page.goto("/login", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill("invalid@example.com");
     await page.getByRole("button", { name: "Continue" }).click();
@@ -86,12 +86,12 @@ test.describe("Authentication", () => {
     await expect(page.getByText(/invalid credentials/i).first()).toBeVisible();
   });
 
-  test("@smoke redirects unauthenticated users from protected route", async ({ page }) => {
+  test("@COHI-398 @smoke redirects unauthenticated users from protected route", async ({ page }) => {
     await page.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/login\?returnTo=%2Finsights/);
   });
 
-  test("@smoke logs out from the user menu", async ({ userPage }) => {
+  test("@COHI-398 @smoke logs out from the user menu", async ({ userPage }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     const opened = await openUserMenu(userPage);
     test.skip(!opened, "User menu trigger not available in this layout/session.");
@@ -110,10 +110,12 @@ test.describe("Authentication", () => {
     await expect(logoutAction).toBeVisible();
   });
 
-  test("forgot-password flow accepts email", async ({ page }) => {
+  test("@COHI-398 forgot-password flow accepts email", async ({ page }) => {
     await page.goto("/forgot-password", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Email").fill("qa-check@example.com");
     await page.getByRole("button", { name: "Reset Password" }).click();
     await expect(page.getByText(/check your email/i)).toBeVisible();
   });
 });
+
+

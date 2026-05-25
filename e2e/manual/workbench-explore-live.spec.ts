@@ -140,7 +140,7 @@ function collectHints(text: string): string[] {
 test.describe("Workbench human exploration @explore-live", () => {
   test.setTimeout(2_400_000);
 
-  test("run all probes and print summary", async ({ userPage }) => {
+  test("@COHI-398 run all probes and print summary", async ({ userPage }) => {
     await forceUnifiedChat(userPage);
     const results: ProbeResult[] = [];
     const mtdStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
@@ -277,3 +277,4 @@ test.describe("Workbench human exploration @explore-live", () => {
     expect(results.length).toBe(PROBES.length);
   });
 });
+
