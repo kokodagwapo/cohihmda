@@ -2,6 +2,38 @@
 
 Gitignored runtime copy: `test-results/more-live/SLICE-F2-REPORT.md`
 
+## Current state (Post-I, 2026-05-25)
+
+| Area | Result |
+|------|--------|
+| **Slices I1–I5** | On branch `fix/COHI-398-workbench-mtd-scope` (`750b56c3` … `b4b7f939`) |
+| **Agency eval** | **21/21** offline anchors — CI: [`.github/workflows/agency-eval.yml`](../.github/workflows/agency-eval.yml), [docs/agency-eval-ci.md](agency-eval-ci.md) |
+| **`WorkbenchCanvas.tsx`** | **3917 lines** (was ~4524 post-H; target &lt;1500 deferred to I6) |
+| **New modules** | `WorkbenchCanvasItemsLayer`, `useCanvasLayout`, `useWorkbenchAutosave` |
+| **Unit tests** | Items layer smoke (2), layout undo (1), autosave indicator (1), reconcile +36 |
+
+### I1 stabilization (expected REPORT after full live re-run)
+
+| ID | Status | Change |
+|----|--------|--------|
+| M06, M22, U08 | **works** (expected) | `pollCanvasTextGone` + reconcile trace prompt on record |
+| M21 | **works** (expected) | Poll + all-time title regex; unit test for `add_cohi` pipeline |
+| M24 | **works** (expected) | `expect.poll` on `.recharts-bar-rectangle` count |
+| M25 | **skipped** | Covered by M03 share dialog |
+
+Run full live regression:
+
+```powershell
+$env:WORKBENCH_RECONCILE_DEBUG="1"
+cd server; npm run dev
+# separate shell
+npx playwright test e2e/manual/workbench-more-live.spec.ts e2e/manual/workbench-unique-live.spec.ts e2e/manual/workbench-edge-live.spec.ts e2e/manual/workbench-more-responsive.spec.ts --config=playwright.manual-live.config.ts
+```
+
+---
+
+## Archive — pre-I top table (2026-05-25)
+
 | ID | Suite | Case | Status | Observed |
 |----|-------|------|--------|----------|
 | M17 | more-live | Chart type line | works | lineCurve=true |
@@ -119,6 +151,16 @@ npx playwright test e2e/manual/workbench-more-live.spec.ts e2e/manual/workbench-
 - [workbenchWidgetPeriodReconcile.ts](server/src/services/workbench/workbenchWidgetPeriodReconcile.ts): `actionsIncludeWidgetAdd`, volume SQL, empty `modify_group` all-time seed
 - M11: `Slides (\d+)` + Back to Canvas; M21/U02/U07 polls
 
-### H5 — next branch (recommended)
+## Post-I (slice I1–I5)
 
-**H5.A — Canvas toward &lt;1,500 lines** (`WorkbenchCanvas.tsx` ~4524). Extract `itemsForRender` map → `WorkbenchCanvasItemsLayer.tsx`, then layout reducer + autosave hook. Agency-eval CI (H5.B) and remaining rough rows M06/M22/M24/M25/U08 (H5.C) after canvas split.
+| Slice | Commit topic |
+|-------|----------------|
+| I1 | Poll remove/chart; M25 skip; M21 unit; reconcile-trace 404 hint |
+| I2 | `agency-eval.yml` + `docs/agency-eval-ci.md` |
+| I3 | `WorkbenchCanvasItemsLayer` (~630 lines extracted) |
+| I4 | `useCanvasLayout`, `useWorkbenchAutosave` + unit tests |
+| I5 | This report trim + full live re-run (see command above) |
+
+### I6 (next branch)
+
+Extract cohi action dispatch, AI background, image-to-dashboard handlers to push `WorkbenchCanvas.tsx` toward &lt;1500 lines.
