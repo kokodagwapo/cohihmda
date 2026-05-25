@@ -24,6 +24,7 @@ import { useWidgetData } from "@/components/widgets/data";
 import { SectionHeader } from "@/components/widgets/components/SectionHeader";
 import { WidgetGroup } from "@/components/widgets/components/WidgetGroup";
 import { CohiWidgetRenderer } from "./CohiWidgetRenderer";
+import { migrateLegacyCanvasItem } from "@/lib/workbench/migrateLegacyCanvasItems";
 import type { CanvasLayoutItem, CanvasWidgetPayload, GroupWidgetItem } from "./types";
 
 /** Coalesce canvasDataStore writes for heavy widget_group payloads (loan detail groups, etc.). */
@@ -58,153 +59,6 @@ interface WidgetRendererProps {
   onMoveItemOut?: (item: GroupWidgetItem, targetGroupId: string) => void;
   /** Whether canvas interactions are editable (owner/editor). */
   canEdit?: boolean;
-}
-
-const CHART_TYPE_OPTIONS: {
-  type: string;
-  label: string;
-  Icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { type: 'bar', label: 'Bar', Icon: BarChart3 },
-  { type: 'line', label: 'Line', Icon: Activity },
-  { type: 'pie', label: 'Pie', Icon: PieChartIcon },
-  { type: 'area', label: 'Area', Icon: BarChart3 },
-  { type: 'donut', label: 'Donut', Icon: PieChartIcon },
-  { type: 'horizontal_bar', label: 'H-Bar', Icon: BarChart3 },
-  { type: 'table', label: 'Table', Icon: LayoutGrid },
-];
-
-function ChartWidget({
-  payload,
-  onTypeChange,
-}: {
-  payload: Extract<CanvasWidgetPayload, { type: "chart" }>;
-  onTypeChange?: (type: string) => void;
-}) {
-  const config = payload.config as { type?: string };
-  const [chartType, setChartType] = useState<string | null>(config?.type ?? null);
-
-  useEffect(() => {
-    setChartType(config?.type ?? null);
-  }, [config?.type]);
-
-  if (payload.type !== "chart" || !payload.config) return null;
-  const effectiveConfig = chartType ? { ...config, type: chartType } : config;
-
-  return (
-    <div className="h-full w-full flex flex-col overflow-hidden">
-      <div className="flex-1 min-h-0 p-2 overflow-auto">
-        <EnhancedVisualization
-          config={{
-            ...effectiveConfig,
-            animated: true,
-            drilldownEnabled: false,
-          }}
-          height={200}
-          showInsights={false}
-        />
-      </div>
-      <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40 shrink-0">
-        <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-0.5">
-          Type:
-        </span>
-        {CHART_TYPE_OPTIONS.map(({ type, label, Icon }) => (
-          <button
-            key={type}
-            className={`h-6 px-1.5 text-[10px] rounded-md canvas-interactive inline-flex items-center ${
-              (chartType ?? config.type) === type
-                ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
-            }`}
-            onClick={() => {
-              setChartType(type);
-              onTypeChange?.(type);
-            }}
-          >
-            <Icon className="w-3 h-3 mr-0.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function KpiWidget({
-  payload,
-}: {
-  payload: Extract<CanvasWidgetPayload, { type: "kpi" }>;
-}) {
-  if (payload.type !== "kpi") return null;
-  const formatted =
-    payload.format === "currency"
-      ? typeof payload.value === "number"
-        ? new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-            maximumFractionDigits: 0,
-          }).format(payload.value)
-        : String(payload.value)
-      : payload.format === "percent"
-      ? `${Number(payload.value)}%`
-      : String(payload.value);
-  return (
-    <div className="h-full w-full p-4 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200/70 dark:border-slate-700/70">
-      <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-        {payload.label}
-      </p>
-      <p className="text-xl font-semibold text-slate-900 dark:text-white mt-1">
-        {formatted}
-      </p>
-    </div>
-  );
-}
-
-function TableWidget({
-  payload,
-}: {
-  payload: Extract<CanvasWidgetPayload, { type: "table" }>;
-}) {
-  if (payload.type !== "table" || !payload.data?.length) return null;
-  const columns = payload.columns || Object.keys(payload.data[0] || {});
-  return (
-    <div className="h-full w-full overflow-auto p-2">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 dark:border-slate-700">
-            {columns.map((col) => (
-              <th
-                key={col.key || col}
-                className="text-left py-2 px-2 font-medium text-slate-600 dark:text-slate-400"
-              >
-                {typeof col === "object" ? col.label : col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {payload.data.slice(0, 10).map((row, idx) => (
-            <tr
-              key={idx}
-              className="border-b border-slate-100 dark:border-slate-800"
-            >
-              {columns.map((col) => {
-                const key = typeof col === "object" ? col.key : col;
-                return (
-                  <td
-                    key={key}
-                    className="py-1.5 px-2 text-slate-800 dark:text-slate-200"
-                  >
-                    {String(row[key] ?? "")}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
 }
 
 const currentYear = new Date().getFullYear();
@@ -449,48 +303,6 @@ function LoanFunnelViewEmbed({
         selectedChannel={selectedChannel}
         hiddenSections={hiddenSections}
       />
-    </div>
-  );
-}
-
-function PinnedInsightWidget({
-  payload,
-}: {
-  payload: Extract<CanvasWidgetPayload, { type: "pinned_insight" }>;
-}) {
-  if (payload.type !== "pinned_insight") return null;
-  const hasViz =
-    payload.visualization && payload.visualization.data?.length > 0;
-  return (
-    <div className="h-full w-full p-3 overflow-auto rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/80 dark:bg-slate-800/50 flex flex-col">
-      <div className="flex items-center gap-2 mb-2 shrink-0">
-        <Lightbulb className="w-4 h-4 text-amber-500 shrink-0" />
-        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-          {payload.title}
-        </p>
-      </div>
-      {hasViz ? (
-        <>
-          <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 mb-2 shrink-0">
-            {payload.content}
-          </p>
-          <div className="flex-1 min-h-0">
-            <EnhancedVisualization
-              config={{
-                ...payload.visualization!,
-                animated: true,
-                drilldownEnabled: false,
-              }}
-              height={120}
-              showInsights={false}
-            />
-          </div>
-        </>
-      ) : (
-        <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-4">
-          {payload.content}
-        </p>
-      )}
     </div>
   );
 }
@@ -920,7 +732,7 @@ function CohiWidgetRendererWithTenant({
 }
 
 export function WidgetRenderer({
-  item,
+  item: itemProp,
   height = 200,
   width,
   onUpdatePayload,
@@ -928,6 +740,10 @@ export function WidgetRenderer({
   onMoveItemOut,
   canEdit = true,
 }: WidgetRendererProps) {
+  const item = useMemo(
+    () => migrateLegacyCanvasItem(itemProp),
+    [itemProp],
+  );
   const { type, payload } = item;
   const style = { minHeight: height };
 
@@ -1091,36 +907,6 @@ export function WidgetRenderer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.i]);
 
-  if (type === "chart" && payload.type === "chart")
-    return (
-      <div style={style}>
-        <ChartWidget
-          payload={payload}
-          onTypeChange={
-            canEdit && onUpdatePayload
-              ? (nextType) =>
-                  onUpdatePayload({
-                    ...payload,
-                    type: "chart",
-                    config: { ...(payload.config as object), type: nextType },
-                  })
-              : undefined
-          }
-        />
-      </div>
-    );
-  if (type === "kpi" && payload.type === "kpi")
-    return (
-      <div style={style}>
-        <KpiWidget payload={payload} />
-      </div>
-    );
-  if (type === "table" && payload.type === "table")
-    return (
-      <div style={style}>
-        <TableWidget payload={payload} />
-      </div>
-    );
   if (type === "dashboard_section" && payload.type === "dashboard_section")
     return (
       <div
@@ -1146,12 +932,6 @@ export function WidgetRenderer({
             />
           </ScaleToFit>
         )}
-      </div>
-    );
-  if (type === "pinned_insight" && payload.type === "pinned_insight")
-    return (
-      <div style={style}>
-        <PinnedInsightWidget payload={payload} />
       </div>
     );
   if (type === "news_card" && payload.type === "news_card")

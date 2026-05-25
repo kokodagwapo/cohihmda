@@ -11,6 +11,11 @@
 
 import type { ChatMessage, VisualizationConfig } from '@/hooks/useCohiChat';
 import { createLayoutItem, type CanvasLayoutItem, type GroupWidgetItem } from '@/components/workbench/canvas/types';
+import {
+  WORKBENCH_LEGACY_CHART_ID,
+  WORKBENCH_LEGACY_KPI_ID,
+  WORKBENCH_LEGACY_TABLE_ID,
+} from '@/components/widgets/registry/legacyWorkbenchWidgets';
 
 /** Default widget sizes per type */
 const WIDGET_SIZES = {
@@ -138,45 +143,52 @@ function buildStaticCanvasItem(
 ): CanvasLayoutItem {
   const baseId = `chat-export-${message.id || index}`;
 
-  // KPI widget
+  // KPI widget → legacy registry embed
   if ((viz.type === 'kpi' || viz.type === 'kpi-grid') && viz.kpiConfig) {
     const size = WIDGET_SIZES.kpi;
     return createLayoutItem(
       `${baseId}-kpi`,
-      'kpi',
+      'registry_widget',
       {
-        type: 'kpi',
-        label: viz.kpiConfig.label,
-        value: viz.kpiConfig.value,
-        format: viz.kpiConfig.format,
+        type: 'registry_widget',
+        definitionId: WORKBENCH_LEGACY_KPI_ID,
+        config: {
+          label: viz.kpiConfig.label,
+          value: viz.kpiConfig.value,
+          format: viz.kpiConfig.format,
+        },
       },
       { x: 0, y: 0, ...size },
     );
   }
 
-  // Table widget
+  // Table widget → legacy registry embed
   if (viz.type === 'table' && viz.tableConfig) {
     const size = WIDGET_SIZES.table;
     return createLayoutItem(
       `${baseId}-table`,
-      'table',
+      'registry_widget',
       {
-        type: 'table',
-        columns: viz.tableConfig.columns.map((c) => ({ key: c.key, label: c.label })),
-        data: viz.data || [],
+        type: 'registry_widget',
+        definitionId: WORKBENCH_LEGACY_TABLE_ID,
+        config: {
+          columns: viz.tableConfig.columns.map((c) => ({ key: c.key, label: c.label })),
+          data: viz.data || [],
+        },
       },
       { x: 0, y: 0, ...size },
     );
   }
 
-  // Generic chart widget (static data snapshot)
+  // Generic chart (static snapshot) → legacy registry embed
   const size = WIDGET_SIZES.chart;
   return createLayoutItem(
     `${baseId}-chart`,
-    'chart',
+    'registry_widget',
     {
-      type: 'chart',
-      config: viz,
+      type: 'registry_widget',
+      definitionId: WORKBENCH_LEGACY_CHART_ID,
+      config: { vizConfig: viz },
     },
     { x: 0, y: 0, ...size },
   );

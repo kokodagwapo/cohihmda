@@ -135,6 +135,11 @@ import {
   isRegistryModifyAction,
   normalizeRegistryModifyAction,
 } from "@/lib/workbench/normalizeModifyWidgetAction";
+import { migrateLegacyCanvasItems } from "@/lib/workbench/migrateLegacyCanvasItems";
+import {
+  WORKBENCH_LEGACY_CHART_ID,
+  WORKBENCH_LEGACY_PINNED_ID,
+} from "@/components/widgets/registry/legacyWorkbenchWidgets";
 import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
 import {
   applyModifyGroupOperations,
@@ -2031,6 +2036,7 @@ export function WorkbenchCanvas({
             ? convertLayoutToPixels(content.layout, containerWidth)
             : content.layout;
           nextLayout = migrateLoanDetailToWidgetGroup(nextLayout);
+          nextLayout = migrateLegacyCanvasItems(nextLayout);
           setItems(nextLayout);
         }
         if (Array.isArray(content.annotations))
@@ -2502,10 +2508,12 @@ export function WorkbenchCanvas({
 
   const applyTemplate = useCallback(
     (template: (typeof CANVAS_TEMPLATES)[number]) => {
-      const newItems = normalizeTemplateItems(template.items, canvasWidth, {
-        x: 0,
-        y: 0,
-      });
+      const newItems = migrateLegacyCanvasItems(
+        normalizeTemplateItems(template.items, canvasWidth, {
+          x: 0,
+          y: 0,
+        }),
+      );
       setItemsWithHistory(() => newItems);
       if (template.background) setCanvasBackground(template.background);
       setSelectedWidgetId(null);
@@ -2526,10 +2534,13 @@ export function WorkbenchCanvas({
         const payload =
           pin.type === "pinned_insight"
             ? {
-                type: "pinned_insight" as const,
-                title: pin.payload.title,
-                content: pin.payload.content,
-                visualization: pin.payload.visualization,
+                type: "registry_widget" as const,
+                definitionId: WORKBENCH_LEGACY_PINNED_ID,
+                config: {
+                  title: pin.payload.title,
+                  content: pin.payload.content,
+                  visualization: pin.payload.visualization,
+                },
               }
             : {
                 type: "news_card" as const,
@@ -2537,7 +2548,8 @@ export function WorkbenchCanvas({
                 summary: pin.payload.summary,
                 link: pin.payload.link,
               };
-        const type = pin.type;
+        const type =
+          pin.type === "pinned_insight" ? "registry_widget" : pin.type;
         newItems.push(
           createLayoutItem(id, type, payload, {
             x: 0,
@@ -2654,8 +2666,12 @@ export function WorkbenchCanvas({
         setUploads((prev) => [uploadRecord, ...prev]);
         if (visualization) {
           addWidget(
-            "chart",
-            { type: "chart", config: visualization },
+            "registry_widget",
+            {
+              type: "registry_widget",
+              definitionId: WORKBENCH_LEGACY_CHART_ID,
+              config: { vizConfig: visualization },
+            },
             { w: 6, h: 3 },
           );
         }
