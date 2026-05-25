@@ -1184,6 +1184,11 @@ export function CohiWidgetRenderer({
 
   const presentationLocked = artifactCapabilities?.canEditPresentation === false;
   const persistPresentation = canEdit && !!onPersistPatch && !presentationLocked;
+  /** Chart-type row: allow save via group onVizTypeChange or standalone onPersistPatch */
+  const canChangeChartType =
+    canEdit &&
+    !presentationLocked &&
+    (!!onPersistPatch || !!onVizTypeChange);
 
   const setChartType = useCallback((type: VisualizationConfig['type']) => {
     const next = normalizeVizType(type);
@@ -1652,13 +1657,13 @@ export function CohiWidgetRenderer({
           <button
             key={type}
             type="button"
-            disabled={!persistPresentation}
+            disabled={!canChangeChartType}
             className={cn(
               'h-5 px-1.5 rounded text-[9px] font-medium whitespace-nowrap canvas-interactive transition-colors flex items-center gap-0.5 shrink-0',
               chartType === type
                 ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
                 : 'text-slate-400 dark:text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 hover:text-slate-600 dark:hover:text-slate-300',
-              !persistPresentation && 'opacity-50',
+              !canChangeChartType && 'opacity-50',
             )}
             onClick={() => setChartType(type)}
             title={label}

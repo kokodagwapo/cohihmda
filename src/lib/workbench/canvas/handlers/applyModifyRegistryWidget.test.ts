@@ -21,7 +21,7 @@ describe("applyModifyRegistryWidget", () => {
     expect(found).toBe(true);
     expect(isRegistry).toBe(true);
     expect(next.items?.[0]).toMatchObject({
-      configOverrides: { chartType: "line" },
+      config: { chartType: "line" },
     });
   });
 

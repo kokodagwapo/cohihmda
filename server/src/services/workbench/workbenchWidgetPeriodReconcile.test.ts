@@ -212,6 +212,34 @@ describe("workbenchWidgetPeriodReconcile", () => {
     expect(add?.title).toBe("All-time Funded Volume");
   });
 
+  it("renames LLM add_cohi title to All-time Funded Volume on all-time ask", () => {
+    const actions = [
+      {
+        type: "modify_group",
+        groupId: "grp-1",
+        operations: [
+          {
+            op: "add_cohi",
+            title: "Funded Volume",
+            sql: "SELECT 1",
+            vizConfig: { type: "kpi" },
+            filterConfig: { filterable: true, defaultPreset: "YTD" },
+          },
+        ],
+      },
+    ];
+    augmentAllTimeReconcileModifyGroupAddCohi(actions, {
+      userQuestion: "Show funded volume as an all-time KPI",
+    });
+    const add = (
+      actions[0] as {
+        operations: Array<{ op: string; title?: string; filterConfig?: { filterable?: boolean } }>;
+      }
+    ).operations.find((o) => o.op === "add_cohi");
+    expect(add?.title).toBe("All-time Funded Volume");
+    expect(add?.filterConfig?.filterable).toBe(false);
+  });
+
   it("seeds create_widget after stripping period-only on all-time", () => {
     const actions = [
       {

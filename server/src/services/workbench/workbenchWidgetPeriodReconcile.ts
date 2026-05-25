@@ -258,6 +258,7 @@ export function augmentPeriodSwitchActions(
   },
 ): void {
   if ((options.canvasState?.totalItems ?? 0) === 0) return;
+  if (isChartTypeChangeRequest(options.userQuestion)) return;
   if (!isPeriodSwitchOnlyRequest(options.userQuestion)) return;
 
   const period = parseRequestedPeriodFromText(options.userQuestion);
@@ -482,7 +483,10 @@ export function augmentAllTimeKpiToGroup(
       {
         op: "add_cohi",
         sql: cw.sql ?? "SELECT COUNT(*) AS total FROM public.loans l",
-        title: cw.title ?? "All-time KPI",
+        title:
+          inferAllTimeKpiTitle(options.userQuestion ?? "") ||
+          cw.title ||
+          "All-time KPI",
         vizConfig: cw.config ?? { type: "kpi", data: [] },
         filterConfig: cw.filterConfig ?? {
           filterable: false,
@@ -516,6 +520,9 @@ export function augmentAllTimeReconcileModifyGroupAddCohi(
         filterConfig?: WidgetFilterConfigLike;
       };
       if (row.op !== "add_cohi") continue;
+      if (!/all[- ]?time/i.test(String(row.title ?? ""))) {
+        row.title = inferAllTimeKpiTitle(options?.userQuestion ?? "");
+      }
       reconcileCohiDashboardWidget(
         row as CreateWidgetActionLike & { filterConfig?: WidgetFilterConfigLike },
         null,

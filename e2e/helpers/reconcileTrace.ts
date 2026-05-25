@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { e2eAuthHeaders } from "./e2eAuth";
 
 type TraceEntry = {
   ts: string;
@@ -34,8 +35,10 @@ export async function captureReconcileTrace(
   if (!needle) return { status: "empty", trace: "" };
 
   try {
+    const headers = await e2eAuthHeaders(page);
     const res = await page.request.get(
       `${base}/api/cohi-chat/workbench/reconcile-trace?n=${limit}`,
+      { headers },
     );
     if (res.status() === 404) {
       console.warn(

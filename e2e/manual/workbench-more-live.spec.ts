@@ -444,27 +444,39 @@ test.describe("More live workbench @manual-live", () => {
   });
 
   test("M17 chart type line via chat", async ({ page }) => {
-    await seedBoardReadyDashboard(page);
+    await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
-    const { actionSummary } = await sendTurn(
-      page,
-      "Change pull-through by branch chart to a line chart.",
-    );
-    await page.waitForTimeout(2000);
-    const lineCurve = page.locator("#workbench-canvas-root .recharts-line-curve").first();
-    const hasLine = await lineCurve.isVisible({ timeout: 15_000 }).catch(() => false);
-    const footerOk = /line|chart|pull[- ]?through/i.test(actionSummary);
+    await sendTurn(page, "Change pull-through by branch chart to a line chart.");
+    await waitForChatInputReady(page);
+    let status: Status = "works";
+    let observed = "line chart";
+    try {
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(() => {
+              const root = document.getElementById("workbench-canvas-root");
+              if (!root) return 0;
+              const lineAttr = root.querySelectorAll(
+                '[data-widget-title*="Pull-Through by Branch" i][data-chart-type="line"]',
+              ).length;
+              if (lineAttr > 0) return 1;
+              return root.querySelectorAll(".recharts-line-curve").length;
+            }),
+          { timeout: 90_000, intervals: [1000, 2000, 3000] },
+        )
+        .toBeGreaterThan(0);
+    } catch {
+      status = "broken";
+      observed = "line chart not visible";
+    }
     await record(
       page,
       {
         id: "M17",
         name: "Chart type line",
-        status: hasLine ? "works" : footerOk ? "broken" : "broken",
-        observed: hasLine
-          ? `lineCurve=true`
-          : footerOk
-            ? `footer-only`
-            : `lineCurve=false footer=false`,
+        status,
+        observed,
       },
       "Change pull-through by branch chart to a line chart.",
     );
@@ -555,10 +567,13 @@ test.describe("More live workbench @manual-live", () => {
     let status: Status = "works";
     let observed = "removed";
     try {
-      await expectCanvasMissingWidget(page, /pull[- ]?through/i);
+      await expectCanvasMissingWidget(page, /^Pull-Through Rate$/i);
+      await expectCanvasHasWidget(page, /Pull-Through by Branch/i, {
+        timeoutMs: 15_000,
+      });
     } catch {
       status = "broken";
-      observed = "pull-through still present";
+      observed = "pull-through rate still present or branch chart missing";
     }
     await record(
       page,
@@ -620,17 +635,17 @@ test.describe("More live workbench @manual-live", () => {
     try {
       await expect
         .poll(
-          async () => {
-            const barType = await page
-              .locator('[data-widget-title*="Pull-Through by Branch" i][data-chart-type="bar"]')
-              .count();
-            if (barType > 0) return true;
-            const rects = await page
-              .locator('[data-widget-type="cohi_widget"] .recharts-bar-rectangle, [data-widget-type="group_inner"][data-chart-type="bar"] .recharts-bar-rectangle')
-              .count();
-            return rects;
-          },
-          { timeout: 45_000, intervals: [1000, 2000] },
+          async () =>
+            page.evaluate(() => {
+              const root = document.getElementById("workbench-canvas-root");
+              if (!root) return 0;
+              const barAttr = root.querySelectorAll(
+                '[data-widget-title*="Pull-Through by Branch" i][data-chart-type="bar"]',
+              ).length;
+              if (barAttr > 0) return 1;
+              return root.querySelectorAll(".recharts-bar-rectangle").length;
+            }),
+          { timeout: 90_000, intervals: [1000, 2000, 3000] },
         )
         .toBeGreaterThan(0);
     } catch {

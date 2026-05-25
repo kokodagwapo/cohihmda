@@ -44,8 +44,8 @@ export function applyModifyRegistryWidget(
     i === targetIdx && it.kind === "registry"
       ? {
           ...it,
-          configOverrides: {
-            ...(it.configOverrides ?? {}),
+          config: {
+            ...(it.config ?? {}),
             ...action.configOverrides,
           },
         }

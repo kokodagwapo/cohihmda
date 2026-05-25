@@ -236,7 +236,7 @@ export function ChartCard({
       default:
         return null;
     }
-  }, [data, chartHeight, width]);
+  }, [data, chartHeight, width, config]);
 
   return (
     <WidgetShell

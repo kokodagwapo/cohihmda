@@ -101,6 +101,10 @@ import {
   ACTORS_TABLE_DEFAULT_COLUMN_IDS,
 } from "@/stores/widgetSectionStore";
 import { getWidgetDefinition } from "@/components/widgets/registry";
+import {
+  ChartTypeStrip,
+  type ChartCardChartType,
+} from "@/components/widgets/components/ChartTypeStrip";
 import type { ColumnDef } from "@/components/views/LoanDetailView";
 import { normalizeFilterState } from "@/utils/loanDetailFilters";
 import type { ColumnFilterState } from "@/utils/loanDetailFilters";
@@ -1794,6 +1798,7 @@ function GridCellWidget({
   onOpenEditDialog,
   onRegistryConfigChange,
   onSqlChanged,
+  canvasCanEdit = true,
 }: {
   item: GroupWidgetItem;
   /** Stable unique ID used for canvasDataStore reporting */
@@ -1802,6 +1807,8 @@ function GridCellWidget({
   groupId: string;
   width: number;
   height: number;
+  /** Owner can edit canvas (enables registry chart-type strip). */
+  canvasCanEdit?: boolean;
   dateFilter: DateFilter | null;
   dimensionFilters: DimensionFilter[] | null;
   filterSyncEnabled: boolean;
@@ -1987,6 +1994,7 @@ function GridCellWidget({
             canvasItemId={itemId}
             width={width}
             height={height - 20}
+            canvasCanEdit={canvasCanEdit}
           />
         ) : (
           <GridCellCohiWidget
@@ -2054,6 +2062,15 @@ function getLoanDetailFilterSummary(
   return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
+const CHART_TYPE_STRIP_H = 26;
+
+function normalizeChartCardType(raw: unknown): ChartCardChartType {
+  if (raw === "line" || raw === "area" || raw === "pie" || raw === "bar") {
+    return raw;
+  }
+  return "bar";
+}
+
 function GridCellRegistryWidget({
   defId,
   config: configProp,
@@ -2061,6 +2078,7 @@ function GridCellRegistryWidget({
   canvasItemId,
   width,
   height,
+  canvasCanEdit = true,
 }: {
   defId: string;
   config?: Record<string, unknown>;
@@ -2068,6 +2086,7 @@ function GridCellRegistryWidget({
   canvasItemId: string;
   width: number;
   height: number;
+  canvasCanEdit?: boolean;
 }) {
   const definition = getWidgetDefinition(defId);
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
@@ -2508,9 +2527,29 @@ function GridCellRegistryWidget({
       }
     : {};
 
+  if (!definition || !Component) return null;
+
+  const dataChartType =
+    normalizedReportData != null &&
+    typeof normalizedReportData === "object" &&
+    "chartType" in normalizedReportData
+      ? (normalizedReportData as { chartType?: unknown }).chartType
+      : undefined;
+  const chartType = normalizeChartCardType(
+    configProp?.chartType ?? dataChartType,
+  );
+  const showChartTypeStrip =
+    canvasCanEdit &&
+    !!onConfigChange &&
+    definition.category === "chart";
+  const contentHeight = showChartTypeStrip
+    ? Math.max(80, height - CHART_TYPE_STRIP_H)
+    : height;
+
   const config = {
     ...definition?.config,
     ...configProp,
+    chartType,
     canvasItemId,
     definitionName: definition.name,
     definitionCategory: definition.category,
@@ -2532,8 +2571,6 @@ function GridCellRegistryWidget({
     ...estimatedClosingsRiskConfig,
   };
 
-  if (!definition || !Component) return null;
-
   return (
     <div className="h-full w-full flex flex-col min-h-0">
       <div className="flex-1 min-h-0 min-w-0">
@@ -2542,11 +2579,20 @@ function GridCellRegistryWidget({
           loading={loading}
           error={error}
           width={width}
-          height={height}
+          height={contentHeight}
           config={config}
           onConfigChange={onConfigChange}
         />
       </div>
+      {showChartTypeStrip && (
+        <ChartTypeStrip
+          value={chartType}
+          disabled={!canvasCanEdit}
+          onChange={(type) =>
+            onConfigChange?.({ ...(configProp ?? {}), chartType: type })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -5990,7 +6036,11 @@ export function WidgetGroup({
                       ? item.title ?? ""
                       : "";
                 const groupChartType =
-                  item.kind === "cohi" ? item.vizConfig?.type ?? "" : "";
+                  item.kind === "cohi"
+                    ? item.vizConfig?.type ?? ""
+                    : item.kind === "registry"
+                      ? String(item.config?.chartType ?? "")
+                      : "";
                 const groupFilterable =
                   item.kind === "cohi"
                     ? item.filterConfig?.filterable === false
@@ -6014,6 +6064,7 @@ export function WidgetGroup({
                       groupId={groupId}
                       width={cellW}
                       height={cellH}
+                      canvasCanEdit={canEdit}
                       dateFilter={groupDateFilter}
                       dimensionFilters={groupDimensionFilters}
                       filterSyncEnabled={effectiveFilterSync}

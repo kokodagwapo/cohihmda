@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { e2eAuthHeaders } from "./e2eAuth";
 import {
   gotoWithUnifiedChatShell,
   selectUnifiedChatType,
@@ -94,7 +95,11 @@ export async function seedDeterministicBoard(
     /\/$/,
     "",
   );
+  // page.request only inherits BrowserContext cookies after at least one navigation.
+  await gotoWithUnifiedChatShell(page, "/my-dashboard", { timeout: 60_000 });
+  const headers = await e2eAuthHeaders(page);
   const res = await page.request.post(`${base}/api/cohi-chat/workbench/test-seed`, {
+    headers,
     data: { fixture },
   });
   if (!res.ok()) {

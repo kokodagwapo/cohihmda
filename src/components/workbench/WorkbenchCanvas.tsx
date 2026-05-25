@@ -1513,6 +1513,14 @@ export function WorkbenchCanvas({
         }
         case "modify_registry_widget": {
           const regAction = action as ModifyRegistryWidgetAction;
+          const loose = regAction as ModifyRegistryWidgetAction & {
+            chartType?: string;
+          };
+          const configOverrides =
+            regAction.configOverrides ??
+            (loose.chartType
+              ? { chartType: loose.chartType }
+              : undefined);
           const groupIdx = resolveWidgetGroupIndex(items, regAction.groupId);
           if (groupIdx < 0) {
             toast({
@@ -1525,7 +1533,10 @@ export function WorkbenchCanvas({
           const layoutItem = items[groupIdx];
           const payload = layoutItem.payload as WidgetGroupPayloadShape;
           const { payload: nextPayload, found, isRegistry } =
-            applyModifyRegistryWidget(payload, regAction);
+            applyModifyRegistryWidget(payload, {
+              ...regAction,
+              configOverrides: configOverrides ?? regAction.configOverrides ?? {},
+            });
           if (!found) {
             toast({
               title: "Widget not found",
