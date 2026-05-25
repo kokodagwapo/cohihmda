@@ -12,7 +12,6 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { useWidgetSectionStore, type SectionType, type SectionFilters } from "@/stores/widgetSectionStore";
-import { Rnd } from "react-rnd";
 import { api } from "@/lib/api";
 import * as XLSX from "xlsx";
 import { cn } from "@/lib/utils";
@@ -92,16 +91,19 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { useCanvasExport } from "@/hooks/useCanvasExport";
-import { useCanvasHistory } from "@/hooks/useCanvasHistory";
+import { useCanvasLayout } from "@/lib/workbench/canvas/useCanvasLayout";
+import {
+  useWorkbenchAutosave,
+  type SaveStatus,
+} from "@/lib/workbench/canvas/useWorkbenchAutosave";
 import { useCanvasPinStore } from "@/stores/canvasPinStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { WidgetRenderer } from "@/components/workbench/canvas/WidgetRenderer";
-import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
 import { WorkbenchTopToolbar } from "@/components/workbench/canvas/WorkbenchTopToolbar";
 import { WorkbenchCanvasSurface } from "@/components/workbench/canvas/WorkbenchCanvasSurface";
 import { WorkbenchEmptyState } from "@/components/workbench/canvas/WorkbenchEmptyState";
 import { WorkbenchSaveDialog } from "@/components/workbench/canvas/WorkbenchSaveDialog";
 import { WorkbenchShareDialog } from "@/components/workbench/canvas/WorkbenchShareDialog";
+import { WorkbenchCanvasItemsLayer } from "@/components/workbench/canvas/WorkbenchCanvasItemsLayer";
 import {
   createLayoutItem,
   type CanvasLayoutItem,
@@ -156,7 +158,6 @@ import {
 } from "@/lib/workbench/workbenchDraftLayoutCache";
 import {
   consumePendingWorkbenchActions,
-  COHI_WORKBENCH_EDIT_WIDGET_EVENT,
   COHI_WORKBENCH_STOP_EDITING_EVENT,
   dispatchWorkbenchEditingWidgetState,
   draftScopeIdForCanvasTab,
@@ -938,21 +939,6 @@ function migrateLoanDetailToWidgetGroup(
   });
 }
 
-/** Hideable sub-sections per dashboard_section (for "Hide sections" menu). */
-const DASHBOARD_HIDEABLE_SECTIONS: Record<
-  string,
-  { id: string; label: string }[]
-> = {
-  topTiering: [
-    { id: "dailyStory", label: "Executive summary / Daily Story" },
-    { id: "chart", label: "Funnel / Detail chart" },
-  ],
-  loanFunnel: [
-    { id: "dailyStory", label: "Executive summary / Daily Story" },
-    { id: "chart", label: "Funnel / Detail chart" },
-  ],
-};
-
 function getNextPosition(items: CanvasLayoutItem[]): { x: number; y: number } {
   if (items.length === 0) return { x: 0, y: 0 };
   let maxY = 0;
@@ -982,7 +968,7 @@ function convertLayoutToPixels(
   }));
 }
 
-export type SaveStatus = "saved" | "saving" | "unsaved" | "idle";
+export type { SaveStatus };
 
 /** Fixed ID for the seeded demo canvas; in dev it is loaded via /api/workbench/canvases/demo (no auth). */
 export const DEMO_CANVAS_ID = "00000000-0000-0000-0000-000000000002";
@@ -1032,6 +1018,8 @@ export function WorkbenchCanvas({
   chatDraftScopeId,
 }: WorkbenchCanvasProps) {
   const embeddedCohiHidden = isWorkbenchEmbeddedCohiHidden();
+  const isOwner = isOwnerProp ?? true;
+  const canEdit = isOwner;
   const {
     items,
     annotations,
@@ -1044,10 +1032,15 @@ export function WorkbenchCanvas({
     redo,
     canUndo,
     canRedo,
-  } = useCanvasHistory<CanvasLayoutItem, CanvasAnnotation>(
-    restoreLayoutFromDraftCache(loadCanvasId, chatDraftScopeId),
-    [],
-  );
+    updateItemRect,
+    updateWidgetPayload,
+    bringToFront,
+    sendToBack,
+  } = useCanvasLayout({
+    initialItems: restoreLayoutFromDraftCache(loadCanvasId, chatDraftScopeId),
+    initialAnnotations: [],
+    canEdit,
+  });
   const [uploads, setUploads] = useState<CanvasUpload[]>([]);
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>(
     () =>
@@ -1118,8 +1111,6 @@ export function WorkbenchCanvas({
     useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
-  const canEdit = isOwner;
   const canTransferOwnership =
     !!canvasId &&
     (isRecordOwner ||
@@ -1166,155 +1157,34 @@ export function WorkbenchCanvas({
   const pendingPins = useCanvasPinStore((s) => s.pendingPins);
   const consumePendingPins = useCanvasPinStore((s) => s.consumePendingPins);
 
-  /* ─── Autosave: dirty-state tracking & debounced save ─── */
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const lastSavedSnapshotRef = useRef<string>("");
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manualSavingRef = useRef(false);
   const previousLoadCanvasIdRef = useRef<string | null>(loadCanvasId ?? null);
 
-  // Build a snapshot string for comparison
-  const currentSnapshot = useMemo(() => {
-    try {
-      return JSON.stringify({
-        items,
-        annotations,
-        bg: canvasBackground,
-        uploads,
-        title: saveTitle,
-      });
-    } catch {
-      return "";
-    }
-  }, [items, annotations, canvasBackground, uploads, saveTitle]);
-
-  const buildLayoutWithLatestGroupFilters = useCallback(
-    (layoutItems: CanvasLayoutItem[]): CanvasLayoutItem[] => {
-      const sections = useWidgetSectionStore.getState().sections;
-      return layoutItems.map((it) => {
-        if (it.type !== "widget_group" || it.payload.type !== "widget_group") return it;
-        const current = sections[it.payload.groupId];
-        if (!current) return it;
-        const mergedSavedFilters = compactFiltersForPersistence({
-          ...(it.payload.savedFilters || {}),
-          ...current,
-        });
-        return {
-          ...it,
-          payload: {
-            ...it.payload,
-            ...(mergedSavedFilters ? { savedFilters: mergedSavedFilters } : {}),
-          },
-        };
-      });
-    },
-    [],
-  );
-
-  const persistExistingCanvas = useCallback(
-    async (options?: { keepalive?: boolean }) => {
-      if (!canvasId || !isOwner) return null;
-
-      const title = saveTitle.trim() || "Untitled canvas";
-      const persistedLayout = buildLayoutWithLatestGroupFilters(items);
-      const content = {
-        layoutVersion: "freeform-v1",
-        layout: persistedLayout,
-        annotations,
-        background: canvasBackground,
-        uploadsMeta: uploads,
-      };
-      const snapshot = JSON.stringify({
-        items: persistedLayout,
-        annotations,
-        bg: canvasBackground,
-        uploads,
-        title: saveTitle,
-      });
-      const saveTenantQs = tenantId
-        ? `?tenant_id=${encodeURIComponent(tenantId)}`
-        : "";
-      const url = `/api/workbench/canvases/${canvasId}${saveTenantQs}`;
-      const body = JSON.stringify({ title, content });
-
-      if (options?.keepalive) {
-        void fetch(url, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body,
-          keepalive: true,
-        });
-        return { title, snapshot };
-      }
-
-      await api.request(url, { method: "PUT", body });
-      lastSavedSnapshotRef.current = snapshot;
-      onSaved?.(canvasId, title);
-      return { title, snapshot };
-    },
-    [
-      annotations,
-      canvasBackground,
-      canvasId,
-      buildLayoutWithLatestGroupFilters,
-      isOwner,
-      items,
-      onSaved,
-      saveTitle,
-      tenantId,
-      uploads,
-    ],
-  );
-
-  // Determine dirty state
-  const isDirty = useMemo(() => {
-    if (!lastSavedSnapshotRef.current) return false; // never saved/loaded — not dirty
-    return currentSnapshot !== lastSavedSnapshotRef.current;
-  }, [currentSnapshot]);
-
-  // Notify parent of dirty state changes
-  useEffect(() => {
-    onDirtyChange?.(isDirty);
-  }, [isDirty, onDirtyChange]);
-
-  // Update visual save status based on dirty
-  useEffect(() => {
-    if (isDirty && saveStatus !== "saving") {
-      setSaveStatus("unsaved");
-    } else if (!isDirty && saveStatus !== "saving") {
-      setSaveStatus(canvasId ? "saved" : "idle");
-    }
-  }, [isDirty, canvasId, saveStatus]);
-
-  // Autosave: debounce 5s after last change for already-saved canvases
-  useEffect(() => {
-    if (autosaveTimerRef.current) {
-      clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-    if (!canvasId || !isDirty || !isOwner) return;
-
-    autosaveTimerRef.current = setTimeout(async () => {
-      // Skip if a manual save is already in progress
-      if (manualSavingRef.current) return;
-      setSaveStatus("saving");
-      try {
-        await persistExistingCanvas();
-        setSaveStatus("saved");
-      } catch {
-        setSaveStatus("unsaved");
-      }
-    }, 5000);
-
-    return () => {
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
-        autosaveTimerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSnapshot, canvasId, persistExistingCanvas]);
+  const {
+    saveStatus,
+    setSaveStatus,
+    isDirty,
+    saveIndicator,
+    persistExistingCanvas,
+    buildLayoutWithLatestGroupFilters,
+    syncSavedSnapshot,
+  } = useWorkbenchAutosave({
+    items,
+    annotations,
+    canvasBackground,
+    uploads,
+    saveTitle,
+    canvasId,
+    isOwner,
+    tenantId,
+    onDirtyChange,
+    onSaved,
+    lastSavedSnapshotRef,
+    manualSavingRef,
+    loadCanvasId,
+    chatDraftScopeId,
+  });
 
   useEffect(() => {
     const previousLoadCanvasId = previousLoadCanvasIdRef.current;
@@ -1348,58 +1218,6 @@ export function WorkbenchCanvas({
     if (!loadCanvasId || chatDraftScopeId) return;
     setDraftScopeId(draftScopeIdForCanvasTab(loadCanvasId));
   }, [loadCanvasId, chatDraftScopeId]);
-
-  useEffect(() => {
-    if (!canvasId || !isOwner || !isDirty) return;
-
-    const handlePageHide = () => {
-      void persistExistingCanvas({ keepalive: true });
-    };
-
-    window.addEventListener("pagehide", handlePageHide);
-    return () => window.removeEventListener("pagehide", handlePageHide);
-  }, [canvasId, isDirty, isOwner, persistExistingCanvas]);
-
-  const saveIndicator = useMemo(() => {
-    if (!isOwner) {
-      if (!canvasId) return null;
-      return {
-        label: "View only",
-        className:
-          "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap flex items-center justify-end gap-1",
-        icon: <Lock className="h-3 w-3" />,
-      };
-    }
-
-    if (saveStatus === "saving") {
-      return {
-        label: "Saving...",
-        className:
-          "text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap",
-        icon: null,
-      };
-    }
-
-    if (saveStatus === "saved" && canvasId && !isDirty) {
-      return {
-        label: "Saved",
-        className:
-          "text-[11px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap",
-        icon: null,
-      };
-    }
-
-    if (saveStatus === "unsaved" && canvasId && isDirty) {
-      return {
-        label: "Unsaved changes",
-        className:
-          "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap",
-        icon: null,
-      };
-    }
-
-    return null;
-  }, [canvasId, isDirty, isOwner, saveStatus]);
 
   // --- Cohi Workbench Intelligence ---
   const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
@@ -2262,13 +2080,15 @@ export function WorkbenchCanvas({
                 )
               : (content.layout ?? []);
             layoutForSnap = migrateLoanDetailToWidgetGroup(layoutForSnap);
-            lastSavedSnapshotRef.current = JSON.stringify({
-              items: layoutForSnap,
-              annotations: content.annotations ?? [],
-              bg: content.background ?? canvasBackground,
-              uploads: content.uploadsMeta ?? [],
-              title: data.title ?? "Untitled canvas",
-            });
+            syncSavedSnapshot(
+              JSON.stringify({
+                items: layoutForSnap,
+                annotations: content.annotations ?? [],
+                bg: content.background ?? canvasBackground,
+                uploads: content.uploadsMeta ?? [],
+                title: data.title ?? "Untitled canvas",
+              }),
+            );
             setSaveStatus("saved");
           });
         });
@@ -2306,7 +2126,7 @@ export function WorkbenchCanvas({
         // Reset baseline so the autosave that runs ~5s after this event
         // doesn't persist the now-stale in-memory layout. Refetch will
         // re-establish a baseline once the new content lands.
-        lastSavedSnapshotRef.current = "";
+        syncSavedSnapshot("");
         setExternalRefetchToken((t) => t + 1);
       }
     };
@@ -2370,32 +2190,6 @@ export function WorkbenchCanvas({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showCohiPanel]);
-
-  const bringToFront = useCallback(
-    (id: string) => {
-      setItemsWithHistory((prev) => {
-        const idx = prev.findIndex((p) => p.i === id);
-        if (idx < 0) return prev;
-        const item = prev[idx];
-        return [...prev.slice(0, idx), ...prev.slice(idx + 1), item];
-      });
-      toast({ title: "Brought to front" });
-    },
-    [setItemsWithHistory, toast],
-  );
-
-  const sendToBack = useCallback(
-    (id: string) => {
-      setItemsWithHistory((prev) => {
-        const idx = prev.findIndex((p) => p.i === id);
-        if (idx < 0) return prev;
-        const item = prev[idx];
-        return [item, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
-      });
-      toast({ title: "Sent to back" });
-    },
-    [setItemsWithHistory, toast],
-  );
 
   const applyBestFitLayout = useCallback(() => {
     if (items.length === 0) return;
@@ -2543,51 +2337,6 @@ export function WorkbenchCanvas({
       toast({ title: "Widget duplicated" });
     },
     [canEdit, items, setItemsWithHistory, toast],
-  );
-
-  const updateItemRect = useCallback(
-    (
-      id: string,
-      next: Partial<Pick<CanvasLayoutItem, "x" | "y" | "w" | "h">>,
-      withHistory = false,
-    ) => {
-      if (!canEdit) return;
-      // Clamp position so widgets can't be dragged off the left/top edges
-      const clamped = { ...next };
-      if (clamped.x !== undefined) clamped.x = Math.max(0, clamped.x);
-      if (clamped.y !== undefined) clamped.y = Math.max(0, clamped.y);
-      const setter = withHistory ? setItemsWithHistory : setItems;
-      setter((prev) =>
-        prev.map((i) => (i.i === id ? { ...i, ...clamped } : i)),
-      );
-    },
-    [canEdit, setItems, setItemsWithHistory],
-  );
-
-  const updateWidgetPayload = useCallback(
-    (
-      id: string,
-      payload: CanvasLayoutItem["payload"],
-      options?: { recordHistory?: boolean },
-    ) => {
-      if (!canEdit) return;
-      const mapper = (prev: CanvasLayoutItem[]) =>
-        prev.map((i) => {
-          if (i.i !== id) return i;
-          try {
-            if (JSON.stringify(i.payload) === JSON.stringify(payload)) return i;
-          } catch {
-            // Fall through and update the payload if serialization fails.
-          }
-          return { ...i, payload };
-        });
-      if (options?.recordHistory) {
-        setItemsWithHistory(mapper);
-      } else {
-        setItems(mapper);
-      }
-    },
-    [canEdit, setItems, setItemsWithHistory],
   );
 
   const addTextBlock = useCallback(() => {
@@ -3670,13 +3419,15 @@ export function WorkbenchCanvas({
       // Update snapshot so dirty-state resets
       if (!canvasId) {
         const persistedLayout = buildLayoutWithLatestGroupFilters(items);
-        lastSavedSnapshotRef.current = JSON.stringify({
-          items: persistedLayout,
-          annotations,
-          bg: canvasBackground,
-          uploads,
-          title: saveTitle,
-        });
+        syncSavedSnapshot(
+          JSON.stringify({
+            items: persistedLayout,
+            annotations,
+            bg: canvasBackground,
+            uploads,
+            title: saveTitle,
+          }),
+        );
       }
       setSaveStatus("saved");
       setSaveDialogOpen(false);
@@ -3866,388 +3617,30 @@ export function WorkbenchCanvas({
               canvasContentHeight={canvasContentHeight}
             >
               {hasItems ? (
-                itemsForRender.map((displayItem, index) => {
-                  const item = items[index]!;
-                  const isDashboardSection =
-                    item.type === "dashboard_section" &&
-                    item.payload.type === "dashboard_section";
-                  const payload = item.payload;
-                  const isLegacyLoanDetail =
-                    isDashboardSection &&
-                    (payload as { sectionId?: string }).sectionId ===
-                      "loanDetail";
-                  const hideableSections = isDashboardSection
-                    ? (DASHBOARD_HIDEABLE_SECTIONS[
-                        (payload as { sectionId: string }).sectionId
-                      ] ?? [])
-                    : [];
-                  const hiddenSections = isDashboardSection
-                    ? ((payload as { hiddenSections?: string[] })
-                        .hiddenSections ?? [])
-                    : [];
-                  const displayMode = isDashboardSection
-                    ? ((
-                        payload as {
-                          displayMode?: "full" | "compact" | "hidden";
-                        }
-                      ).displayMode ?? "full")
-                    : undefined;
-                  const onToggleSection = isDashboardSection
-                    ? (sectionId: string, hidden: boolean) => {
-                        const prev =
-                          (payload as { hiddenSections?: string[] })
-                            .hiddenSections ?? [];
-                        const next = hidden
-                          ? [...prev, sectionId]
-                          : prev.filter((s) => s !== sectionId);
-                        updateWidgetPayload(item.i, {
-                          ...payload,
-                          hiddenSections: next,
-                        });
-                      }
-                    : undefined;
-
-                  // ─── Group actions for standalone cohi_widget items ───
-                  const isStandaloneCohiWidget =
-                    item.type === "cohi_widget" &&
-                    payload.type === "cohi_widget";
-                  const availableGroups = isStandaloneCohiWidget
-                    ? items
-                        .filter(
-                          (it) =>
-                            it.type === "widget_group" &&
-                            it.payload.type === "widget_group" &&
-                            it.i !== item.i,
-                        )
-                        .map((it) => ({
-                          id: it.i,
-                          title: (it.payload as any).title || "Untitled Group",
-                        }))
-                    : [];
-
-                  const handleMoveToGroup = isStandaloneCohiWidget
-                    ? (groupId: string) => {
-                        const groupItem = items.find((it) => it.i === groupId);
-                        if (
-                          !groupItem ||
-                          groupItem.payload.type !== "widget_group"
-                        )
-                          return;
-                        const gp = groupItem.payload;
-                        const currentItems =
-                          gp.items ||
-                          gp.widgetIds.map((id: string) => ({
-                            kind: "registry" as const,
-                            defId: id,
-                          }));
-                        const cohiPayload = payload as {
-                          sql: string;
-                          title: string;
-                          vizConfig: any;
-                          explanation?: string;
-                        };
-                        const newItem = {
-                          kind: "cohi" as const,
-                          id: `moved-${Date.now()}`,
-                          sql: cohiPayload.sql,
-                          title: cohiPayload.title,
-                          vizConfig: cohiPayload.vizConfig,
-                          explanation: cohiPayload.explanation,
-                        };
-                        const updatedGP = {
-                          ...gp,
-                          items: [...currentItems, newItem],
-                          widgetIds: [...currentItems, newItem]
-                            .filter((i: any) => i.kind === "registry")
-                            .map((i: any) => i.defId),
-                        };
-                        // Remove standalone item and update the target group
-                        const sourceId = item.i;
-                        const targetId = groupId;
-                        setItemsWithHistory((prev) =>
-                          prev
-                            .filter((it) => it.i !== sourceId)
-                            .map((it) =>
-                              it.i === targetId
-                                ? { ...it, payload: updatedGP }
-                                : it,
-                            ),
-                        );
-                        toast({
-                          title: "Moved to group",
-                          description: (gp as any).title,
-                        });
-                      }
-                    : undefined;
-
-                  const handleWrapInGroup = isStandaloneCohiWidget
-                    ? () => {
-                        const cohiPayload = payload as {
-                          sql: string;
-                          title: string;
-                          vizConfig: any;
-                          explanation?: string;
-                        };
-                        const groupId = `wrap-group-${Date.now()}`;
-                        const newGroupItem = createLayoutItem(
-                          groupId,
-                          "widget_group",
-                          {
-                            type: "widget_group",
-                            groupId,
-                            title: cohiPayload.title || "New Group",
-                            sectionType: "company-scorecard",
-                            widgetIds: [],
-                            items: [
-                              {
-                                kind: "cohi" as const,
-                                id: `wrapped-${Date.now()}`,
-                                sql: cohiPayload.sql,
-                                title: cohiPayload.title,
-                                vizConfig: cohiPayload.vizConfig,
-                                explanation: cohiPayload.explanation,
-                              },
-                            ],
-                            filterSync: false, // Cohi widgets start with independent filters
-                          },
-                          { x: 0, y: item.y, w: defaultGroupWidth, h: 500 },
-                        );
-                        // Replace standalone item with the new group
-                        const replaceId = item.i;
-                        setItemsWithHistory((prev) =>
-                          prev.map((it) =>
-                            it.i === replaceId ? newGroupItem : it,
-                          ),
-                        );
-                        toast({ title: "Wrapped in new group" });
-                      }
-                    : undefined;
-
-                  return (
-                    <Rnd
-                      key={item.i}
-                      data-item-id={item.i}
-                      size={{ width: item.w, height: item.h }}
-                      position={{ x: item.x, y: item.y }}
-                      onDragStart={() => setSelectedWidgetId(item.i)}
-                      onResizeStart={() => setSelectedWidgetId(item.i)}
-                      onDrag={(_, data) =>
-                        updateItemRect(item.i, { x: data.x, y: data.y })
-                      }
-                      onDragStop={(_, data) =>
-                        updateItemRect(item.i, { x: data.x, y: data.y }, true)
-                      }
-                      onResize={(_, __, ref, ___, position) =>
-                        updateItemRect(item.i, {
-                          x: position.x,
-                          y: position.y,
-                          w: ref.offsetWidth,
-                          h: ref.offsetHeight,
-                        })
-                      }
-                      onResizeStop={(_, __, ref, ___, position) =>
-                        updateItemRect(
-                          item.i,
-                          {
-                            x: position.x,
-                            y: position.y,
-                            w: ref.offsetWidth,
-                            h: ref.offsetHeight,
-                          },
-                          true,
-                        )
-                      }
-                      disableDragging={!canEdit}
-                      enableResizing={canEdit}
-                      dragHandleClassName={
-                        item.type === "rich_text"
-                          ? "canvas-drag-handle"
-                          : undefined
-                      }
-                      cancel="button, a, input, textarea, select, option, [contenteditable], .canvas-interactive"
-                      className="canvas-item"
-                      style={{ zIndex: index + 1 }}
-                    >
-                      <CanvasWidgetCard
-                        widgetId={item.i}
-                        selected={selectedWidgetId === item.i}
-                        editing={editingWidgetId === item.i}
-                        onSelect={() => setSelectedWidgetId(item.i)}
-                        onDuplicate={
-                          canEdit ? () => duplicateWidget(item.i) : undefined
-                        }
-                        onDelete={
-                          canEdit ? () => removeWidget(item.i) : undefined
-                        }
-                        className="overflow-hidden"
-                        hideableSections={canEdit ? hideableSections : []}
-                        hiddenSections={hiddenSections}
-                        onToggleSection={canEdit ? onToggleSection : undefined}
-                        onBringToFront={
-                          canEdit ? () => bringToFront(item.i) : undefined
-                        }
-                        onSendToBack={
-                          canEdit ? () => sendToBack(item.i) : undefined
-                        }
-                        displayMode={displayMode}
-                        onChangeDisplayMode={
-                          canEdit && isDashboardSection
-                            ? (mode) =>
-                                updateWidgetPayload(item.i, {
-                                  ...payload,
-                                  displayMode: mode,
-                                })
-                            : undefined
-                        }
-                        availableGroups={canEdit ? availableGroups : []}
-                        onMoveToGroup={canEdit ? handleMoveToGroup : undefined}
-                        onWrapInGroup={canEdit ? handleWrapInGroup : undefined}
-                        onExportExcel={() => handleExportWidgetExcel(item.i)}
-                        onEditWithCohi={
-                          embeddedCohiHidden
-                            ? () => {
-                                setEditingWidgetId(item.i);
-                                setSelectedWidgetId(item.i);
-                                const widgetTitle =
-                                  (payload as any).title ||
-                                  (payload as any).sectionId ||
-                                  item.type;
-                                const widgetType = item.type;
-                                const targetId =
-                                  item.type === "widget_group" &&
-                                  payload.type === "widget_group"
-                                    ? payload.groupId
-                                    : item.i;
-                                const message = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, groupId: ${targetId}, layoutId: ${item.i}). What changes can I make?`;
-                                const resolvedCanvasId = canvasId ?? loadCanvasId;
-                                const resolvedDraftScope = resolvedCanvasId
-                                  ? draftScopeIdForCanvasTab(resolvedCanvasId)
-                                  : draftScopeId;
-                                window.dispatchEvent(
-                                  new CustomEvent(COHI_WORKBENCH_EDIT_WIDGET_EVENT, {
-                                    detail: {
-                                      message,
-                                      widgetId: targetId,
-                                      widgetTitle: String(widgetTitle),
-                                      widgetType,
-                                      draftScopeId: resolvedDraftScope,
-                                      canvasId: resolvedCanvasId,
-                                    },
-                                  }),
-                                );
-                              }
-                            : () => {
-                                setEditingWidgetId(item.i);
-                                setSelectedWidgetId(item.i);
-                                setShowCohiPanel(true);
-                                const widgetTitle =
-                                  (payload as any).title ||
-                                  (payload as any).sectionId ||
-                                  item.type;
-                                const widgetType = item.type;
-                                const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
-                                cohiSendMessage(contextMsg);
-                              }
-                        }
-                      >
-                        <WidgetRenderer
-                          item={displayItem}
-                          height={item.h}
-                          width={item.w}
-                          canEdit={canEdit}
-                          onUpdatePayload={
-                            canEdit &&
-                            (item.type === "text_block" ||
-                              item.type === "rich_text" ||
-                              item.type === "widget_group" ||
-                              (item.type === "cohi_widget" &&
-                                payload.type === "cohi_widget"))
-                              ? (p) =>
-                                  updateWidgetPayload(
-                                    item.i,
-                                    p,
-                                    item.type === "cohi_widget" ? { recordHistory: true } : undefined,
-                                  )
-                              : canEdit && isLegacyLoanDetail
-                                ? (p) =>
-                                    setItemsWithHistory((prev) =>
-                                      prev.map((i) =>
-                                        i.i === item.i
-                                          ? {
-                                              ...i,
-                                              type: "widget_group" as const,
-                                              payload: p,
-                                            }
-                                          : i,
-                                      ),
-                                    )
-                                : undefined
-                          }
-                          otherGroups={
-                            item.type === "widget_group" || isLegacyLoanDetail
-                              ? items
-                                  .filter(
-                                    (it) =>
-                                      it.type === "widget_group" &&
-                                      it.payload.type === "widget_group" &&
-                                      it.i !== item.i,
-                                  )
-                                  .map((it) => ({
-                                    id: it.i,
-                                    title:
-                                      (it.payload as any).title ||
-                                      "Untitled Group",
-                                  }))
-                              : undefined
-                          }
-                          onMoveItemOut={
-                            item.type === "widget_group" || isLegacyLoanDetail
-                              ? (movedItem, targetGroupId) => {
-                                  // Add the moved item to the target group's items array
-                                  setItemsWithHistory((prev) =>
-                                    prev.map((it) => {
-                                      if (
-                                        it.i !== targetGroupId ||
-                                        it.payload.type !== "widget_group"
-                                      )
-                                        return it;
-                                      const gp = it.payload;
-                                      const currentItems =
-                                        gp.items ||
-                                        gp.widgetIds.map((id: string) => ({
-                                          kind: "registry" as const,
-                                          defId: id,
-                                        }));
-                                      const updatedItems = [
-                                        ...currentItems,
-                                        movedItem,
-                                      ];
-                                      return {
-                                        ...it,
-                                        payload: {
-                                          ...gp,
-                                          items: updatedItems,
-                                          widgetIds: updatedItems
-                                            .filter(
-                                              (i: any) => i.kind === "registry",
-                                            )
-                                            .map((i: any) => i.defId),
-                                        },
-                                      };
-                                    }),
-                                  );
-                                  toast({
-                                    title: "Moved to group",
-                                    description: `Widget moved successfully`,
-                                  });
-                                }
-                              : undefined
-                          }
-                        />
-                      </CanvasWidgetCard>
-                    </Rnd>
-                  );
-                })
+                <WorkbenchCanvasItemsLayer
+                  items={items}
+                  itemsForRender={itemsForRender}
+                  canEdit={canEdit}
+                  selectedWidgetId={selectedWidgetId}
+                  editingWidgetId={editingWidgetId}
+                  setSelectedWidgetId={setSelectedWidgetId}
+                  setEditingWidgetId={setEditingWidgetId}
+                  updateItemRect={updateItemRect}
+                  updateWidgetPayload={updateWidgetPayload}
+                  setItemsWithHistory={setItemsWithHistory}
+                  duplicateWidget={duplicateWidget}
+                  removeWidget={removeWidget}
+                  bringToFront={bringToFront}
+                  sendToBack={sendToBack}
+                  handleExportWidgetExcel={handleExportWidgetExcel}
+                  defaultGroupWidth={defaultGroupWidth}
+                  embeddedCohiHidden={embeddedCohiHidden}
+                  setShowCohiPanel={setShowCohiPanel}
+                  cohiSendMessage={cohiSendMessage}
+                  canvasId={canvasId}
+                  loadCanvasId={loadCanvasId}
+                  draftScopeId={draftScopeId}
+                />
               ) : (
                 <WorkbenchEmptyState
                   embeddedCohiHidden={embeddedCohiHidden}
