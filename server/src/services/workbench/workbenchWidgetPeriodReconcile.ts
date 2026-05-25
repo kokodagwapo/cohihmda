@@ -31,6 +31,11 @@ type MutableGroupOperationLike = {
   preset?: WorkbenchLlmPreset;
   widgetId?: string;
   defId?: string;
+  sql?: string;
+  title?: string;
+  vizConfig?: Record<string, unknown>;
+  filterConfig?: WidgetFilterConfigLike;
+  allowLowSamplePullThrough?: boolean;
 };
 
 type MutableWorkbenchActionLike = {
@@ -39,9 +44,14 @@ type MutableWorkbenchActionLike = {
   groupId?: string;
   widgetId?: string;
   instanceId?: string;
+  title?: string;
+  sql?: string;
+  config?: Record<string, unknown>;
+  filterConfig?: WidgetFilterConfigLike;
   configPatch?: Record<string, unknown>;
   explanation?: string;
   configOverrides?: Record<string, unknown>;
+  allowLowSamplePullThrough?: boolean;
   operations?: MutableGroupOperationLike[];
 };
 
@@ -132,7 +142,7 @@ import {
   isRestoreWidgetRequest,
   extractRemoveWidgetPhrase,
   isRemoveWidgetOnlyRequest,
-} from "../../../../src/lib/workbench/workbenchPromptIntent.js";
+} from "./workbenchPromptIntent.js";
 
 export {
   isAllTimeRequest,
@@ -1193,13 +1203,7 @@ export function normalizeWorkbenchWidgetIds(
 
   for (const raw of actions) {
     if (!raw || typeof raw !== "object") continue;
-    const action = raw as {
-      type?: string;
-      groupId?: string;
-      instanceId?: string;
-      widgetId?: string;
-      operations?: Array<{ op?: string; widgetId?: string }>;
-    };
+    const action = raw as MutableWorkbenchActionLike;
 
     if (action.type === "modify_widget" && action.instanceId) {
       const resolved = resolveCanvasWidgetKey(allWidgets, action.instanceId);
