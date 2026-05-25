@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 type TraceEntry = {
   ts: string;
@@ -12,55 +12,63 @@ type TraceEntry = {
   }>;
 };
 
+export type ReconcileTraceCapture =
+  | { status: "ok"; trace: string }
+  | { status: "auth_failed" | "disabled" | "empty"; trace: "" };
+
 /**
  * Fetch last reconcile pipeline entries from the backend (requires WORKBENCH_RECONCILE_DEBUG=1).
+ * Uses page.request so BrowserContext auth cookies are included.
  */
-function resolveTraceBaseURL(
-  request: APIRequestContext,
-  options?: { baseURL?: string; page?: Page },
-): string {
-  if (options?.baseURL) return options.baseURL.replace(/\/$/, "");
-  if (options?.page) {
-    try {
-      const fromContext = options.page.context().baseURL;
-      if (fromContext) return fromContext.replace(/\/$/, "");
-    } catch {
-      /* ignore */
-    }
-  }
-  return (process.env.E2E_BASE_URL ?? "http://localhost:5000").replace(/\/$/, "");
-}
-
 export async function captureReconcileTrace(
-  request: APIRequestContext,
+  page: Page,
   prompt: string,
-  options?: { baseURL?: string; page?: Page; limit?: number },
-): Promise<string> {
-  const base = resolveTraceBaseURL(request, options);
+  options?: { limit?: number },
+): Promise<ReconcileTraceCapture> {
+  const base = (page.context().baseURL ?? process.env.E2E_BASE_URL ?? "http://localhost:5000").replace(
+    /\/$/,
+    "",
+  );
   const limit = options?.limit ?? 12;
   const needle = prompt.trim().slice(0, 40).toLowerCase();
-  if (!needle) return "";
+  if (!needle) return { status: "empty", trace: "" };
 
   try {
-    const res = await request.get(
+    const res = await page.request.get(
       `${base}/api/cohi-chat/workbench/reconcile-trace?n=${limit}`,
     );
     if (res.status() === 404) {
       console.warn(
         "[reconcile-trace] disabled — set WORKBENCH_RECONCILE_DEBUG=1 on the backend process",
       );
-      return "";
+      return { status: "disabled", trace: "" };
     }
-    if (!res.ok()) return "";
+    if (res.status() === 401 || res.status() === 403) {
+      console.warn(
+        `[reconcile-trace] auth failed (${res.status}) — Playwright page.request lacks session cookies`,
+      );
+      return { status: "auth_failed", trace: "" };
+    }
+    if (!res.ok()) return { status: "empty", trace: "" };
     const body = (await res.json()) as { entries?: TraceEntry[] };
     const entries = body.entries ?? [];
     const match =
       [...entries].reverse().find((e) =>
         e.question.toLowerCase().includes(needle),
       ) ?? entries[entries.length - 1];
-    if (!match) return "";
-    return JSON.stringify(match.actions);
+    if (!match) return { status: "empty", trace: "" };
+    return { status: "ok", trace: JSON.stringify(match.actions) };
   } catch {
-    return "";
+    return { status: "empty", trace: "" };
   }
+}
+
+/** Append trace suffix for REPORT rows (broken/rough). */
+export function formatTraceSuffix(capture: ReconcileTraceCapture): string {
+  if (capture.status === "ok" && capture.trace) {
+    return ` | trace=${capture.trace}`;
+  }
+  if (capture.status === "auth_failed") return " | trace=AUTH_FAILED";
+  if (capture.status === "disabled") return " | trace=DISABLED";
+  return "";
 }
