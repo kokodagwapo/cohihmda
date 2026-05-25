@@ -55,12 +55,27 @@ import {
   parseRequestedPeriodFromText,
   reconcileWidgetActionPeriods,
   augmentPeriodSwitchActions,
+  augmentAllTimeStripPeriodOnlyActions,
+  augmentAllTimeCreateWidgetFromQuestion,
+  augmentAllTimeKpiToGroup,
+  augmentAllTimeReconcileModifyGroupAddCohi,
+  periodSwitchAssistantMessage,
+  stripBuildActionsForAnalyticalQuestion,
   normalizeWorkbenchWidgetIds,
   augmentGroupRemoveFromQuestion,
+  augmentRestoreWidgetFromQuestion,
+  augmentChartTypeFromQuestion,
+  augmentAddRegistryWidgetFromQuestion,
+  stripBuildActionsForChartTypeChange,
+  rewriteGroupedDeleteWidgetActions,
+  stripRecreateOnRemoveOnly,
   isChartTypeChangeRequest,
   isAllTimeRequest,
   isPeriodSwitchOnlyRequest,
+  isAnalyticalOnlyRequest,
   shouldBuildExecutiveDashboardOnEmptyCanvas,
+  pushReconcileTraceEntry,
+  getReconcileTraceBuffer,
   type WorkbenchLlmPreset,
 } from "../services/workbench/workbenchWidgetPeriodReconcile.js";
 import {
@@ -1061,9 +1076,9 @@ Each action in the "actions" array must be one of:
    Use modify_group when the user asks to add/remove widgets in a dashboard section, reorder them, resize, change the section title, switch period, or rename a widget in the group.
    For **chart type / viz changes on a SQL widget inside a group**, use **modify_widget** with that widget's \`cohi__id__idx\` from the canvas list — do NOT use create_widget.
 
-6a. **modify_registry_widget**: Change config on a pre-built catalog widget inside a group
-   {"type": "modify_registry_widget", "groupId": "<groupId>", "widgetId": "<widget id from group list, e.g. company-scorecard-units__0>", "configOverrides": {"format": "currency", "chartType": "line"}, "explanation": "What changed"}
-   Use when the user wants to change how a catalog widget displays (e.g. number format, chart type) without converting it to SQL. The widgetId is the stable id shown in the canvas state for that widget (e.g. company-scorecard-units__0 or cohi__abc__1). Only keys that the widget supports (e.g. format, chartType) will take effect.
+6a. **modify_widget** (target registry): Change config on a pre-built catalog widget inside a group
+   {"type": "modify_widget", "target": "registry", "groupId": "<groupId>", "widgetId": "<widget id from group list, e.g. company-scorecard-units__0>", "configPatch": {"format": "currency", "chartType": "line"}, "explanation": "What changed"}
+   Legacy alias modify_registry_widget with configOverrides is still accepted. Use when the user wants to change how a catalog widget displays (e.g. number format, chart type) without converting it to SQL. The widgetId is the stable id shown in the canvas state for that widget (e.g. company-scorecard-units__0 or cohi__abc__1). Only keys that the widget supports (e.g. format, chartType) will take effect.
 
 6b. **create_dashboard**: Build an entirely new dashboard from scratch (mix of catalog widgets and SQL widgets)
    {"type": "create_dashboard", "title": "My Dashboard", "groups": [{"title": "Section Title", "sectionType": "company-scorecard", "widgets": [{"kind": "registry", "defId": "company-scorecard-units"}, {"kind": "cohi", "sql": "SELECT ...", "title": "Custom Chart", "vizConfig": {...}}], "canvasPosition": {"x": 20, "y": 20, "w": 1000, "h": 800}}], "standaloneWidgets": [{"kind": "cohi", "sql": "SELECT ...", "title": "Standalone", "vizConfig": {...}}], "explanation": "What this dashboard shows"}
@@ -1426,6 +1441,68 @@ When replacing a catalog widget with a SQL-backed widget, use the tenant schema 
  * GET /api/cohi-chat/workbench/personas
  * Returns the available agent personas for the workbench panel UI.
  */
+/**
+ * POST /api/cohi-chat/workbench/test-seed
+ * Inserts a deterministic canvas for e2e (local only when WORKBENCH_TEST_SEED_ENABLED=1).
+ */
+router.post(
+  "/test-seed",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    if (process.env.WORKBENCH_TEST_SEED_ENABLED !== "1") {
+      return res.status(404).json({ error: "Test seed disabled" });
+    }
+    try {
+      const fixture =
+        typeof (req.body as { fixture?: string })?.fixture === "string"
+          ? (req.body as { fixture: string }).fixture
+          : "board-ready-min";
+      if (fixture !== "board-ready-min") {
+        return res.status(400).json({ error: `Unknown fixture: ${fixture}` });
+      }
+      const { buildBoardReadyMinContent } = await import(
+        "../services/workbench/boardReadyMinFixture.js"
+      );
+      const content = buildBoardReadyMinContent();
+      const { tenantPool } = getTenantContext(req);
+      const result = await tenantPool.query(
+        `INSERT INTO public.workbench_canvases
+           (user_id, title, layout_version, content, visibility, created_by_role, shared_with_user_ids)
+         VALUES ($1, $2, $3, $4, 'private', $5, '{}')
+         RETURNING id`,
+        [
+          req.userId,
+          "E2E Board Ready Min",
+          "freeform-v1",
+          JSON.stringify(content),
+          req.userRole || "user",
+        ],
+      );
+      res.json({ canvasId: result.rows[0].id, fixture });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[CohiWorkbench] test-seed error:", message);
+      res.status(500).json({ error: message });
+    }
+  },
+);
+
+/**
+ * GET /api/cohi-chat/workbench/reconcile-trace?n=10
+ * Last reconcile pipeline snapshots (local/e2e only when WORKBENCH_RECONCILE_DEBUG=1).
+ */
+router.get("/reconcile-trace", authenticateToken, (req, res) => {
+  if (process.env.WORKBENCH_RECONCILE_DEBUG !== "1") {
+    return res.status(404).json({ error: "Reconcile trace disabled" });
+  }
+  const n = Math.min(
+    32,
+    Math.max(1, parseInt(String(req.query.n ?? "10"), 10) || 10),
+  );
+  res.json({ entries: getReconcileTraceBuffer(n) });
+});
+
 router.get("/personas", authenticateToken, (_req, res) => {
   res.json({
     personas: Object.values(AGENT_PERSONAS).map((p) => ({
@@ -1612,11 +1689,18 @@ export async function runWorkbenchChatTurn(
         (canvasState?.totalItems ?? 0) > 0 &&
         isChartTypeChangeRequest(question, ...historyTexts)
       ) {
-        personaSupplement += `\n\n## Chart type change (CRITICAL)\nUpdate the existing widget with **modify_widget** using the widget's stable id from CANVAS STATE (e.g. cohi__id__idx). Set changes.type to the target chart type and provide SQL grouped appropriately. Do NOT use create_widget.`;
+        personaSupplement += `\n\n## Chart type change (CRITICAL)\nFor catalog/chart widgets (e.g. pull-through by branch, volume by branch), use **modify_widget** with target registry and configPatch.chartType (bar|line|pie|area) and the widget's stable id from CANVAS STATE (e.g. company-scorecard-pullthrough-by-branch__N). For cohi SQL widgets use **modify_widget** with changes.type. Do NOT use create_widget.`;
       }
 
       if (isAllTimeRequest(question, ...historyTexts)) {
         personaSupplement += `\n\n## All-time scope (CRITICAL)\nUser requested all-time / lifetime metrics. Set filterConfig.filterable to false and defaultPreset to null on new widgets. SQL must compute the full-range metric without relying on injected date filters.`;
+      }
+
+      if (
+        (canvasState?.totalItems ?? 0) > 0 &&
+        isAnalyticalOnlyRequest(question, ...historyTexts)
+      ) {
+        personaSupplement += `\n\n## Analytical question (CRITICAL)\nThe user is asking WHY or HOW — not requesting new widgets. Use query_data and/or explain in message with an empty or query-only actions array. Do NOT create_widget or create_dashboard.`;
       }
 
       if (
@@ -1763,6 +1847,28 @@ export async function runWorkbenchChatTurn(
             action.config.type = mapped;
           }
         }
+        if (
+          action.type === "modify_widget" &&
+          action.changes &&
+          typeof action.changes.type === "string"
+        ) {
+          const t = action.changes.type.toLowerCase().trim();
+          if (!VALID_VIZ_TYPES.has(t)) {
+            const mapped =
+              t === "chart" || t === "bar_chart" || t === "barchart"
+                ? "bar"
+                : t === "line_chart" || t === "linechart"
+                  ? "line"
+                : t === "pie_chart" || t === "piechart"
+                  ? "pie"
+                : t === "number" || t === "metric" || t === "metric-card"
+                  ? "kpi"
+                : t === "hbar" || t === "h_bar" || t === "horizontal"
+                  ? "horizontal_bar"
+                  : "bar";
+            action.changes.type = mapped;
+          }
+        }
       }
 
       reconcileWidgetActionPeriods(validActions, {
@@ -1777,6 +1883,40 @@ export async function runWorkbenchChatTurn(
               groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
             }
           : undefined,
+      });
+      augmentAllTimeStripPeriodOnlyActions(validActions, {
+        userQuestion: question,
+        canvasState: canvasState
+          ? {
+              totalItems: canvasState.totalItems,
+              groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
+            }
+          : undefined,
+      });
+      augmentAllTimeCreateWidgetFromQuestion(validActions, {
+        userQuestion: question,
+        canvasState: canvasState
+          ? {
+              totalItems: canvasState.totalItems,
+              groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
+            }
+          : undefined,
+      });
+      augmentAllTimeKpiToGroup(validActions, {
+        userQuestion: question,
+        canvasState: canvasState
+          ? {
+              totalItems: canvasState.totalItems,
+              groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
+            }
+          : undefined,
+      });
+      augmentAllTimeReconcileModifyGroupAddCohi(validActions, {
+        userQuestion: question,
+      });
+      stripBuildActionsForAnalyticalQuestion(validActions, {
+        userQuestion: question,
+        canvasTotalItems: canvasState?.totalItems,
       });
       if (canvasState) {
         const canvasRefs = {
@@ -1794,11 +1934,40 @@ export async function runWorkbenchChatTurn(
             title: w.title,
           })),
         };
+        stripRecreateOnRemoveOnly(validActions, question);
+        stripBuildActionsForChartTypeChange(validActions, question);
+        augmentChartTypeFromQuestion(validActions, {
+          userQuestion: question,
+          canvasState: canvasRefs,
+        });
+        augmentAddRegistryWidgetFromQuestion(validActions, {
+          userQuestion: question,
+          canvasState: canvasRefs,
+        });
         augmentGroupRemoveFromQuestion(validActions, {
           userQuestion: question,
           canvasState: canvasRefs,
         });
+        augmentRestoreWidgetFromQuestion(validActions, {
+          userQuestion: question,
+          canvasState: canvasRefs,
+        });
+        rewriteGroupedDeleteWidgetActions(validActions, canvasRefs);
         normalizeWorkbenchWidgetIds(validActions, canvasRefs);
+
+        pushReconcileTraceEntry(question, validActions);
+        if (process.env.WORKBENCH_RECONCILE_DEBUG === "1") {
+          console.log(
+            `[CohiWorkbench] reconcile pipeline question=${JSON.stringify(question?.slice(0, 80))} actions=${JSON.stringify(
+              validActions.map((a: { type?: string; groupId?: string; widgetId?: string; configOverrides?: unknown }) => ({
+                type: a.type,
+                groupId: a.groupId,
+                widgetId: a.widgetId,
+                chartType: (a.configOverrides as { chartType?: string })?.chartType,
+              })),
+            )}`,
+          );
+        }
       }
 
       // Log modify_widget actions for debugging (instanceId, sql provided?, changes keys)
@@ -2177,6 +2346,30 @@ export async function runWorkbenchChatTurn(
           );
           if (secondActions.length > 0) {
             validActions = [...validActions, ...secondActions];
+            reconcileWidgetActionPeriods(validActions, {
+              requestedPeriod,
+              userQuestion: question,
+            });
+            augmentPeriodSwitchActions(validActions, {
+              userQuestion: question,
+              canvasState: canvasState
+                ? {
+                    totalItems: canvasState.totalItems,
+                    groups: canvasState.groups?.map((g) => ({
+                      groupId: g.groupId,
+                    })),
+                  }
+                : undefined,
+            });
+            stripBuildActionsForAnalyticalQuestion(validActions, {
+              userQuestion: question,
+              canvasTotalItems: canvasState?.totalItems,
+            });
+            const periodMsg = periodSwitchAssistantMessage(
+              validActions,
+              question,
+            );
+            if (periodMsg) finalMessage = periodMsg;
           }
 
           console.log(
@@ -2188,6 +2381,19 @@ export async function runWorkbenchChatTurn(
           finalMessage +=
             "\n\n(I ran the queries but encountered an issue formulating the final answer. The query results are attached.)";
         }
+      }
+
+      stripBuildActionsForAnalyticalQuestion(validActions, {
+        userQuestion: question,
+        canvasTotalItems: canvasState?.totalItems,
+      });
+
+      const periodOnlyMessage = periodSwitchAssistantMessage(
+        validActions,
+        question,
+      );
+      if (periodOnlyMessage) {
+        finalMessage = periodOnlyMessage;
       }
 
       const response = {

@@ -33,6 +33,10 @@ import {
   type UnifiedConversationChatType,
 } from "../services/chat/unifiedConversationService.js";
 import {
+  readCarryOverContext,
+  prependCarryOverToHistory,
+} from "../services/chat/chatConversationFork.js";
+import {
   listUnifiedChatFolders,
   createUnifiedChatFolder,
   renameUnifiedChatFolder,
@@ -269,6 +273,15 @@ router.get(
           ...(r.shared_by_name
             ? { shared_by_name: r.shared_by_name }
             : {}),
+          ...(r.parent_conversation_id
+            ? { parent_conversation_id: r.parent_conversation_id }
+            : {}),
+          ...(r.forked_to_conversation_id
+            ? { forked_to_conversation_id: r.forked_to_conversation_id }
+            : {}),
+          ...(r.conversation_origin
+            ? { conversation_origin: r.conversation_origin }
+            : {}),
           created_at: r.created_at ?? r.updated_at,
           updated_at: r.updated_at,
         })),
@@ -440,6 +453,9 @@ router.get(
         legacy_ref: row.legacy_ref,
         legacy_source: row.legacy_source,
         folder_id: row.folder_id,
+        parent_conversation_id: row.parent_conversation_id ?? null,
+        forked_to_conversation_id: row.forked_to_conversation_id ?? null,
+        conversation_origin: row.conversation_origin ?? null,
         messages: row.messages,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -939,6 +955,7 @@ async function handleInsightBuilderStream(
             ? body.scope.id
             : body.scope?.id ?? null,
         chatType: "insight_builder",
+        carryOverContext: readCarryOverContext(body),
       });
     } catch (persistErr: any) {
       console.warn("[chat/v1 insight_builder stream] Persist skipped:", persistErr?.message);
@@ -1037,6 +1054,7 @@ async function handleResearchStream(
         chatType: "research",
         legacyRef,
         legacySource: "research_lab",
+        carryOverContext: readCarryOverContext(body),
       });
       await persistDatasetUploadLinks(req, conversationId, body, "research");
     } catch (persistErr: any) {
@@ -1117,6 +1135,11 @@ async function handlePostMessage(
     }
     req.userId = userId;
 
+    const carryOver = readCarryOverContext(body);
+    if (carryOver) {
+      prependCarryOverToHistory(body, carryOver);
+    }
+
     const idem = await tryReserveClientMessageId(tenantId, userId, body.clientMessageId);
     if (idem === "duplicate") {
       res.status(409).json({
@@ -1178,6 +1201,7 @@ async function handlePostMessage(
                 ? body.scope.id
                 : body.scope?.id ?? null,
             chatType: policy.chatType,
+            carryOverContext: carryOver,
           });
           await persistDatasetUploadLinks(req, conversationId, body, policy.chatType);
         } catch (persistErr: any) {
@@ -1221,6 +1245,7 @@ async function handlePostMessage(
           chatType,
           legacyRef: result.legacyRef ?? null,
           legacySource: result.legacySource ?? null,
+          carryOverContext: carryOver,
         });
         await persistDatasetUploadLinks(req, result.conversationId, body, chatType);
       } catch (persistErr: any) {

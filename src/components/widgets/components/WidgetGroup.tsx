@@ -53,11 +53,16 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
+  COHI_WORKBENCH_STOP_EDITING_EVENT,
+  dispatchWorkbenchEditingWidgetState,
+} from "@/lib/workbench/workbenchChatHandoff";
+import {
   DatePeriodPicker,
   type DateRange,
   type PeriodSelection,
   type PeriodPreset,
   computePresetDateRange,
+  getPeriodPresetMeta,
 } from "@/components/ui/DatePeriodPicker";
 import { Button } from "@/components/ui/button";
 import {
@@ -96,6 +101,11 @@ import {
   ACTORS_TABLE_DEFAULT_COLUMN_IDS,
 } from "@/stores/widgetSectionStore";
 import { getWidgetDefinition } from "@/components/widgets/registry";
+import {
+  ChartShell,
+  chartShellContentHeight,
+  normalizeChartCardType,
+} from "@/components/widgets/components/ChartShell";
 import type { ColumnDef } from "@/components/views/LoanDetailView";
 import { normalizeFilterState } from "@/utils/loanDetailFilters";
 import type { ColumnFilterState } from "@/utils/loanDetailFilters";
@@ -1789,6 +1799,7 @@ function GridCellWidget({
   onOpenEditDialog,
   onRegistryConfigChange,
   onSqlChanged,
+  canvasCanEdit = true,
 }: {
   item: GroupWidgetItem;
   /** Stable unique ID used for canvasDataStore reporting */
@@ -1797,6 +1808,8 @@ function GridCellWidget({
   groupId: string;
   width: number;
   height: number;
+  /** Owner can edit canvas (enables registry chart-type strip). */
+  canvasCanEdit?: boolean;
   dateFilter: DateFilter | null;
   dimensionFilters: DimensionFilter[] | null;
   filterSyncEnabled: boolean;
@@ -1982,6 +1995,7 @@ function GridCellWidget({
             canvasItemId={itemId}
             width={width}
             height={height - 20}
+            canvasCanEdit={canvasCanEdit}
           />
         ) : (
           <GridCellCohiWidget
@@ -2049,6 +2063,15 @@ function getLoanDetailFilterSummary(
   return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
+const CHART_TYPE_STRIP_H = 26;
+
+function normalizeChartCardType(raw: unknown): ChartCardChartType {
+  if (raw === "line" || raw === "area" || raw === "pie" || raw === "bar") {
+    return raw;
+  }
+  return "bar";
+}
+
 function GridCellRegistryWidget({
   defId,
   config: configProp,
@@ -2056,6 +2079,7 @@ function GridCellRegistryWidget({
   canvasItemId,
   width,
   height,
+  canvasCanEdit = true,
 }: {
   defId: string;
   config?: Record<string, unknown>;
@@ -2063,6 +2087,7 @@ function GridCellRegistryWidget({
   canvasItemId: string;
   width: number;
   height: number;
+  canvasCanEdit?: boolean;
 }) {
   const definition = getWidgetDefinition(defId);
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
@@ -2503,9 +2528,27 @@ function GridCellRegistryWidget({
       }
     : {};
 
+  if (!definition || !Component) return null;
+
+  const dataChartType =
+    normalizedReportData != null &&
+    typeof normalizedReportData === "object" &&
+    "chartType" in normalizedReportData
+      ? (normalizedReportData as { chartType?: unknown }).chartType
+      : undefined;
+  const chartType = normalizeChartCardType(
+    configProp?.chartType ?? dataChartType,
+  );
+  const showChartTypeStrip =
+    canvasCanEdit &&
+    !!onConfigChange &&
+    definition.category === "chart";
+  const contentHeight = chartShellContentHeight(height, showChartTypeStrip);
+
   const config = {
     ...definition?.config,
     ...configProp,
+    chartType,
     canvasItemId,
     definitionName: definition.name,
     definitionCategory: definition.category,
@@ -2527,22 +2570,25 @@ function GridCellRegistryWidget({
     ...estimatedClosingsRiskConfig,
   };
 
-  if (!definition || !Component) return null;
-
   return (
-    <div className="h-full w-full flex flex-col min-h-0">
-      <div className="flex-1 min-h-0 min-w-0">
-        <Component
-          data={selectedData}
-          loading={loading}
-          error={error}
-          width={width}
-          height={height}
-          config={config}
-          onConfigChange={onConfigChange}
-        />
-      </div>
-    </div>
+    <ChartShell
+      showChartTypeStrip={showChartTypeStrip}
+      chartType={chartType}
+      chartTypeStripDisabled={!canvasCanEdit}
+      onChartTypeChange={(type) =>
+        onConfigChange?.({ ...(configProp ?? {}), chartType: type })
+      }
+    >
+      <Component
+        data={selectedData}
+        loading={loading}
+        error={error}
+        width={width}
+        height={contentHeight}
+        config={config}
+        onConfigChange={onConfigChange}
+      />
+    </ChartShell>
   );
 }
 
@@ -2602,18 +2648,29 @@ function GridCellCohiWidget({
 
 function MaximizeDialog({
   item,
+  maximizedIndex,
   open,
   onClose,
   dateFilter,
   dimensionFilters,
   filterSyncEnabled,
+  canvasCanEdit = true,
+  onVizTypeChange,
+  onRegistryConfigChange,
 }: {
   item: GroupWidgetItem | null;
+  maximizedIndex: number;
   open: boolean;
   onClose: () => void;
   dateFilter: DateFilter | null;
   dimensionFilters: DimensionFilter[] | null;
   filterSyncEnabled: boolean;
+  canvasCanEdit?: boolean;
+  onVizTypeChange?: (index: number, type: string) => void;
+  onRegistryConfigChange?: (
+    index: number,
+    config: Record<string, unknown>,
+  ) => void;
 }) {
   if (!item) return null;
 
@@ -2644,13 +2701,29 @@ function MaximizeDialog({
         </DialogHeader>
         <div className="flex-1 min-h-0 overflow-auto p-6">
           {item.kind === "registry" ? (
-            <MaximizeRegistryWidget defId={item.defId} />
+            <MaximizeRegistryWidget
+              defId={item.defId}
+              config={item.config}
+              canvasCanEdit={canvasCanEdit}
+              onConfigChange={
+                maximizedIndex >= 0 && onRegistryConfigChange
+                  ? (config) =>
+                      onRegistryConfigChange(maximizedIndex, config)
+                  : undefined
+              }
+            />
           ) : (
             <MaximizeCohiWidget
               item={item}
               dateFilter={dateFilter}
               dimensionFilters={dimensionFilters}
               filterSyncEnabled={filterSyncEnabled}
+              canEdit={canvasCanEdit}
+              onVizTypeChange={
+                maximizedIndex >= 0 && onVizTypeChange
+                  ? (type) => onVizTypeChange(maximizedIndex, type)
+                  : undefined
+              }
             />
           )}
         </div>
@@ -2659,7 +2732,17 @@ function MaximizeDialog({
   );
 }
 
-function MaximizeRegistryWidget({ defId }: { defId: string }) {
+function MaximizeRegistryWidget({
+  defId,
+  config: configProp,
+  canvasCanEdit = true,
+  onConfigChange,
+}: {
+  defId: string;
+  config?: Record<string, unknown>;
+  canvasCanEdit?: boolean;
+  onConfigChange?: (config: Record<string, unknown>) => void;
+}) {
   const definition = getWidgetDefinition(defId);
   if (!definition) return null;
 
@@ -2668,15 +2751,39 @@ function MaximizeRegistryWidget({ defId }: { defId: string }) {
     definition.dataSelector,
   );
 
+  const chartType = normalizeChartCardType(configProp?.chartType);
+  const showChartTypeStrip =
+    canvasCanEdit &&
+    !!onConfigChange &&
+    definition.category === "chart";
+  const contentHeight = chartShellContentHeight(700, showChartTypeStrip);
+
   const Component = definition.component;
+  const mergedConfig = {
+    ...definition.config,
+    ...configProp,
+    chartType,
+  };
+
   return (
-    <Component
-      data={data}
-      loading={loading}
-      error={error}
-      width={1200}
-      height={700}
-    />
+    <ChartShell
+      showChartTypeStrip={showChartTypeStrip}
+      chartType={chartType}
+      chartTypeStripDisabled={!canvasCanEdit}
+      onChartTypeChange={(type) =>
+        onConfigChange?.({ ...(configProp ?? {}), chartType: type })
+      }
+    >
+      <Component
+        data={data}
+        loading={loading}
+        error={error}
+        width={1200}
+        height={contentHeight}
+        config={mergedConfig}
+        onConfigChange={onConfigChange}
+      />
+    </ChartShell>
   );
 }
 
@@ -2685,11 +2792,15 @@ function MaximizeCohiWidget({
   dateFilter,
   dimensionFilters,
   filterSyncEnabled,
+  canEdit = true,
+  onVizTypeChange,
 }: {
   item: Extract<GroupWidgetItem, { kind: "cohi" }>;
   dateFilter: DateFilter | null;
   dimensionFilters: DimensionFilter[] | null;
   filterSyncEnabled: boolean;
+  canEdit?: boolean;
+  onVizTypeChange?: (type: string) => void;
 }) {
   const { selectedTenantId } = useTenantStore();
   return (
@@ -2706,6 +2817,8 @@ function MaximizeCohiWidget({
       filterSyncEnabled={filterSyncEnabled}
       initialFilters={item.savedFilters}
       allowLowSamplePullThrough={item.allowLowSamplePullThrough}
+      canEdit={canEdit}
+      onVizTypeChange={onVizTypeChange}
       hideTitle
     />
   );
@@ -3126,6 +3239,29 @@ export function WidgetGroup({
         item.savedFilters.preset !== groupPreset,
     );
   }, [effectiveFilterSync, filters.periodSelection?.preset, items]);
+
+  const groupPeriodChipLabel = useMemo(() => {
+    const ps =
+      filters.periodSelection ?? savedFiltersProp?.periodSelection;
+    if (ps?.type === "preset" && ps.preset) {
+      return getPeriodPresetMeta(ps.preset).title;
+    }
+    if (ps?.type === "year" && ps.year != null) {
+      return String(ps.year);
+    }
+    if (ps?.type === "custom" && ps.dateRange) {
+      return `${ps.dateRange.start} – ${ps.dateRange.end}`;
+    }
+    const legacyPreset = savedFiltersProp?.preset as PeriodPreset | undefined;
+    if (legacyPreset) {
+      return getPeriodPresetMeta(legacyPreset).title;
+    }
+    return null;
+  }, [
+    filters.periodSelection,
+    savedFiltersProp?.periodSelection,
+    savedFiltersProp?.preset,
+  ]);
 
   // ─── Build dimension filters (branch, loan officer, dynamic, etc.) for cohi widgets ───
   const groupDimensionFilters = useMemo<DimensionFilter[] | null>(() => {
@@ -3985,6 +4121,16 @@ export function WidgetGroup({
             >
               {title}
             </h3>
+          )}
+
+          {groupPeriodChipLabel && !collapsed && (
+            <span
+              data-testid="group-period-chip"
+              aria-label={groupPeriodChipLabel}
+              className="inline-flex items-center h-5 px-1.5 rounded text-[9px] font-medium shrink-0 text-slate-600 dark:text-slate-300 bg-slate-100/90 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-600/80"
+            >
+              {groupPeriodChipLabel}
+            </span>
           )}
 
           {/* Rename pencil — only on hover */}
@@ -5945,9 +6091,33 @@ export function WidgetGroup({
                   ? layoutItem.h * ROW_HEIGHT - GRID_MARGIN[1]
                   : 200;
 
+                const groupWidgetTitle =
+                  item.kind === "registry"
+                    ? getWidgetDefinition(item.defId)?.name ?? item.defId
+                    : item.kind === "cohi"
+                      ? item.title ?? ""
+                      : "";
+                const groupChartType =
+                  item.kind === "cohi"
+                    ? item.vizConfig?.type ?? ""
+                    : item.kind === "registry"
+                      ? String(item.config?.chartType ?? "")
+                      : "";
+                const groupFilterable =
+                  item.kind === "cohi"
+                    ? item.filterConfig?.filterable === false
+                      ? "false"
+                      : "true"
+                    : "";
+
                 return (
                   <div
                     key={key}
+                    data-testid={`group-widget-${groupId}__${key}`}
+                    data-widget-title={groupWidgetTitle}
+                    data-widget-type={item.kind}
+                    data-chart-type={groupChartType || undefined}
+                    data-filterable={groupFilterable || undefined}
                     className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden transition-shadow hover:shadow-md"
                   >
                     <GridCellWidget
@@ -5956,6 +6126,7 @@ export function WidgetGroup({
                       groupId={groupId}
                       width={cellW}
                       height={cellH}
+                      canvasCanEdit={canEdit}
                       dateFilter={groupDateFilter}
                       dimensionFilters={groupDimensionFilters}
                       filterSyncEnabled={effectiveFilterSync}
@@ -5979,6 +6150,15 @@ export function WidgetGroup({
                       onOpenEditDialog={
                         item.kind === "cohi"
                           ? () => {
+                              const cohiItem = item as Extract<
+                                GroupWidgetItem,
+                                { kind: "cohi" }
+                              >;
+                              const widgetId = `cohi__${cohiItem.id}__${idx}`;
+                              dispatchWorkbenchEditingWidgetState({
+                                widgetId,
+                                widgetTitle: cohiItem.title ?? "Cohi widget",
+                              });
                               setEditingItemIdx(idx);
                               setEditDialogOpen(true);
                             }
@@ -6021,11 +6201,19 @@ export function WidgetGroup({
       {/* ═══════ Maximize dialog ═══════ */}
       <MaximizeDialog
         item={maximizedItem}
+        maximizedIndex={
+          maximizedItem != null
+            ? items.findIndex((it) => it === maximizedItem)
+            : -1
+        }
         open={maximizedItem !== null}
         onClose={() => setMaximizedItem(null)}
         dateFilter={groupDateFilter}
         dimensionFilters={groupDimensionFilters}
         filterSyncEnabled={effectiveFilterSync}
+        canvasCanEdit={canEdit}
+        onVizTypeChange={handleVizTypeChange}
+        onRegistryConfigChange={handleRegistryConfigChange}
       />
 
       {/* Actors table columns modal (workbench only) */}
@@ -6117,7 +6305,18 @@ export function WidgetGroup({
           open={editDialogOpen}
           onOpenChange={(open) => {
             setEditDialogOpen(open);
-            if (!open) setEditingItemIdx(null);
+            if (!open) {
+              setEditingItemIdx(null);
+              dispatchWorkbenchEditingWidgetState({
+                widgetId: null,
+                widgetTitle: null,
+              });
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent(COHI_WORKBENCH_STOP_EDITING_EVENT),
+                );
+              }
+            }
           }}
           item={
             items[editingItemIdx] as Extract<GroupWidgetItem, { kind: "cohi" }>

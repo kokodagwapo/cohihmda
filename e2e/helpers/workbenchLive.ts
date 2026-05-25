@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { e2eAuthHeaders } from "./e2eAuth";
 import {
   gotoWithUnifiedChatShell,
   selectUnifiedChatType,
@@ -53,9 +54,12 @@ export async function waitForWorkbenchCanvasPopulated(
     .toBeGreaterThan(0);
 }
 
-export async function waitForChatInputReady(page: Page): Promise<void> {
+export async function waitForChatInputReady(
+  page: Page,
+  options?: { timeoutMs?: number },
+): Promise<void> {
   const input = unifiedChatMessageInput(page);
-  await expect(input).toBeEnabled({ timeout: 120_000 });
+  await expect(input).toBeEnabled({ timeout: options?.timeoutMs ?? 120_000 });
 }
 
 export async function sendWorkbenchChatTurn(
@@ -80,6 +84,40 @@ export async function seedBoardReadyDashboard(page: Page): Promise<void> {
   await input.press("Enter");
   await waitForWorkbenchCanvasPopulated(page);
   await waitForChatInputReady(page);
+}
+
+/** Deterministic canvas via test-only API (requires WORKBENCH_TEST_SEED_ENABLED=1 on server). */
+export async function seedDeterministicBoard(
+  page: Page,
+  fixture: "board-ready-min" = "board-ready-min",
+): Promise<string> {
+  const base = (page.context().baseURL ?? process.env.E2E_BASE_URL ?? "http://localhost:5000").replace(
+    /\/$/,
+    "",
+  );
+  // page.request only inherits BrowserContext cookies after at least one navigation.
+  await gotoWithUnifiedChatShell(page, "/my-dashboard", { timeout: 60_000 });
+  const headers = await e2eAuthHeaders(page);
+  const res = await page.request.post(`${base}/api/cohi-chat/workbench/test-seed`, {
+    headers,
+    data: { fixture },
+  });
+  if (!res.ok()) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `test-seed failed (${res.status()}): ${body.slice(0, 400)} — set WORKBENCH_TEST_SEED_ENABLED=1`,
+    );
+  }
+  const { canvasId } = (await res.json()) as { canvasId: string };
+  await gotoWithUnifiedChatShell(page, `/my-dashboard/${canvasId}`, {
+    timeout: 60_000,
+  });
+  await selectUnifiedChatType(page, "Workbench");
+  await expect(page.locator('[data-testid^="canvas-item-"]').first()).toBeVisible({
+    timeout: 60_000,
+  });
+  await waitForChatInputReady(page);
+  return canvasId;
 }
 
 export function attachPresentationStreamWatcher(page: Page): {

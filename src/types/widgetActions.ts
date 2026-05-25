@@ -62,10 +62,21 @@ export interface CreateWidgetAction {
 
 export interface ModifyWidgetAction {
   type: 'modify_widget';
-  /** Instance ID on the canvas to modify */
-  instanceId: string;
-  /** Partial changes to apply to the visualization config */
-  changes: Partial<VisualizationConfig>;
+  /**
+   * Layout item id on the canvas (required for cohi standalone / cohi target).
+   * For registry widgets inside a group, use groupId + widgetId instead.
+   */
+  instanceId?: string;
+  /** Discriminates registry catalog widgets vs cohi SQL widgets */
+  target?: 'registry' | 'cohi';
+  /** Group layout id when target is registry */
+  groupId?: string;
+  /** Stable widget id within the group (defId__idx) when target is registry */
+  widgetId?: string;
+  /** Registry config patch (chartType, format, etc.) */
+  configPatch?: Record<string, unknown>;
+  /** Partial changes to apply to the visualization config (cohi target) */
+  changes?: Partial<VisualizationConfig>;
   /** New SQL query to replace the existing one (for cohi_widget items) */
   sql?: string;
   /** New widget title */
@@ -116,6 +127,13 @@ export type GroupOperation =
       title: string;
       vizConfig: VisualizationConfig;
       gridPosition?: { x: number; y: number; w: number; h: number };
+      /** When filterable is false, group date filters are not injected into SQL. */
+      filterConfig?: {
+        filterable?: boolean;
+        dateColumn?: string;
+        defaultPreset?: string | null;
+      };
+      allowLowSamplePullThrough?: boolean;
     }
   | { op: 'remove'; widgetId: string }
   | { op: 'resize'; widgetId: string; w: number; h: number }
@@ -136,6 +154,10 @@ export interface ModifyGroupAction {
 // Phase 2: Registry widget config overrides
 // ---------------------------------------------------------------------------
 
+/**
+ * @deprecated Prefer `modify_widget` with `target: 'registry'` and `configPatch`.
+ * Still accepted by the client and server during transition.
+ */
 export interface ModifyRegistryWidgetAction {
   type: 'modify_registry_widget';
   groupId: string;
@@ -144,6 +166,14 @@ export interface ModifyRegistryWidgetAction {
   configOverrides: Record<string, unknown>;
   explanation: string;
 }
+
+/** Unified modify_widget for registry catalog widgets (K3). */
+export type RegistryModifyWidgetAction = ModifyWidgetAction & {
+  target: 'registry';
+  groupId: string;
+  widgetId: string;
+  configPatch: Record<string, unknown>;
+};
 
 // ---------------------------------------------------------------------------
 // Phase 3: Full template creation

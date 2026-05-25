@@ -1,0 +1,166 @@
+# Slice F2 live verify (tracked)
+
+Gitignored runtime copy: `test-results/more-live/SLICE-F2-REPORT.md`
+
+## Current state (Post-I, 2026-05-25)
+
+| Area | Result |
+|------|--------|
+| **Slices I1–I5** | On branch `fix/COHI-398-workbench-mtd-scope` (`750b56c3` … `b4b7f939`) |
+| **Agency eval** | **21/21** offline anchors — CI: [`.github/workflows/agency-eval.yml`](../.github/workflows/agency-eval.yml), [docs/agency-eval-ci.md](agency-eval-ci.md) |
+| **`WorkbenchCanvas.tsx`** | **3917 lines** (was ~4524 post-H; target &lt;1500 deferred to I6) |
+| **New modules** | `WorkbenchCanvasItemsLayer`, `useCanvasLayout`, `useWorkbenchAutosave` |
+| **Unit tests** | Items layer smoke (2), layout undo (1), autosave indicator (1), reconcile +36 |
+
+### I1 stabilization (expected REPORT after full live re-run)
+
+| ID | Status | Change |
+|----|--------|--------|
+| M06, M22, U08 | **works** (expected) | `pollCanvasTextGone` + reconcile trace prompt on record |
+| M21 | **works** (expected) | Poll + all-time title regex; unit test for `add_cohi` pipeline |
+| M24 | **works** (expected) | `expect.poll` on `.recharts-bar-rectangle` count |
+| M25 | **skipped** | Covered by M03 share dialog |
+
+Run full live regression:
+
+```powershell
+$env:WORKBENCH_RECONCILE_DEBUG="1"
+cd server; npm run dev
+# separate shell
+npx playwright test e2e/manual/workbench-more-live.spec.ts e2e/manual/workbench-unique-live.spec.ts e2e/manual/workbench-edge-live.spec.ts e2e/manual/workbench-more-responsive.spec.ts --config=playwright.manual-live.config.ts
+```
+
+---
+
+## Archive — pre-I top table (2026-05-25)
+
+| ID | Suite | Case | Status | Observed |
+|----|-------|------|--------|----------|
+| M17 | more-live | Chart type line | works | lineCurve=true |
+| M18 | more-live | Duplicate widget | works | widgets 6→7 |
+| M21 | more-live | All-time KPI | broken | Updated dashboard group |
+| M22 | more-live | Remove pull-through | works | gone=true |
+| M23 | more-live | WAC on board-ready | broken | wac=false |
+| M24 | more-live | Chart type bar | rough | barRect=false footer=false |
+| U02 | unique-live | Chart type line | works | lineCurve=true |
+| U04 | unique-live | Toolbar duplicate | works | widgets 6→7 |
+| U07 | unique-live | L6M period | works | Updated dashboard period |
+| U08 | unique-live | Remove volume | works | gone=true |
+| U09 | unique-live | PT remove+readd | works | ok |
+| U10 | unique-live | Duplicate 2nd widget | works | widgets 6→7 |
+
+## Auth (F1)
+
+- Refreshed: `npx tsx e2e/manual-auth-setup.ts` — success (2026-05-25)
+- globalSetup: `e2e/manual-auth-global-setup.ts`
+
+## Post-F3 re-run (M21/M23/M24)
+
+| ID | Status | Notes |
+|----|--------|-------|
+| M21 | broken | Footer still "Updated dashboard group" — restart backend to load F3 reconcile |
+| M23 | broken | WAC add turn — restart backend |
+| M24 | rough→F4 broken | barRect=false — restart backend |
+
+## F5/F6 regression
+
+- NR01–NR08 + E01–E05: **13/13 passed** (F5 toolbar extract)
+- Full more-live + unique-live: **40/40 Playwright passed** (~25 min)
+- Handler unit tests: **20/20 passed**
+- `WorkbenchCanvas.tsx`: **5096 lines** (target &lt;1500 not met; layout/render still inline)
+
+### Recorded failures (tests pass; status in REPORT)
+
+| ID | Status | Note |
+|----|--------|------|
+| M21 | broken | Footer "Updated dashboard group" — **restart backend** to load F3 all-time reconcile |
+| M23 | broken | WAC not on canvas after add turn — verify `augmentAddRegistry` + backend reload |
+| M24 | **works** | barRect=true after F3 wait + backend warm |
+| U02 | rough | lineCurve=false (flaky; M17 works same prompt class) |
+| U07 | broken | footer-only per F4 tighten (canvas Period chip missing L6M text) |
+| M11 | broken | PPT dialog=false |
+
+## Reconcile pipeline log
+
+Set on the **backend** before live runs:
+
+```powershell
+$env:WORKBENCH_RECONCILE_DEBUG="1"
+cd server; npm run dev
+```
+
+Broken/rough rows in this report append `trace=[...]` from `GET /api/cohi-chat/workbench/reconcile-trace?n=12` via [e2e/helpers/reconcileTrace.ts](e2e/helpers/reconcileTrace.ts).
+
+## Post-G1–G6 (slice G)
+
+| Slice | Change |
+|-------|--------|
+| G1 | Ring buffer `pushReconcileTraceEntry`, `GET /reconcile-trace`, e2e `captureReconcileTrace` on broken/rough rows |
+| G2 | `augmentAllTimeStripPeriodOnlyActions` chains `augmentAllTimeCreateWidgetFromQuestion`; WAC regex expanded |
+| G3 | `augmentPeriodSwitchActions` injects `set_period` on teach-only; `group-period-chip` visible label |
+| G4 | U02 `waitForChatInputReady` + 2s; M11 viewport 1440px; M23 canvas match includes full WAC phrase |
+| G5 | Extracted `WorkbenchCanvasSurface`, `WorkbenchEmptyState`, `WorkbenchSaveDialog`, `WorkbenchShareDialog` (`WorkbenchCanvas.tsx` ~4.5k lines; items layer still inline) |
+| G6 | Re-run live suites with `WORKBENCH_RECONCILE_DEBUG=1` after backend restart |
+
+### Expected after backend reload
+
+| ID | Expected | Notes |
+|----|----------|-------|
+| M21 | works | All-time create seeded after period-only strip |
+| M23 | works | `add_registry` for WAC / weighted average coupon |
+| U07 | works | Footer + `group-period-chip` "Last 6 Months" |
+| U02 | works | Same wait pattern as M17 |
+| M11 | works | PPT at 1440px viewport |
+
+```powershell
+$env:WORKBENCH_RECONCILE_DEBUG="1"
+cd server; npm run dev
+# separate shell
+npx playwright test e2e/manual/workbench-more-live.spec.ts e2e/manual/workbench-unique-live.spec.ts --config=playwright.manual-live.config.ts
+```
+
+## Post-H (slice H, 2026-05-25)
+
+**48/48 Playwright passed** (~26 min): more-live + unique-live + edge-live + more-responsive (NR01–NR08).
+
+### G1–G6 red rows (targeted H2 run — all works)
+
+| ID | Status | Observed |
+|----|--------|----------|
+| M11 | **works** | `reportBuilder=true` (assert `Slides (n)` inline ReportBuilder, not `role=dialog`) |
+| M21 | **works** | canvas/Total Volume (isolated run) |
+| M23 | **works** | `wac=true` |
+| U02 | **works** | `lineCurve=true` (expect.poll) |
+| U07 | **works** | `Updated dashboard period` + period chip |
+
+### Full-suite recorded gaps (out of H scope; trace on broken/rough)
+
+| ID | Status | Note |
+|----|--------|------|
+| M06 | broken | `gone=false` remove funded volume |
+| M21 | broken | flaky in full serial run — M21 poll hardened post-H |
+| M22 | broken | `gone=false` |
+| M24 | broken | `barRect=false` |
+| M25 | rough | share banner `dialog=false` |
+| U08 | broken | `gone=false` |
+
+### H code changes
+
+- [e2e/helpers/reconcileTrace.ts](e2e/helpers/reconcileTrace.ts): `baseURL` from Playwright `page.context()`
+- [WidgetGroup.tsx](src/components/widgets/components/WidgetGroup.tsx): period chip reads `savedFiltersProp` before store sync
+- [workbenchWidgetPeriodReconcile.ts](server/src/services/workbench/workbenchWidgetPeriodReconcile.ts): `actionsIncludeWidgetAdd`, volume SQL, empty `modify_group` all-time seed
+- M11: `Slides (\d+)` + Back to Canvas; M21/U02/U07 polls
+
+## Post-I (slice I1–I5)
+
+| Slice | Commit topic |
+|-------|----------------|
+| I1 | Poll remove/chart; M25 skip; M21 unit; reconcile-trace 404 hint |
+| I2 | `agency-eval.yml` + `docs/agency-eval-ci.md` |
+| I3 | `WorkbenchCanvasItemsLayer` (~630 lines extracted) |
+| I4 | `useCanvasLayout`, `useWorkbenchAutosave` + unit tests |
+| I5 | This report trim + full live re-run (see command above) |
+
+### I6 (next branch)
+
+Extract cohi action dispatch, AI background, image-to-dashboard handlers to push `WorkbenchCanvas.tsx` toward &lt;1500 lines.

@@ -88,6 +88,9 @@ export interface UnifiedConversationSummary {
   is_shared_view?: boolean;
   shared_by_email?: string | null;
   shared_by_name?: string | null;
+  parent_conversation_id?: string | null;
+  forked_to_conversation_id?: string | null;
+  conversation_origin?: string | null;
 }
 
 export interface UnifiedChatFolder {
@@ -207,6 +210,9 @@ export class UnifiedChatClient {
     chat_type: UnifiedChatType;
     messages: unknown[];
     legacy_ref?: string | null;
+    parent_conversation_id?: string | null;
+    forked_to_conversation_id?: string | null;
+    conversation_origin?: string | null;
     dataset_upload_ids?: string[];
     datasets?: {
       id: string;

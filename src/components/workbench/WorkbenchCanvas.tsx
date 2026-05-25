@@ -12,7 +12,6 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { useWidgetSectionStore, type SectionType, type SectionFilters } from "@/stores/widgetSectionStore";
-import { Rnd } from "react-rnd";
 import { api } from "@/lib/api";
 import * as XLSX from "xlsx";
 import { cn } from "@/lib/utils";
@@ -92,11 +91,19 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { useCanvasExport } from "@/hooks/useCanvasExport";
-import { useCanvasHistory } from "@/hooks/useCanvasHistory";
+import { useCanvasLayout } from "@/lib/workbench/canvas/useCanvasLayout";
+import {
+  useWorkbenchAutosave,
+  type SaveStatus,
+} from "@/lib/workbench/canvas/useWorkbenchAutosave";
 import { useCanvasPinStore } from "@/stores/canvasPinStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { WidgetRenderer } from "@/components/workbench/canvas/WidgetRenderer";
-import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
+import { WorkbenchTopToolbar } from "@/components/workbench/canvas/WorkbenchTopToolbar";
+import { WorkbenchCanvasSurface } from "@/components/workbench/canvas/WorkbenchCanvasSurface";
+import { WorkbenchEmptyState } from "@/components/workbench/canvas/WorkbenchEmptyState";
+import { WorkbenchSaveDialog } from "@/components/workbench/canvas/WorkbenchSaveDialog";
+import { WorkbenchShareDialog } from "@/components/workbench/canvas/WorkbenchShareDialog";
+import { WorkbenchCanvasItemsLayer } from "@/components/workbench/canvas/WorkbenchCanvasItemsLayer";
 import {
   createLayoutItem,
   type CanvasLayoutItem,
@@ -104,9 +111,7 @@ import {
   type CanvasBackground,
   type CanvasAnnotation,
   type WidgetFilterConfig,
-  type WidgetFilterState,
 } from "@/components/workbench/canvas/types";
-import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import { getWidgetDefinition } from "@/components/widgets/registry";
 import { WidgetDataProvider } from "@/components/widgets/data";
 import { WorkbenchCohiPanel } from "@/components/workbench/WorkbenchCohiPanel";
@@ -123,18 +128,39 @@ import type {
   ModifyGroupAction,
   GroupOperation,
   ModifyRegistryWidgetAction,
-  CreateDashboardAction,
-  DashboardGroupSpec,
-  StandaloneWidgetSpec,
-  ConvertToSqlWidgetAction,
+  ModifyWidgetAction,
   CanvasStateSnapshot,
 } from "@/types/widgetActions";
+import {
+  isRegistryModifyAction,
+  normalizeRegistryModifyAction,
+} from "@/lib/workbench/normalizeModifyWidgetAction";
+import { migrateLegacyCanvasItems } from "@/lib/workbench/migrateLegacyCanvasItems";
+import {
+  WORKBENCH_LEGACY_CHART_ID,
+  WORKBENCH_LEGACY_PINNED_ID,
+} from "@/components/widgets/registry/legacyWorkbenchWidgets";
 import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
-import { buildGroupSavedFiltersFromFilterConfig } from "@/lib/workbench/workbenchPresetMapping";
+import {
+  applyModifyGroupOperations,
+  applyModifyRegistryWidget,
+  applyDeleteWidgetFromItems,
+  applyConvertToSqlWidget,
+  applyCreateDashboard,
+  applyCreateWidget,
+  applyCreateCanvas,
+  applyModifyWidget,
+  type WidgetGroupPayloadShape,
+  type WidgetActionReducerOutcome,
+} from "@/lib/workbench/canvas/handlers/widgetActionDispatch";
+import {
+  buildGroupSavedFiltersFromFilterConfig,
+  filterConfigToInitialState,
+} from "@/lib/workbench/workbenchPresetMapping";
+import { wrapCohiWidgetInGroup } from "@/lib/workbench/workbenchCohiLayoutUtils";
 import { registerWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
 import { buildCanvasStateSnapshot } from "@/lib/workbench/buildCanvasStateSnapshot";
 import { resolveWidgetGroupIndex } from "@/lib/workbench/resolveWidgetGroupIndex";
-import { resolveGroupWidgetItemIndex } from "@/lib/workbench/resolveGroupWidgetItem";
 import {
   loadWorkbenchDraftLayout,
   saveWorkbenchDraftLayout,
@@ -142,7 +168,6 @@ import {
 } from "@/lib/workbench/workbenchDraftLayoutCache";
 import {
   consumePendingWorkbenchActions,
-  COHI_WORKBENCH_EDIT_WIDGET_EVENT,
   COHI_WORKBENCH_STOP_EDITING_EVENT,
   dispatchWorkbenchEditingWidgetState,
   draftScopeIdForCanvasTab,
@@ -185,77 +210,25 @@ function compactFiltersForPersistence(
   return Object.keys(out).length > 0 ? (out as Partial<SectionFilters>) : undefined;
 }
 
-/**
- * Converts a WidgetFilterConfig returned by the AI into an initial WidgetFilterState.
- * The savedFilters drives the group's initial filter bar selection.
- */
-function filterConfigToInitialState(fc: WidgetFilterConfig | undefined): WidgetFilterState | undefined {
-  if (!fc || !fc.filterable) return undefined;
-  const state: WidgetFilterState = {};
-  if (fc.dateColumn && fc.dateColumn !== 'application_date') {
-    state.dateField = fc.dateColumn;
+type WorkbenchToastFn = (props: {
+  title: string;
+  description?: string;
+  variant?: "destructive";
+}) => void;
+
+function commitWidgetActionReducerOutcome(
+  outcome: WidgetActionReducerOutcome,
+  setItemsWithHistory: (
+    items: CanvasLayoutItem[] | ((prev: CanvasLayoutItem[]) => CanvasLayoutItem[]),
+  ) => void,
+  toast: WorkbenchToastFn,
+) {
+  if (outcome.result === "ok") {
+    setItemsWithHistory(outcome.items);
   }
-  if (fc.defaultPreset) {
-    try {
-      // Validate it's a known preset key before storing
-      computePresetDateRange(fc.defaultPreset as any);
-      state.preset = fc.defaultPreset;
-    } catch {
-      // Unknown preset — omit, widget will use its default
-    }
+  if (outcome.toast) {
+    toast(outcome.toast);
   }
-  return Object.keys(state).length > 0 ? state : undefined;
-}
-
-/**
- * Wraps a single AI-generated cohi widget in a lightweight widget_group so it
- * gets the full group filter bar (date, dimension, "add filter") instead of the
- * limited standalone toolbar.
- */
-function wrapCohiWidgetInGroup(
-  action: { sql: string; title: string; config: any; explanation?: string; filterConfig?: WidgetFilterConfig; allowLowSamplePullThrough?: boolean },
-  idx: string,
-  pos: { x: number; y: number; w: number; h: number },
-): CanvasLayoutItem {
-  const groupId = `cohi-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const widgetId = `cohi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
-  const filterConfig: WidgetFilterConfig = action.filterConfig ?? { filterable: true, dateColumn: 'application_date' };
-  const initialFilters = filterConfigToInitialState(filterConfig);
-
-  // Use filterConfig.dateColumn to initialise the group's own savedFilters so
-  // the filter bar starts on the right date column & preset.
-  const groupSavedFilters = filterConfig.filterable && filterConfig.dateColumn
-    ? {
-        dateField: filterConfig.dateColumn,
-        ...(filterConfig.defaultPreset ? { periodSelection: { preset: filterConfig.defaultPreset as any } } : {}),
-      }
-    : undefined;
-
-  return createLayoutItem(
-    groupId,
-    'widget_group',
-    {
-      type: 'widget_group' as const,
-      groupId,
-      title: action.title,
-      sectionType: 'company-scorecard' as SectionType,
-      widgetIds: [],
-      items: [{
-        kind: 'cohi' as const,
-        id: widgetId,
-        sql: action.sql,
-        title: action.title,
-        vizConfig: action.config,
-        explanation: action.explanation,
-        filterConfig,
-        allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
-        savedFilters: initialFilters,
-      }],
-      filterSync: true,
-      ...(groupSavedFilters ? { savedFilters: groupSavedFilters } : {}),
-    },
-    pos,
-  );
 }
 
 /**
@@ -283,7 +256,7 @@ async function fetchBlob(endpoint: string, body: object): Promise<Blob> {
   return res.blob();
 }
 
-const UPLOAD_ALLOWED_TYPES = [
+export const UPLOAD_ALLOWED_TYPES = [
   "text/csv",
   "application/pdf",
   "image/png",
@@ -303,7 +276,7 @@ const DEFAULT_BACKGROUND: CanvasBackground = {
 };
 
 /** 10 UGC background templates: gradients and subtle patterns */
-const BACKGROUND_TEMPLATES: {
+export const BACKGROUND_TEMPLATES: {
   id: string;
   label: string;
   style: React.CSSProperties;
@@ -400,7 +373,7 @@ const TEMPLATE_SCALE = 0.75;
 const TEMPLATE_MIN_SIZE = { w: 260, h: 180 };
 
 /** Predefined canvas templates (layout + optional background) */
-const CANVAS_TEMPLATES: {
+export const CANVAS_TEMPLATES: {
   id: string;
   label: string;
   description: string;
@@ -976,21 +949,6 @@ function migrateLoanDetailToWidgetGroup(
   });
 }
 
-/** Hideable sub-sections per dashboard_section (for "Hide sections" menu). */
-const DASHBOARD_HIDEABLE_SECTIONS: Record<
-  string,
-  { id: string; label: string }[]
-> = {
-  topTiering: [
-    { id: "dailyStory", label: "Executive summary / Daily Story" },
-    { id: "chart", label: "Funnel / Detail chart" },
-  ],
-  loanFunnel: [
-    { id: "dailyStory", label: "Executive summary / Daily Story" },
-    { id: "chart", label: "Funnel / Detail chart" },
-  ],
-};
-
 function getNextPosition(items: CanvasLayoutItem[]): { x: number; y: number } {
   if (items.length === 0) return { x: 0, y: 0 };
   let maxY = 0;
@@ -1020,7 +978,7 @@ function convertLayoutToPixels(
   }));
 }
 
-export type SaveStatus = "saved" | "saving" | "unsaved" | "idle";
+export type { SaveStatus };
 
 /** Fixed ID for the seeded demo canvas; in dev it is loaded via /api/workbench/canvases/demo (no auth). */
 export const DEMO_CANVAS_ID = "00000000-0000-0000-0000-000000000002";
@@ -1070,6 +1028,8 @@ export function WorkbenchCanvas({
   chatDraftScopeId,
 }: WorkbenchCanvasProps) {
   const embeddedCohiHidden = isWorkbenchEmbeddedCohiHidden();
+  const isOwner = isOwnerProp ?? true;
+  const canEdit = isOwner;
   const {
     items,
     annotations,
@@ -1082,10 +1042,15 @@ export function WorkbenchCanvas({
     redo,
     canUndo,
     canRedo,
-  } = useCanvasHistory<CanvasLayoutItem, CanvasAnnotation>(
-    restoreLayoutFromDraftCache(loadCanvasId, chatDraftScopeId),
-    [],
-  );
+    updateItemRect,
+    updateWidgetPayload,
+    bringToFront,
+    sendToBack,
+  } = useCanvasLayout({
+    initialItems: restoreLayoutFromDraftCache(loadCanvasId, chatDraftScopeId),
+    initialAnnotations: [],
+    canEdit,
+  });
   const [uploads, setUploads] = useState<CanvasUpload[]>([]);
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>(
     () =>
@@ -1156,8 +1121,6 @@ export function WorkbenchCanvas({
     useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
-  const canEdit = isOwner;
   const canTransferOwnership =
     !!canvasId &&
     (isRecordOwner ||
@@ -1204,155 +1167,34 @@ export function WorkbenchCanvas({
   const pendingPins = useCanvasPinStore((s) => s.pendingPins);
   const consumePendingPins = useCanvasPinStore((s) => s.consumePendingPins);
 
-  /* ─── Autosave: dirty-state tracking & debounced save ─── */
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const lastSavedSnapshotRef = useRef<string>("");
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manualSavingRef = useRef(false);
   const previousLoadCanvasIdRef = useRef<string | null>(loadCanvasId ?? null);
 
-  // Build a snapshot string for comparison
-  const currentSnapshot = useMemo(() => {
-    try {
-      return JSON.stringify({
-        items,
-        annotations,
-        bg: canvasBackground,
-        uploads,
-        title: saveTitle,
-      });
-    } catch {
-      return "";
-    }
-  }, [items, annotations, canvasBackground, uploads, saveTitle]);
-
-  const buildLayoutWithLatestGroupFilters = useCallback(
-    (layoutItems: CanvasLayoutItem[]): CanvasLayoutItem[] => {
-      const sections = useWidgetSectionStore.getState().sections;
-      return layoutItems.map((it) => {
-        if (it.type !== "widget_group" || it.payload.type !== "widget_group") return it;
-        const current = sections[it.payload.groupId];
-        if (!current) return it;
-        const mergedSavedFilters = compactFiltersForPersistence({
-          ...(it.payload.savedFilters || {}),
-          ...current,
-        });
-        return {
-          ...it,
-          payload: {
-            ...it.payload,
-            ...(mergedSavedFilters ? { savedFilters: mergedSavedFilters } : {}),
-          },
-        };
-      });
-    },
-    [],
-  );
-
-  const persistExistingCanvas = useCallback(
-    async (options?: { keepalive?: boolean }) => {
-      if (!canvasId || !isOwner) return null;
-
-      const title = saveTitle.trim() || "Untitled canvas";
-      const persistedLayout = buildLayoutWithLatestGroupFilters(items);
-      const content = {
-        layoutVersion: "freeform-v1",
-        layout: persistedLayout,
-        annotations,
-        background: canvasBackground,
-        uploadsMeta: uploads,
-      };
-      const snapshot = JSON.stringify({
-        items: persistedLayout,
-        annotations,
-        bg: canvasBackground,
-        uploads,
-        title: saveTitle,
-      });
-      const saveTenantQs = tenantId
-        ? `?tenant_id=${encodeURIComponent(tenantId)}`
-        : "";
-      const url = `/api/workbench/canvases/${canvasId}${saveTenantQs}`;
-      const body = JSON.stringify({ title, content });
-
-      if (options?.keepalive) {
-        void fetch(url, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body,
-          keepalive: true,
-        });
-        return { title, snapshot };
-      }
-
-      await api.request(url, { method: "PUT", body });
-      lastSavedSnapshotRef.current = snapshot;
-      onSaved?.(canvasId, title);
-      return { title, snapshot };
-    },
-    [
-      annotations,
-      canvasBackground,
-      canvasId,
-      buildLayoutWithLatestGroupFilters,
-      isOwner,
-      items,
-      onSaved,
-      saveTitle,
-      tenantId,
-      uploads,
-    ],
-  );
-
-  // Determine dirty state
-  const isDirty = useMemo(() => {
-    if (!lastSavedSnapshotRef.current) return false; // never saved/loaded — not dirty
-    return currentSnapshot !== lastSavedSnapshotRef.current;
-  }, [currentSnapshot]);
-
-  // Notify parent of dirty state changes
-  useEffect(() => {
-    onDirtyChange?.(isDirty);
-  }, [isDirty, onDirtyChange]);
-
-  // Update visual save status based on dirty
-  useEffect(() => {
-    if (isDirty && saveStatus !== "saving") {
-      setSaveStatus("unsaved");
-    } else if (!isDirty && saveStatus !== "saving") {
-      setSaveStatus(canvasId ? "saved" : "idle");
-    }
-  }, [isDirty, canvasId, saveStatus]);
-
-  // Autosave: debounce 5s after last change for already-saved canvases
-  useEffect(() => {
-    if (autosaveTimerRef.current) {
-      clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-    if (!canvasId || !isDirty || !isOwner) return;
-
-    autosaveTimerRef.current = setTimeout(async () => {
-      // Skip if a manual save is already in progress
-      if (manualSavingRef.current) return;
-      setSaveStatus("saving");
-      try {
-        await persistExistingCanvas();
-        setSaveStatus("saved");
-      } catch {
-        setSaveStatus("unsaved");
-      }
-    }, 5000);
-
-    return () => {
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
-        autosaveTimerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSnapshot, canvasId, persistExistingCanvas]);
+  const {
+    saveStatus,
+    setSaveStatus,
+    isDirty,
+    saveIndicator,
+    persistExistingCanvas,
+    buildLayoutWithLatestGroupFilters,
+    syncSavedSnapshot,
+  } = useWorkbenchAutosave({
+    items,
+    annotations,
+    canvasBackground,
+    uploads,
+    saveTitle,
+    canvasId,
+    isOwner,
+    tenantId,
+    onDirtyChange,
+    onSaved,
+    lastSavedSnapshotRef,
+    manualSavingRef,
+    loadCanvasId,
+    chatDraftScopeId,
+  });
 
   useEffect(() => {
     const previousLoadCanvasId = previousLoadCanvasIdRef.current;
@@ -1386,58 +1228,6 @@ export function WorkbenchCanvas({
     if (!loadCanvasId || chatDraftScopeId) return;
     setDraftScopeId(draftScopeIdForCanvasTab(loadCanvasId));
   }, [loadCanvasId, chatDraftScopeId]);
-
-  useEffect(() => {
-    if (!canvasId || !isOwner || !isDirty) return;
-
-    const handlePageHide = () => {
-      void persistExistingCanvas({ keepalive: true });
-    };
-
-    window.addEventListener("pagehide", handlePageHide);
-    return () => window.removeEventListener("pagehide", handlePageHide);
-  }, [canvasId, isDirty, isOwner, persistExistingCanvas]);
-
-  const saveIndicator = useMemo(() => {
-    if (!isOwner) {
-      if (!canvasId) return null;
-      return {
-        label: "View only",
-        className:
-          "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap flex items-center justify-end gap-1",
-        icon: <Lock className="h-3 w-3" />,
-      };
-    }
-
-    if (saveStatus === "saving") {
-      return {
-        label: "Saving...",
-        className:
-          "text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap",
-        icon: null,
-      };
-    }
-
-    if (saveStatus === "saved" && canvasId && !isDirty) {
-      return {
-        label: "Saved",
-        className:
-          "text-[11px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap",
-        icon: null,
-      };
-    }
-
-    if (saveStatus === "unsaved" && canvasId && isDirty) {
-      return {
-        label: "Unsaved changes",
-        className:
-          "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap",
-        icon: null,
-      };
-    }
-
-    return null;
-  }, [canvasId, isDirty, isOwner, saveStatus]);
 
   // --- Cohi Workbench Intelligence ---
   const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
@@ -1705,149 +1495,11 @@ export function WorkbenchCanvas({
             break;
           }
           const layoutItem = items[groupIdx];
-          const payload = layoutItem.payload as {
-            type: "widget_group";
-            groupId: string;
-            title: string;
-            sectionType: SectionType;
-            widgetIds: string[];
-            items?: GroupWidgetItem[];
-            widgetLayouts?: Record<
-              string,
-              { x: number; y: number; w: number; h: number }
-            >;
-            layoutVersion?: number;
-            savedFilters?: Record<string, unknown>;
-          };
-          const LAYOUT_VERSION = 8;
-          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry")
-              return `${groupItem.defId}__${idx}`;
-            return `cohi__${groupItem.id}__${idx}`;
-          }
-          let itemsList: GroupWidgetItem[] = Array.isArray(payload.items)
-            ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({
-                kind: "registry" as const,
-                defId,
-              }));
-          let layouts: Record<
-            string,
-            { x: number; y: number; w: number; h: number }
-          > = { ...(payload.widgetLayouts ?? {}) };
-          let groupTitle = payload.title;
-          let savedFilters = payload.savedFilters
-            ? { ...payload.savedFilters }
-            : undefined;
-          let removeMissed = false;
-
-          for (const op of groupAction.operations) {
-            if (op.op === "add_registry") {
-              const newItem: GroupWidgetItem = {
-                kind: "registry",
-                defId: op.defId,
-              };
-              const idx = itemsList.length;
-              itemsList.push(newItem);
-              if (op.gridPosition)
-                layouts[itemKey(newItem, idx)] = op.gridPosition;
-            } else if (op.op === "add_cohi") {
-              const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-              const newItem: GroupWidgetItem = {
-                kind: "cohi",
-                id,
-                sql: op.sql,
-                title: op.title,
-                vizConfig: op.vizConfig,
-              };
-              const idx = itemsList.length;
-              itemsList.push(newItem);
-              if (op.gridPosition)
-                layouts[itemKey(newItem, idx)] = op.gridPosition;
-            } else if (op.op === "remove") {
-              const idx = resolveGroupWidgetItemIndex(
-                itemsList,
-                op.widgetId ?? "",
-              );
-              if (idx < 0) {
-                removeMissed = true;
-              }
-              if (idx >= 0) {
-                const oldKeys = itemsList.map((it, i) => itemKey(it, i));
-                itemsList = itemsList.filter((_, i) => i !== idx);
-                const nextLayouts: Record<
-                  string,
-                  { x: number; y: number; w: number; h: number }
-                > = {};
-                itemsList.forEach((it, i) => {
-                  const newKey = itemKey(it, i);
-                  const oldKey = i < idx ? oldKeys[i] : oldKeys[i + 1];
-                  if (layouts[oldKey]) nextLayouts[newKey] = layouts[oldKey];
-                });
-                layouts = nextLayouts;
-              }
-            } else if (op.op === "resize") {
-              if (layouts[op.widgetId]) {
-                layouts = {
-                  ...layouts,
-                  [op.widgetId]: { ...layouts[op.widgetId], w: op.w, h: op.h },
-                };
-              }
-            } else if (op.op === "reorder") {
-              const keyToItem = new Map<string | undefined, GroupWidgetItem>();
-              itemsList.forEach((it, i) => keyToItem.set(itemKey(it, i), it));
-              const reordered = op.widgetIds
-                .map((k) => keyToItem.get(k))
-                .filter(Boolean) as GroupWidgetItem[];
-              if (reordered.length === itemsList.length) {
-                itemsList = reordered;
-                const nextLayouts: Record<
-                  string,
-                  { x: number; y: number; w: number; h: number }
-                > = {};
-                itemsList.forEach((it, i) => {
-                  const newKey = itemKey(it, i);
-                  const oldKey = op.widgetIds[i];
-                  if (layouts[oldKey]) nextLayouts[newKey] = layouts[oldKey];
-                });
-                layouts = nextLayouts;
-              }
-            } else if (op.op === "set_title") {
-              groupTitle = op.title;
-            } else if (op.op === "set_filters") {
-              savedFilters = { ...(savedFilters ?? {}), ...(op.filters ?? {}) };
-            } else if (op.op === "set_period") {
-              const built = buildGroupSavedFiltersFromFilterConfig({
-                filterable: true,
-                dateColumn: "application_date",
-                defaultPreset: op.preset,
-              });
-              if (built) {
-                savedFilters = {
-                  ...(savedFilters ?? {}),
-                  ...built,
-                  year: undefined,
-                };
-              }
-            } else if (op.op === "set_widget_title") {
-              const idx = itemsList.findIndex(
-                (it, i) => itemKey(it, i) === op.widgetId,
-              );
-              if (idx >= 0 && itemsList[idx].kind === "cohi") {
-                itemsList[idx] = { ...itemsList[idx], title: op.title };
-              }
-            }
-          }
-
-          const nextPayload = {
-            ...payload,
-            title: groupTitle,
-            savedFilters,
-            items: itemsList,
-            widgetLayouts:
-              Object.keys(layouts).length > 0 ? layouts : undefined,
-            layoutVersion: LAYOUT_VERSION,
-          } as typeof layoutItem.payload;
+          const payload = layoutItem.payload as WidgetGroupPayloadShape;
+          const { payload: nextPayload, removeMissed } = applyModifyGroupOperations(
+            payload,
+            groupAction.operations,
+          );
           setItemsWithHistory((prev) =>
             prev.map((it, i) =>
               i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
@@ -1869,388 +1521,116 @@ export function WorkbenchCanvas({
           }
           break;
         }
-        case "modify_registry_widget": {
-          const regAction = action as ModifyRegistryWidgetAction;
-          const groupIdx = resolveWidgetGroupIndex(items, regAction.groupId);
-          if (groupIdx < 0) {
+        case "modify_registry_widget":
+        case "modify_widget": {
+          const modifyAction = action as
+            | ModifyWidgetAction
+            | ModifyRegistryWidgetAction;
+          if (isRegistryModifyAction(modifyAction)) {
+            const regAction = normalizeRegistryModifyAction(modifyAction);
+            const groupIdx = resolveWidgetGroupIndex(items, regAction.groupId);
+            if (groupIdx < 0) {
+              toast({
+                title: "Group not found",
+                description: `No dashboard group with id ${regAction.groupId}`,
+                variant: "destructive",
+              });
+              break;
+            }
+            const layoutItem = items[groupIdx];
+            const payload = layoutItem.payload as WidgetGroupPayloadShape;
+            const { payload: nextPayload, found, isRegistry } =
+              applyModifyRegistryWidget(payload, regAction);
+            if (!found) {
+              toast({
+                title: "Widget not found",
+                description: `No registry widget "${regAction.widgetId}" in that group`,
+                variant: "destructive",
+              });
+              break;
+            }
+            if (!isRegistry) {
+              toast({
+                title: "Not a registry widget",
+                description:
+                  "Registry modify only applies to pre-built catalog widgets",
+                variant: "destructive",
+              });
+              break;
+            }
+            setItemsWithHistory((prev) =>
+              prev.map((it, i) =>
+                i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
+              ),
+            );
             toast({
-              title: "Group not found",
-              description: `No dashboard group with id ${regAction.groupId}`,
-              variant: "destructive",
-            });
-            break;
-          }
-          const layoutItem = items[groupIdx];
-          const payload = layoutItem.payload as {
-            type: "widget_group";
-            groupId: string;
-            title: string;
-            sectionType: SectionType;
-            widgetIds: string[];
-            items?: GroupWidgetItem[];
-            widgetLayouts?: Record<
-              string,
-              { x: number; y: number; w: number; h: number }
-            >;
-          };
-          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry")
-              return `${groupItem.defId}__${idx}`;
-            return `cohi__${groupItem.id}__${idx}`;
-          }
-          const itemsList = Array.isArray(payload.items)
-            ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({
-                kind: "registry" as const,
-                defId,
-              }));
-          const targetIdx = itemsList.findIndex(
-            (it, i) =>
-              it.kind === "registry" &&
-              (itemKey(it, i) === regAction.widgetId ||
-                it.defId === regAction.widgetId),
-          );
-          if (targetIdx < 0) {
-            toast({
-              title: "Widget not found",
-              description: `No registry widget "${regAction.widgetId}" in that group`,
-              variant: "destructive",
-            });
-            break;
-          }
-          const target = itemsList[targetIdx];
-          if (target.kind !== "registry") {
-            toast({
-              title: "Not a registry widget",
+              title: "Widget config updated",
               description:
-                "modify_registry_widget only applies to pre-built catalog widgets",
-              variant: "destructive",
+                regAction.explanation?.substring(0, 80) ||
+                "Config patch applied",
             });
             break;
           }
-          const updatedItems = itemsList.map((it, i) =>
-            i === targetIdx && it.kind === "registry"
-              ? {
-                  ...it,
-                  configOverrides: {
-                    ...(it.configOverrides ?? {}),
-                    ...regAction.configOverrides,
-                  },
-                }
-              : it,
+          if (action.type !== "modify_widget") break;
+          commitWidgetActionReducerOutcome(
+            applyModifyWidget(items, action, { editingWidgetId }),
+            setItemsWithHistory,
+            toast,
           );
-          const nextPayload = {
-            ...payload,
-            items: updatedItems,
-          } as typeof layoutItem.payload;
-          setItemsWithHistory((prev) =>
-            prev.map((it, i) =>
-              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
-            ),
-          );
-          toast({
-            title: "Widget config updated",
-            description:
-              regAction.explanation?.substring(0, 80) ||
-              "Config overrides applied",
-          });
           break;
         }
         case "convert_to_sql_widget": {
-          const convAction = action as ConvertToSqlWidgetAction;
-          const groupIdx = resolveWidgetGroupIndex(items, convAction.groupId);
-          if (groupIdx < 0) {
-            toast({
-              title: "Group not found",
-              description: `No dashboard group with id ${convAction.groupId}`,
-              variant: "destructive",
-            });
-            break;
-          }
-          const layoutItem = items[groupIdx];
-          const payload = layoutItem.payload as {
-            type: "widget_group";
-            groupId: string;
-            title: string;
-            sectionType: SectionType;
-            widgetIds: string[];
-            items?: GroupWidgetItem[];
-            widgetLayouts?: Record<
-              string,
-              { x: number; y: number; w: number; h: number }
-            >;
-            layoutVersion?: number;
-          };
-          const LAYOUT_VER = 8;
-          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry")
-              return `${groupItem.defId}__${idx}`;
-            return `cohi__${groupItem.id}__${idx}`;
-          }
-          const itemsList = Array.isArray(payload.items)
-            ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({
-                kind: "registry" as const,
-                defId,
-              }));
-          const targetIdx = itemsList.findIndex(
-            (it, i) =>
-              it.kind === "registry" &&
-              (itemKey(it, i) === convAction.widgetId ||
-                it.defId === convAction.widgetId),
+          commitWidgetActionReducerOutcome(
+            applyConvertToSqlWidget(items, action),
+            setItemsWithHistory,
+            toast,
           );
-          if (targetIdx < 0) {
-            toast({
-              title: "Widget not found",
-              description: `No registry widget "${convAction.widgetId}" in that group`,
-              variant: "destructive",
-            });
-            break;
-          }
-          const oldKey = itemKey(itemsList[targetIdx], targetIdx);
-          const newCohi: GroupWidgetItem = {
-            kind: "cohi",
-            id: `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            sql: convAction.sql,
-            title: convAction.title,
-            vizConfig: convAction.vizConfig,
-          };
-          const updatedItems = itemsList.map((it, i) =>
-            i === targetIdx ? newCohi : it,
-          );
-          const newKey = itemKey(newCohi, targetIdx);
-          const layouts = { ...(payload.widgetLayouts ?? {}) };
-          if (layouts[oldKey]) {
-            layouts[newKey] = layouts[oldKey];
-            delete layouts[oldKey];
-          }
-          const nextPayload = {
-            ...payload,
-            items: updatedItems,
-            widgetLayouts:
-              Object.keys(layouts).length > 0 ? layouts : undefined,
-            layoutVersion: LAYOUT_VER,
-          } as typeof layoutItem.payload;
-          setItemsWithHistory((prev) =>
-            prev.map((it, i) =>
-              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
-            ),
-          );
-          toast({
-            title: "Widget converted",
-            description:
-              convAction.explanation?.substring(0, 80) ||
-              "Replaced with SQL-backed widget",
-          });
           break;
         }
         case "create_dashboard": {
-          const dashAction = action as CreateDashboardAction;
-          const newItems: CanvasLayoutItem[] = [];
-          let yOffset = 20;
-          const groupGap = 20;
-          const defaultGroupSize = { w: 1000, h: 800 };
-
-          for (const group of dashAction.groups) {
-            const groupId = `cohi-dash-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-            const groupItems: GroupWidgetItem[] = group.widgets.map((w) => {
-              if (w.kind === "registry") {
-                return { kind: "registry" as const, defId: w.defId };
-              }
-              const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-              const fc: WidgetFilterConfig = (w as any).filterConfig ?? { filterable: true, dateColumn: 'application_date' };
-              return {
-                kind: "cohi" as const,
-                id,
-                sql: w.sql,
-                title: w.title,
-                vizConfig: w.vizConfig,
-                filterConfig: fc,
-                allowLowSamplePullThrough: !!(w as any).allowLowSamplePullThrough,
-                savedFilters: filterConfigToInitialState(fc),
-              };
-            });
-            const pos = group.canvasPosition ?? {
-              x: 20,
-              y: yOffset,
-              w: defaultGroupSize.w,
-              h: defaultGroupSize.h,
-            };
-            const sectionType = (group.sectionType ??
-              "company-scorecard") as SectionType;
-            const groupPayload = {
-              type: "widget_group" as const,
-              groupId,
-              title: group.title,
-              sectionType,
-              widgetIds: groupItems
-                .filter(
-                  (i): i is Extract<GroupWidgetItem, { kind: "registry" }> =>
-                    i.kind === "registry",
-                )
-                .map((i) => i.defId),
-              items: groupItems,
-            };
-            newItems.push(
-              createLayoutItem(
-                `canvas-${groupId}`,
-                "widget_group",
-                groupPayload,
-                pos,
-              ),
-            );
-            yOffset = pos.y + pos.h + groupGap;
-          }
-
-          for (const spec of dashAction.standaloneWidgets ?? []) {
-            if (spec.kind !== "cohi") continue;
-            const pos = spec.canvasPosition ?? {
-              x: 20,
-              y: yOffset,
-              w: 700,
-              h: 440,
-            };
-            // Standalone cohi specs also get auto-grouped for the filter bar
-            const groupItem = wrapCohiWidgetInGroup(spec as any, Math.random().toString(36).slice(2, 6), pos);
-            newItems.push(groupItem);
-            yOffset = pos.y + pos.h + groupGap;
-          }
-
-          setItemsWithHistory((prev) => [...prev, ...newItems]);
-          toast({
-            title: "Dashboard created",
-            description:
-              dashAction.explanation?.substring(0, 80) ||
-              `Added ${dashAction.groups.length} group(s)`,
-          });
+          commitWidgetActionReducerOutcome(
+            applyCreateDashboard(items, action),
+            setItemsWithHistory,
+            toast,
+          );
           break;
         }
         case "create_widget": {
-          // Wrap in a widget_group for the full filter bar experience.
-          const yBottom = items.reduce(
-            (max, it) => Math.max(max, it.y + it.h),
-            0,
+          commitWidgetActionReducerOutcome(
+            applyCreateWidget(items, action, { canvasWidth: width }),
+            setItemsWithHistory,
+            toast,
           );
-          const groupItem = wrapCohiWidgetInGroup(
-            action as any,
-            Math.random().toString(36).slice(2, 6),
-            {
-              x: 12,
-              y: yBottom + 16,
-              w: Math.min(Math.max(width - 56, 400), 700),
-              h: 440,
-            },
-          );
-          setItemsWithHistory((prev) => [...prev, groupItem]);
-          toast({ title: "Widget added", description: action.title });
           break;
         }
         case "delete_widget": {
-          setItemsWithHistory(items.filter((it) => it.i !== action.instanceId));
-          toast({ title: "Widget removed" });
+          const { items: nextItems, removed } = applyDeleteWidgetFromItems(
+            items,
+            action.instanceId,
+          );
+          if (removed) {
+            setItemsWithHistory(nextItems);
+            toast({ title: "Widget removed" });
+          } else {
+            toast({
+              title: "Widget not found",
+              description: `No widget matching "${action.instanceId}"`,
+              variant: "destructive",
+            });
+          }
           break;
         }
         case "create_canvas": {
-          // Build a full canvas from multiple dashboard sections
-          const sectionKeys = action.sectionKeys ?? [];
-          if (sectionKeys.length === 0) {
-            toast({ title: "No sections specified", variant: "destructive" });
-            break;
-          }
           if (action.title) setSaveTitle(action.title);
-          const newItems: CanvasLayoutItem[] = [];
-          let yOffset = 0;
-          const groupW = Math.max(width - 32, 480);
-          const EMBED_HEIGHTS: Record<string, number> = {
-            executiveDashboard: 700,
-            leaderboard: 850,
-          };
-
-          for (const key of sectionKeys) {
-            const itemId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-            const sectionTitle = key
-              .replace(/([A-Z])/g, " $1")
-              .replace(/^./, (s) => s.toUpperCase())
-              .trim();
-
-            // Standalone widgets – add as registry_widget directly
-            const standalone = STANDALONE_WIDGETS[key];
-            if (standalone) {
-              newItems.push(
-                createLayoutItem(
-                  itemId,
-                  "registry_widget",
-                  {
-                    type: "registry_widget",
-                    definitionId: standalone.defId,
-                  },
-                  {
-                    x: 0,
-                    y: yOffset,
-                    w: Math.min(standalone.w, groupW),
-                    h: standalone.h,
-                  },
-                ),
-              );
-              yOffset += standalone.h + 24;
-              continue;
-            }
-
-            // Full dashboard sections – add as widget_group
-            const section = SECTION_TO_WIDGETS[key];
-            if (!section) continue;
-            const groupId = `cohi-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-            const embedH = EMBED_HEIGHTS[key];
-            let groupH: number;
-            if (embedH && section.widgetIds.length <= 2) {
-              groupH = embedH;
-            } else {
-              const kpiCount = section.widgetIds.filter((id) => {
-                const def = getWidgetDefinition(id);
-                return def?.category === "kpi";
-              }).length;
-              const kpiRows = Math.ceil(kpiCount / 7);
-              const chartCount = section.widgetIds.filter((id) => {
-                const d = getWidgetDefinition(id);
-                return (
-                  d?.category === "chart" || d?.category === "distribution"
-                );
-              }).length;
-              const tableCount = section.widgetIds.filter((id) => {
-                const d = getWidgetDefinition(id);
-                return d?.category === "table";
-              }).length;
-              const chartRows = Math.ceil(chartCount / 2);
-              const contentH =
-                kpiRows * 80 + chartRows * 210 + tableCount * 280 + 20;
-              groupH = Math.max(350, 110 + contentH);
-            }
-
-            newItems.push(
-              createLayoutItem(
-                itemId,
-                "widget_group",
-                {
-                  type: "widget_group",
-                  groupId,
-                  title: sectionTitle,
-                  sectionType: section.sectionType as SectionType,
-                  widgetIds: section.widgetIds,
-                },
-                { x: 0, y: yOffset, w: groupW, h: groupH },
-              ),
-            );
-            yOffset += groupH + 24;
-          }
-
-          if (newItems.length > 0) {
-            setItemsWithHistory((prev) => [...prev, ...newItems]);
-            toast({
-              title: action.title || "Canvas created",
-              description: `Added ${newItems.length} dashboard section${newItems.length !== 1 ? "s" : ""} to canvas`,
-            });
-          }
+          commitWidgetActionReducerOutcome(
+            applyCreateCanvas(items, action, {
+              canvasWidth: width,
+              sectionToWidgets: SECTION_TO_WIDGETS,
+              standaloneWidgets: STANDALONE_WIDGETS,
+            }),
+            setItemsWithHistory,
+            toast,
+          );
           break;
         }
         case "generate_report": {
@@ -2309,198 +1689,6 @@ export function WorkbenchCanvas({
               });
             }
           })();
-          break;
-        }
-        case "modify_widget": {
-          if (editingWidgetId && action.instanceId !== editingWidgetId) {
-            toast({
-              title: "Wrong widget",
-              description:
-                "Cohi tried to modify a different widget. Only the widget you're editing (with the ring) can be modified. Click 'Stop editing' or select the correct widget and use Edit with Cohi.",
-              variant: "destructive",
-            });
-            break;
-          }
-          const targetIdx = items.findIndex((it) => it.i === action.instanceId);
-          const hasSql = !!(action.sql && String(action.sql).trim());
-          const hasChanges =
-            action.changes && Object.keys(action.changes).length > 0;
-          const hasTitle = !!(action.title && String(action.title).trim());
-          if (!hasSql && !hasChanges && !hasTitle) {
-            toast({
-              title: "No changes applied",
-              description:
-                "Cohi didn't provide SQL or config changes. Try asking to remove a column or change the query explicitly.",
-              variant: "destructive",
-            });
-            break;
-          }
-          if (hasSql) {
-            const trimmed = String(action.sql).trim();
-            const upper = trimmed.toUpperCase();
-            if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
-              toast({
-                title: "Invalid SQL",
-                description:
-                  "Widget SQL must start with SELECT or WITH. The change was not applied.",
-                variant: "destructive",
-              });
-              break;
-            }
-          }
-          const mergeVizConfig = (existingViz: Record<string, unknown>) => {
-            const changes = action.changes as Partial<typeof existingViz> & {
-              tableConfig?: Record<string, unknown>;
-            };
-            const mergedVizBase =
-              action.changes && Object.keys(action.changes).length > 0
-              ? {
-                  ...existingViz,
-                  ...action.changes,
-                  ...(changes.tableConfig
-                    ? {
-                        tableConfig: {
-                          ...((
-                            existingViz as {
-                              tableConfig?: Record<string, unknown>;
-                            }
-                          ).tableConfig || {}),
-                          ...changes.tableConfig,
-                        },
-                      }
-                    : {}),
-                }
-              : existingViz;
-            const isLikelyTableWidget =
-              (existingViz as { type?: string }).type === "table" ||
-              !!(existingViz as { tableConfig?: unknown }).tableConfig;
-            const shouldRefreshTableColumnsFromData = hasSql && isLikelyTableWidget;
-            const mergedViz = (() => {
-              if (!shouldRefreshTableColumnsFromData) return mergedVizBase;
-              const tableConfig = (
-                mergedVizBase as { tableConfig?: Record<string, unknown> }
-              ).tableConfig;
-              if (!tableConfig || typeof tableConfig !== "object")
-                return mergedVizBase;
-              // SQL changed but no explicit header mapping was provided.
-              // Drop stale saved columns so headers derive from the new result keys.
-              const { columns: _dropColumns, ...restTableConfig } = tableConfig as {
-                columns?: unknown;
-                [key: string]: unknown;
-              };
-              return {
-                ...(mergedVizBase as Record<string, unknown>),
-                tableConfig:
-                  Object.keys(restTableConfig).length > 0
-                    ? restTableConfig
-                    : undefined,
-              } as typeof mergedVizBase;
-            })();
-            const shouldPersistVizConfig =
-              (action.changes && Object.keys(action.changes).length > 0) ||
-              shouldRefreshTableColumnsFromData;
-            return { mergedViz, shouldPersistVizConfig };
-          };
-
-          if (targetIdx >= 0) {
-            const target = items[targetIdx];
-            if (target.payload.type !== "cohi_widget") {
-              toast({
-                title: "Cannot modify",
-                description: "Only SQL-backed widgets can be modified via chat",
-                variant: "destructive",
-              });
-              break;
-            }
-
-            const updated = [...items];
-            const existingViz = (target.payload.vizConfig || {}) as Record<
-              string,
-              unknown
-            >;
-            const { mergedViz, shouldPersistVizConfig } =
-              mergeVizConfig(existingViz);
-            updated[targetIdx] = {
-              ...target,
-              payload: {
-                ...target.payload,
-                ...(action.sql ? { sql: action.sql } : {}),
-                ...(action.title ? { title: action.title } : {}),
-                ...(shouldPersistVizConfig
-                  ? { vizConfig: mergedViz as typeof target.payload.vizConfig }
-                  : {}),
-              },
-            };
-            setItemsWithHistory(updated);
-            toast({
-              title: "Widget updated",
-              description:
-                action.explanation?.substring(0, 80) || "Changes applied",
-            });
-            break;
-          }
-
-          // Support editing SQL widgets nested inside widget_group payload.items.
-          let modifiedGrouped = false;
-          const updatedItems = items.map((layoutItem) => {
-            if (
-              layoutItem.payload.type !== "widget_group" ||
-              !Array.isArray((layoutItem.payload as any).items)
-            ) {
-              return layoutItem;
-            }
-            const payload = layoutItem.payload as {
-              items: GroupWidgetItem[];
-            } & typeof layoutItem.payload;
-            const matchIdx = resolveGroupWidgetItemIndex(
-              payload.items,
-              action.instanceId,
-            );
-            const nextGroupItems = payload.items.map((groupItem, idx) => {
-              if (groupItem.kind !== "cohi" || idx !== matchIdx) {
-                return groupItem;
-              }
-              modifiedGrouped = true;
-              const existingViz = (groupItem.vizConfig || {}) as Record<
-                string,
-                unknown
-              >;
-              const { mergedViz, shouldPersistVizConfig } =
-                mergeVizConfig(existingViz);
-              return {
-                ...groupItem,
-                ...(action.sql ? { sql: action.sql } : {}),
-                ...(action.title ? { title: action.title } : {}),
-                ...(shouldPersistVizConfig
-                  ? { vizConfig: mergedViz as typeof groupItem.vizConfig }
-                  : {}),
-              };
-            });
-            if (!modifiedGrouped) return layoutItem;
-            return {
-              ...layoutItem,
-              payload: {
-                ...layoutItem.payload,
-                items: nextGroupItems,
-              },
-            };
-          });
-
-          if (modifiedGrouped) {
-            setItemsWithHistory(updatedItems);
-            toast({
-              title: "Widget updated",
-              description:
-                action.explanation?.substring(0, 80) || "Changes applied",
-            });
-            break;
-          }
-
-          toast({
-            title: "Widget not found",
-            description: `No widget with id ${action.instanceId}`,
-            variant: "destructive",
-          });
           break;
         }
         default:
@@ -2848,6 +2036,7 @@ export function WorkbenchCanvas({
             ? convertLayoutToPixels(content.layout, containerWidth)
             : content.layout;
           nextLayout = migrateLoanDetailToWidgetGroup(nextLayout);
+          nextLayout = migrateLegacyCanvasItems(nextLayout);
           setItems(nextLayout);
         }
         if (Array.isArray(content.annotations))
@@ -2907,13 +2096,15 @@ export function WorkbenchCanvas({
                 )
               : (content.layout ?? []);
             layoutForSnap = migrateLoanDetailToWidgetGroup(layoutForSnap);
-            lastSavedSnapshotRef.current = JSON.stringify({
-              items: layoutForSnap,
-              annotations: content.annotations ?? [],
-              bg: content.background ?? canvasBackground,
-              uploads: content.uploadsMeta ?? [],
-              title: data.title ?? "Untitled canvas",
-            });
+            syncSavedSnapshot(
+              JSON.stringify({
+                items: layoutForSnap,
+                annotations: content.annotations ?? [],
+                bg: content.background ?? canvasBackground,
+                uploads: content.uploadsMeta ?? [],
+                title: data.title ?? "Untitled canvas",
+              }),
+            );
             setSaveStatus("saved");
           });
         });
@@ -2951,7 +2142,7 @@ export function WorkbenchCanvas({
         // Reset baseline so the autosave that runs ~5s after this event
         // doesn't persist the now-stale in-memory layout. Refetch will
         // re-establish a baseline once the new content lands.
-        lastSavedSnapshotRef.current = "";
+        syncSavedSnapshot("");
         setExternalRefetchToken((t) => t + 1);
       }
     };
@@ -3015,32 +2206,6 @@ export function WorkbenchCanvas({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showCohiPanel]);
-
-  const bringToFront = useCallback(
-    (id: string) => {
-      setItemsWithHistory((prev) => {
-        const idx = prev.findIndex((p) => p.i === id);
-        if (idx < 0) return prev;
-        const item = prev[idx];
-        return [...prev.slice(0, idx), ...prev.slice(idx + 1), item];
-      });
-      toast({ title: "Brought to front" });
-    },
-    [setItemsWithHistory, toast],
-  );
-
-  const sendToBack = useCallback(
-    (id: string) => {
-      setItemsWithHistory((prev) => {
-        const idx = prev.findIndex((p) => p.i === id);
-        if (idx < 0) return prev;
-        const item = prev[idx];
-        return [item, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
-      });
-      toast({ title: "Sent to back" });
-    },
-    [setItemsWithHistory, toast],
-  );
 
   const applyBestFitLayout = useCallback(() => {
     if (items.length === 0) return;
@@ -3188,51 +2353,6 @@ export function WorkbenchCanvas({
       toast({ title: "Widget duplicated" });
     },
     [canEdit, items, setItemsWithHistory, toast],
-  );
-
-  const updateItemRect = useCallback(
-    (
-      id: string,
-      next: Partial<Pick<CanvasLayoutItem, "x" | "y" | "w" | "h">>,
-      withHistory = false,
-    ) => {
-      if (!canEdit) return;
-      // Clamp position so widgets can't be dragged off the left/top edges
-      const clamped = { ...next };
-      if (clamped.x !== undefined) clamped.x = Math.max(0, clamped.x);
-      if (clamped.y !== undefined) clamped.y = Math.max(0, clamped.y);
-      const setter = withHistory ? setItemsWithHistory : setItems;
-      setter((prev) =>
-        prev.map((i) => (i.i === id ? { ...i, ...clamped } : i)),
-      );
-    },
-    [canEdit, setItems, setItemsWithHistory],
-  );
-
-  const updateWidgetPayload = useCallback(
-    (
-      id: string,
-      payload: CanvasLayoutItem["payload"],
-      options?: { recordHistory?: boolean },
-    ) => {
-      if (!canEdit) return;
-      const mapper = (prev: CanvasLayoutItem[]) =>
-        prev.map((i) => {
-          if (i.i !== id) return i;
-          try {
-            if (JSON.stringify(i.payload) === JSON.stringify(payload)) return i;
-          } catch {
-            // Fall through and update the payload if serialization fails.
-          }
-          return { ...i, payload };
-        });
-      if (options?.recordHistory) {
-        setItemsWithHistory(mapper);
-      } else {
-        setItems(mapper);
-      }
-    },
-    [canEdit, setItems, setItemsWithHistory],
   );
 
   const addTextBlock = useCallback(() => {
@@ -3388,10 +2508,12 @@ export function WorkbenchCanvas({
 
   const applyTemplate = useCallback(
     (template: (typeof CANVAS_TEMPLATES)[number]) => {
-      const newItems = normalizeTemplateItems(template.items, canvasWidth, {
-        x: 0,
-        y: 0,
-      });
+      const newItems = migrateLegacyCanvasItems(
+        normalizeTemplateItems(template.items, canvasWidth, {
+          x: 0,
+          y: 0,
+        }),
+      );
       setItemsWithHistory(() => newItems);
       if (template.background) setCanvasBackground(template.background);
       setSelectedWidgetId(null);
@@ -3412,10 +2534,13 @@ export function WorkbenchCanvas({
         const payload =
           pin.type === "pinned_insight"
             ? {
-                type: "pinned_insight" as const,
-                title: pin.payload.title,
-                content: pin.payload.content,
-                visualization: pin.payload.visualization,
+                type: "registry_widget" as const,
+                definitionId: WORKBENCH_LEGACY_PINNED_ID,
+                config: {
+                  title: pin.payload.title,
+                  content: pin.payload.content,
+                  visualization: pin.payload.visualization,
+                },
               }
             : {
                 type: "news_card" as const,
@@ -3423,7 +2548,8 @@ export function WorkbenchCanvas({
                 summary: pin.payload.summary,
                 link: pin.payload.link,
               };
-        const type = pin.type;
+        const type =
+          pin.type === "pinned_insight" ? "registry_widget" : pin.type;
         newItems.push(
           createLayoutItem(id, type, payload, {
             x: 0,
@@ -3540,8 +2666,12 @@ export function WorkbenchCanvas({
         setUploads((prev) => [uploadRecord, ...prev]);
         if (visualization) {
           addWidget(
-            "chart",
-            { type: "chart", config: visualization },
+            "registry_widget",
+            {
+              type: "registry_widget",
+              definitionId: WORKBENCH_LEGACY_CHART_ID,
+              config: { vizConfig: visualization },
+            },
             { w: 6, h: 3 },
           );
         }
@@ -4315,13 +3445,15 @@ export function WorkbenchCanvas({
       // Update snapshot so dirty-state resets
       if (!canvasId) {
         const persistedLayout = buildLayoutWithLatestGroupFilters(items);
-        lastSavedSnapshotRef.current = JSON.stringify({
-          items: persistedLayout,
-          annotations,
-          bg: canvasBackground,
-          uploads,
-          title: saveTitle,
-        });
+        syncSavedSnapshot(
+          JSON.stringify({
+            items: persistedLayout,
+            annotations,
+            bg: canvasBackground,
+            uploads,
+            title: saveTitle,
+          }),
+        );
       }
       setSaveStatus("saved");
       setSaveDialogOpen(false);
@@ -4378,6 +3510,19 @@ export function WorkbenchCanvas({
     });
   }, [items]);
 
+  const widgetTitleSummary = useMemo(() => {
+    const titles: string[] = [];
+    for (const it of items) {
+      const p = it.payload;
+      if (p.type === "cohi_widget") titles.push(p.title);
+      else if (p.type === "widget_group") titles.push(p.title);
+      else if (p.type === "registry_widget") {
+        titles.push(getWidgetDefinition(p.definitionId)?.name ?? p.definitionId);
+      }
+    }
+    return titles.filter(Boolean).join(", ");
+  }, [items]);
+
   const hasItems = items.length > 0;
 
   const handleClearCanvas = useCallback(() => {
@@ -4428,564 +3573,48 @@ export function WorkbenchCanvas({
             </div>
           )}
           {/* Canvas toolbar — hidden while the report builder is active */}
-          <div
-            className={cn(
-              "flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-1.5 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[44px] sticky top-0 z-20",
-              showReportBuilder && "hidden",
-            )}
-          >
-            <div className="flex items-center gap-1 flex-wrap md:flex-nowrap shrink-0">
-              {!showReportBuilder && (
-                <>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                        onClick={() => undo()}
-                        disabled={!canUndo || !isOwner}
-                      >
-                        <Undo2 className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Undo (Ctrl+Z)</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                        onClick={() => redo()}
-                        disabled={!canRedo || !isOwner}
-                      >
-                        <Redo2 className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      Redo (Ctrl+Shift+Z)
-                    </TooltipContent>
-                  </Tooltip>
-                  <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                  {/* Inline editable canvas name */}
-                  <input
-                    data-testid="workbench-canvas-title-input"
-                    type="text"
-                    value={saveTitle}
-                    onChange={(e) => isOwner && setSaveTitle(e.target.value)}
-                    readOnly={!isOwner}
-                    onBlur={() => {
-                      if (!saveTitle.trim()) setSaveTitle("Untitled canvas");
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter")
-                        (e.target as HTMLInputElement).blur();
-                    }}
-                    className={cn(
-                      "h-8 min-w-[120px] max-w-[260px] px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-200 bg-transparent border border-transparent rounded-md outline-none transition-colors truncate",
-                      isOwner
-                        ? "hover:border-slate-300 dark:hover:border-slate-600 focus:border-blue-400 dark:focus:border-blue-500 focus:ring-1 focus:ring-blue-400/30"
-                        : "cursor-default",
-                    )}
-                    placeholder="Canvas name…"
-                    title={isOwner ? "Click to rename this canvas" : saveTitle}
-                  />
-                  {isOwner && (
-                    <>
-                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            data-testid="workbench-save-button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                            onClick={canvasId ? handleSaveConfirm : handleSaveClick}
-                            // Also disable while the canvas is still loading: clicking
-                            // save before the load resolves would read `canvasId === null`
-                            // and take the "new canvas" branch, which (a) opens the Save
-                            // dialog unexpectedly and (b) risks overwriting the real
-                            // canvas content with a blank payload once load completes.
-                            disabled={isSaving || canvasLoading}
-                          >
-                            <Save className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">Save</TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
-                  <div className="min-w-[104px] flex items-center justify-end">
-                    {saveIndicator && (
-                      <span className={saveIndicator.className}>
-                        {saveIndicator.icon}
-                        {saveIndicator.label}
-                      </span>
-                    )}
-                  </div>
-                  {isOwner && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          data-testid="workbench-share-button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                          onClick={handleShareClick}
-                        >
-                          <Share2 className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Share</TooltipContent>
-                    </Tooltip>
-                  )}
-                  {isOwner && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                          onClick={() =>
-                            navigate(
-                              canvasId
-                                ? `/workbench/distributions?canvas=${canvasId}`
-                                : "/workbench/distributions",
-                            )
-                          }
-                        >
-                          <Mail className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        Schedule distribution
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  {canEdit && (
-                    <>
-                      <input
-                        ref={backgroundImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleBackgroundImageChange}
-                        className="hidden"
-                        aria-hidden
-                      />
-                      <DropdownMenu>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                              >
-                                <Palette className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            Background
-                          </TooltipContent>
-                        </Tooltip>
-                        <DropdownMenuContent align="start" className="w-64">
-                          <div className="px-2 py-2 flex items-center gap-2">
-                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                              Color
-                            </span>
-                            <input
-                              type="color"
-                              value={
-                                canvasBackground.type === "color"
-                                  ? canvasBackground.value
-                                  : "#ffffff"
-                              }
-                              onChange={(e) =>
-                                setCanvasBackground({
-                                  type: "color",
-                                  value: e.target.value,
-                                })
-                              }
-                              className="h-8 w-12 cursor-pointer rounded border border-slate-200 dark:border-slate-600 bg-transparent"
-                            />
-                          </div>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() =>
-                              backgroundImageInputRef.current?.click()
-                            }
-                            className="gap-2"
-                          >
-                            <Image className="h-4 w-4" /> Upload image
-                          </DropdownMenuItem>
-                          {/* AI background generation hidden until backend endpoint is implemented */}
-                          <DropdownMenuSeparator />
-                          <div className="px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-                            Templates
-                          </div>
-                          {BACKGROUND_TEMPLATES.map((t) => (
-                            <DropdownMenuItem
-                              key={t.id}
-                              onClick={() =>
-                                setCanvasBackground({
-                                  type: "template",
-                                  value: t.id,
-                                })
-                              }
-                              className="gap-2"
-                            >
-                              <span
-                                className="h-5 w-8 rounded border border-slate-200 dark:border-slate-600 shrink-0"
-                                style={t.style}
-                              />
-                              {t.label}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept={
-                          UPLOAD_ALLOWED_TYPES.join(",") +
-                          ",.csv,.xlsx,.xls,.pptx,.ppt"
-                        }
-                        onChange={handleFileChange}
-                        className="hidden"
-                        aria-hidden
-                      />
-                      <input
-                        ref={logoInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleLogoChange}
-                        className="hidden"
-                        aria-hidden
-                      />
-                      {/* Upload file button hidden – not ready for release
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400 relative" disabled={isUploading}>
-                      <Upload className="h-4 w-4" />
-                      {uploads.length > 0 && <span className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] rounded-full bg-slate-500 text-[10px] text-white flex items-center justify-center px-1">{uploads.length}</span>}
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{isUploading ? 'Uploading…' : 'Upload file'}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="start" className="w-72">
-                <DropdownMenuItem onClick={handleUploadClick} disabled={isUploading} className="gap-2">
-                  <Upload className="h-4 w-4" /> Upload CSV / Excel / PDF / image…
-                </DropdownMenuItem>
-                {uploads.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <div className="px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                      <Clock className="h-3.5 w-3.5" /> Recent uploads
-                    </div>
-                    {uploads.slice(0, 10).map((u) => (
-                      <DropdownMenuItem key={u.id} disabled className="gap-2 py-2 cursor-default">
-                        <span className="shrink-0">{getUploadIcon(u.filename)}</span>
-                        <span className="truncate flex-1" title={u.filename}>{u.filename}</span>
-                        <span className="text-xs text-slate-400 shrink-0">{formatUploadTime(u.uploadedAt)}</span>
-                      </DropdownMenuItem>
-                    ))}
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            */}
-                      {/* Image-to-Dashboard button hidden until feature is ready for release
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/30"
-                  onClick={() => setImageToDashboardOpen(true)}
-                >
-                  <Camera className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
-            </Tooltip>
-            */}
-                    </>
-                  )}
-                  {canEdit && (
-                    <>
-                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                      <DropdownMenu>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300"
-                              >
-                                <PlusCircle className="h-4 w-4" />
-                                <span className="text-xs font-medium">Add</span>
-                                <ChevronDown className="h-3.5 w-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            Add widget or template
-                          </TooltipContent>
-                        </Tooltip>
-                        <DropdownMenuContent
-                          align="start"
-                          className="w-[620px] p-0 overflow-hidden border-0 shadow-lg"
-                        >
-                          <div className="grid grid-cols-[160px_1fr] gap-0">
-                            <div className="space-y-0.5 p-2.5 bg-gradient-to-b from-slate-50/90 to-slate-100/60 dark:from-slate-800/40 dark:to-slate-900/50 rounded-l-lg border-r border-slate-200/60 dark:border-slate-700/50">
-                              {DASHBOARD_SECTION_GROUPS.map((group) => (
-                                <button
-                                  key={group.label}
-                                  type="button"
-                                  onClick={() => setActiveAddGroup(group.label)}
-                                  className={`w-full text-left rounded-lg px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-all duration-200 ${
-                                    activeAddGroup === group.label
-                                      ? "bg-violet-100 text-violet-700 shadow-sm dark:bg-violet-500/20 dark:text-violet-300"
-                                      : "text-slate-500 dark:text-slate-400 hover:bg-violet-50/80 dark:hover:bg-violet-500/10 hover:text-slate-700 dark:hover:text-slate-300"
-                                  }`}
-                                >
-                                  {group.label}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="rounded-r-lg bg-gradient-to-br from-rose-50/50 via-white to-violet-50/50 dark:from-slate-900/60 dark:via-slate-900/40 dark:to-indigo-950/30 p-3 border border-l-0 border-slate-200/50 dark:border-slate-700/50 flex flex-col">
-                              <div className="grid grid-cols-2 gap-2">
-                                {(
-                                  DASHBOARD_SECTION_GROUPS.find(
-                                    (g) => g.label === activeAddGroup,
-                                  )?.items ?? []
-                                ).map((section) => {
-                                  const Icon = section.icon;
-                                  return (
-                                    <DropdownMenuItem
-                                      key={section.id}
-                                      onClick={() =>
-                                        addDashboardSection(
-                                          section.id,
-                                          section.title,
-                                        )
-                                      }
-                                      className="gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:shadow-sm border border-transparent hover:border-rose-200/60 dark:hover:border-violet-500/30 transition-all duration-200"
-                                    >
-                                      <Icon
-                                        className={`h-4 w-4 shrink-0 ${section.iconClass ?? "text-slate-500"}`}
-                                      />
-                                      <span className="truncate">
-                                        {section.title}
-                                      </span>
-                                    </DropdownMenuItem>
-                                  );
-                                })}
-                              </div>
-                              <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-600/50">
-                                <DropdownMenuItem
-                                  onClick={addTextBlock}
-                                  className="gap-2.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:text-slate-800 dark:hover:text-slate-100 border-0 focus:bg-white/90 dark:focus:bg-slate-800/60 focus:text-slate-800 dark:focus:text-slate-100 cursor-pointer"
-                                >
-                                  <StickyNote className="h-4 w-4 shrink-0 text-amber-500/80 dark:text-amber-400/80" />
-                                  <span>Text block</span>
-                                </DropdownMenuItem>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="hidden h-px bg-slate-200/70 dark:bg-slate-700/60 my-2" />
-                          <DropdownMenuLabel className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-3">
-                            Templates
-                          </DropdownMenuLabel>
-                          <div className="hidden grid grid-cols-2 gap-2 px-2 py-2">
-                            {CANVAS_TEMPLATES.map((t) => {
-                              const Icon = t.icon;
-                              return (
-                                <DropdownMenuItem
-                                  key={t.id}
-                                  onClick={() => applyTemplate(t)}
-                                  className="gap-3 rounded-lg border border-transparent bg-slate-50/60 p-2.5 transition-colors data-[highlighted]:border-slate-200 data-[highlighted]:bg-slate-100 dark:bg-slate-800/40 dark:data-[highlighted]:border-slate-700 dark:data-[highlighted]:bg-slate-800"
-                                >
-                                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300">
-                                    <Icon className="h-4 w-4" />
-                                  </span>
-                                  <span className="flex flex-col">
-                                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                                      {t.label}
-                                    </span>
-                                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                                      {t.description}
-                                    </span>
-                                  </span>
-                                </DropdownMenuItem>
-                              );
-                            })}
-                          </div>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </>
-                  )}
-                  {/* Logo button hidden – not ready for release
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300"
-                  onClick={() => logoInputRef.current?.click()}
-                >
-                  <Image className="h-4 w-4" />
-                  <span className="text-xs font-medium">Logo</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Add logo</TooltipContent>
-            </Tooltip>
-            */}
-                  {canEdit && selectedWidgetId && (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0"
-                            onClick={() => duplicateWidget(selectedWidgetId)}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          Duplicate selected
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                            onClick={() => removeWidget(selectedWidgetId)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          Delete selected
-                        </TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
-                  {/* Arrange button hidden – not ready for release
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300">
-                      <LayoutGrid className="h-4 w-4" />
-                      <span className="text-xs font-medium">Arrange</span>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Arrange layout</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Auto layout</DropdownMenuLabel>
-                <DropdownMenuItem onClick={applyBestFitLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Best fit — balanced grid
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={applyMasonryLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Masonry — staggered columns
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Manual layouts</DropdownMenuLabel>
-                <DropdownMenuItem onClick={applyRowLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Single row
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={applyColumnLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Single column
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            */}
-                  {canEdit && (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0"
-                            onClick={addRichTextBlock}
-                          >
-                            <Type className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">Rich text</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                            onClick={() => setClearConfirmOpen(true)}
-                            disabled={!hasItems}
-                          >
-                            <Eraser className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          Clear canvas
-                        </TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
-                </>
-              )}
-              {/* --- End canvas-only tools --- */}
-
-              {!embeddedCohiHidden && !showCohiPanel && (
-                <CohiChatDockChip
-                  data-testid="workbench-cohi-toggle"
-                  onClick={() => setShowCohiPanel(true)}
-                  ariaLabel="Open Cohi Assistant"
-                  title="Cohi – Canvas assistant"
-                />
-              )}
-
-              <div className="ml-auto flex items-center gap-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
-                      onClick={() => setShowReportBuilder(true)}
-                      disabled={!hasItems}
-                    >
-                      <Presentation className="h-3.5 w-3.5" />
-                      PowerPoint Editor
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Open the slide builder to preview, edit, and export a
-                    PowerPoint deck from canvas data
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-            {/* Per-widget export is available in each widget's context menu */}
-          </div>
+          <WorkbenchTopToolbar
+            showReportBuilder={showReportBuilder}
+            undo={undo}
+            redo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            isOwner={isOwner}
+            saveTitle={saveTitle}
+            setSaveTitle={setSaveTitle}
+            canvasId={canvasId}
+            handleSaveConfirm={handleSaveConfirm}
+            handleSaveClick={handleSaveClick}
+            isSaving={isSaving}
+            canvasLoading={canvasLoading}
+            saveIndicator={saveIndicator}
+            handleShareClick={handleShareClick}
+            navigate={navigate}
+            canEdit={canEdit}
+            backgroundImageInputRef={backgroundImageInputRef}
+            handleBackgroundImageChange={handleBackgroundImageChange}
+            canvasBackground={canvasBackground}
+            setCanvasBackground={setCanvasBackground}
+            fileInputRef={fileInputRef}
+            handleFileChange={handleFileChange}
+            logoInputRef={logoInputRef}
+            handleLogoChange={handleLogoChange}
+            activeAddGroup={activeAddGroup}
+            setActiveAddGroup={setActiveAddGroup}
+            addDashboardSection={addDashboardSection}
+            addTextBlock={addTextBlock}
+            applyTemplate={applyTemplate}
+            selectedWidgetId={selectedWidgetId}
+            duplicateWidget={duplicateWidget}
+            removeWidget={removeWidget}
+            addRichTextBlock={addRichTextBlock}
+            setClearConfirmOpen={setClearConfirmOpen}
+            hasItems={hasItems}
+            embeddedCohiHidden={embeddedCohiHidden}
+            showCohiPanel={showCohiPanel}
+            setShowCohiPanel={setShowCohiPanel}
+            setShowReportBuilder={setShowReportBuilder}
+          />
 
           {/* Report Builder — always mounted so it stays in sync with canvas data.
               Hidden when not active to avoid layout interference. */}
@@ -5022,567 +3651,43 @@ export function WorkbenchCanvas({
                 </div>
               </div>
             )}
-            <style>{`
-            .canvas-freeform .react-resizable-handle {
-              opacity: 0;
-              z-index: 20;
-              width: 14px;
-              height: 14px;
-            }
-            .canvas-freeform .canvas-item:hover .react-resizable-handle {
-              opacity: 1;
-            }
-            .canvas-freeform .react-resizable-handle-se::after,
-            .canvas-freeform .react-resizable-handle-sw::after,
-            .canvas-freeform .react-resizable-handle-ne::after,
-            .canvas-freeform .react-resizable-handle-nw::after {
-              right: 2px;
-              bottom: 2px;
-              width: 7px;
-              height: 7px;
-              border-right-width: 2px;
-              border-bottom-width: 2px;
-              border-color: rgba(100, 116, 139, 0.6);
-            }
-          `}</style>
-            <div
-              className="relative"
-              style={{
-                width: canvasContentWidth,
-                minHeight: canvasContentHeight,
-              }}
+            <WorkbenchCanvasSurface
+              canvasContentWidth={canvasContentWidth}
+              canvasContentHeight={canvasContentHeight}
+              widgetTitleSummary={widgetTitleSummary}
             >
               {hasItems ? (
-                itemsForRender.map((displayItem, index) => {
-                  const item = items[index]!;
-                  const isDashboardSection =
-                    item.type === "dashboard_section" &&
-                    item.payload.type === "dashboard_section";
-                  const payload = item.payload;
-                  const isLegacyLoanDetail =
-                    isDashboardSection &&
-                    (payload as { sectionId?: string }).sectionId ===
-                      "loanDetail";
-                  const hideableSections = isDashboardSection
-                    ? (DASHBOARD_HIDEABLE_SECTIONS[
-                        (payload as { sectionId: string }).sectionId
-                      ] ?? [])
-                    : [];
-                  const hiddenSections = isDashboardSection
-                    ? ((payload as { hiddenSections?: string[] })
-                        .hiddenSections ?? [])
-                    : [];
-                  const displayMode = isDashboardSection
-                    ? ((
-                        payload as {
-                          displayMode?: "full" | "compact" | "hidden";
-                        }
-                      ).displayMode ?? "full")
-                    : undefined;
-                  const onToggleSection = isDashboardSection
-                    ? (sectionId: string, hidden: boolean) => {
-                        const prev =
-                          (payload as { hiddenSections?: string[] })
-                            .hiddenSections ?? [];
-                        const next = hidden
-                          ? [...prev, sectionId]
-                          : prev.filter((s) => s !== sectionId);
-                        updateWidgetPayload(item.i, {
-                          ...payload,
-                          hiddenSections: next,
-                        });
-                      }
-                    : undefined;
-
-                  // ─── Group actions for standalone cohi_widget items ───
-                  const isStandaloneCohiWidget =
-                    item.type === "cohi_widget" &&
-                    payload.type === "cohi_widget";
-                  const availableGroups = isStandaloneCohiWidget
-                    ? items
-                        .filter(
-                          (it) =>
-                            it.type === "widget_group" &&
-                            it.payload.type === "widget_group" &&
-                            it.i !== item.i,
-                        )
-                        .map((it) => ({
-                          id: it.i,
-                          title: (it.payload as any).title || "Untitled Group",
-                        }))
-                    : [];
-
-                  const handleMoveToGroup = isStandaloneCohiWidget
-                    ? (groupId: string) => {
-                        const groupItem = items.find((it) => it.i === groupId);
-                        if (
-                          !groupItem ||
-                          groupItem.payload.type !== "widget_group"
-                        )
-                          return;
-                        const gp = groupItem.payload;
-                        const currentItems =
-                          gp.items ||
-                          gp.widgetIds.map((id: string) => ({
-                            kind: "registry" as const,
-                            defId: id,
-                          }));
-                        const cohiPayload = payload as {
-                          sql: string;
-                          title: string;
-                          vizConfig: any;
-                          explanation?: string;
-                        };
-                        const newItem = {
-                          kind: "cohi" as const,
-                          id: `moved-${Date.now()}`,
-                          sql: cohiPayload.sql,
-                          title: cohiPayload.title,
-                          vizConfig: cohiPayload.vizConfig,
-                          explanation: cohiPayload.explanation,
-                        };
-                        const updatedGP = {
-                          ...gp,
-                          items: [...currentItems, newItem],
-                          widgetIds: [...currentItems, newItem]
-                            .filter((i: any) => i.kind === "registry")
-                            .map((i: any) => i.defId),
-                        };
-                        // Remove standalone item and update the target group
-                        const sourceId = item.i;
-                        const targetId = groupId;
-                        setItemsWithHistory((prev) =>
-                          prev
-                            .filter((it) => it.i !== sourceId)
-                            .map((it) =>
-                              it.i === targetId
-                                ? { ...it, payload: updatedGP }
-                                : it,
-                            ),
-                        );
-                        toast({
-                          title: "Moved to group",
-                          description: (gp as any).title,
-                        });
-                      }
-                    : undefined;
-
-                  const handleWrapInGroup = isStandaloneCohiWidget
-                    ? () => {
-                        const cohiPayload = payload as {
-                          sql: string;
-                          title: string;
-                          vizConfig: any;
-                          explanation?: string;
-                        };
-                        const groupId = `wrap-group-${Date.now()}`;
-                        const newGroupItem = createLayoutItem(
-                          groupId,
-                          "widget_group",
-                          {
-                            type: "widget_group",
-                            groupId,
-                            title: cohiPayload.title || "New Group",
-                            sectionType: "company-scorecard",
-                            widgetIds: [],
-                            items: [
-                              {
-                                kind: "cohi" as const,
-                                id: `wrapped-${Date.now()}`,
-                                sql: cohiPayload.sql,
-                                title: cohiPayload.title,
-                                vizConfig: cohiPayload.vizConfig,
-                                explanation: cohiPayload.explanation,
-                              },
-                            ],
-                            filterSync: false, // Cohi widgets start with independent filters
-                          },
-                          { x: 0, y: item.y, w: defaultGroupWidth, h: 500 },
-                        );
-                        // Replace standalone item with the new group
-                        const replaceId = item.i;
-                        setItemsWithHistory((prev) =>
-                          prev.map((it) =>
-                            it.i === replaceId ? newGroupItem : it,
-                          ),
-                        );
-                        toast({ title: "Wrapped in new group" });
-                      }
-                    : undefined;
-
-                  return (
-                    <Rnd
-                      key={item.i}
-                      data-item-id={item.i}
-                      size={{ width: item.w, height: item.h }}
-                      position={{ x: item.x, y: item.y }}
-                      onDragStart={() => setSelectedWidgetId(item.i)}
-                      onResizeStart={() => setSelectedWidgetId(item.i)}
-                      onDrag={(_, data) =>
-                        updateItemRect(item.i, { x: data.x, y: data.y })
-                      }
-                      onDragStop={(_, data) =>
-                        updateItemRect(item.i, { x: data.x, y: data.y }, true)
-                      }
-                      onResize={(_, __, ref, ___, position) =>
-                        updateItemRect(item.i, {
-                          x: position.x,
-                          y: position.y,
-                          w: ref.offsetWidth,
-                          h: ref.offsetHeight,
-                        })
-                      }
-                      onResizeStop={(_, __, ref, ___, position) =>
-                        updateItemRect(
-                          item.i,
-                          {
-                            x: position.x,
-                            y: position.y,
-                            w: ref.offsetWidth,
-                            h: ref.offsetHeight,
-                          },
-                          true,
-                        )
-                      }
-                      disableDragging={!canEdit}
-                      enableResizing={canEdit}
-                      dragHandleClassName={
-                        item.type === "rich_text"
-                          ? "canvas-drag-handle"
-                          : undefined
-                      }
-                      cancel="button, a, input, textarea, select, option, [contenteditable], .canvas-interactive"
-                      className="canvas-item"
-                      style={{ zIndex: index + 1 }}
-                    >
-                      <CanvasWidgetCard
-                        widgetId={item.i}
-                        selected={selectedWidgetId === item.i}
-                        editing={editingWidgetId === item.i}
-                        onSelect={() => setSelectedWidgetId(item.i)}
-                        onDuplicate={
-                          canEdit ? () => duplicateWidget(item.i) : undefined
-                        }
-                        onDelete={
-                          canEdit ? () => removeWidget(item.i) : undefined
-                        }
-                        className="overflow-hidden"
-                        hideableSections={canEdit ? hideableSections : []}
-                        hiddenSections={hiddenSections}
-                        onToggleSection={canEdit ? onToggleSection : undefined}
-                        onBringToFront={
-                          canEdit ? () => bringToFront(item.i) : undefined
-                        }
-                        onSendToBack={
-                          canEdit ? () => sendToBack(item.i) : undefined
-                        }
-                        displayMode={displayMode}
-                        onChangeDisplayMode={
-                          canEdit && isDashboardSection
-                            ? (mode) =>
-                                updateWidgetPayload(item.i, {
-                                  ...payload,
-                                  displayMode: mode,
-                                })
-                            : undefined
-                        }
-                        availableGroups={canEdit ? availableGroups : []}
-                        onMoveToGroup={canEdit ? handleMoveToGroup : undefined}
-                        onWrapInGroup={canEdit ? handleWrapInGroup : undefined}
-                        onExportExcel={() => handleExportWidgetExcel(item.i)}
-                        onEditWithCohi={
-                          embeddedCohiHidden
-                            ? () => {
-                                setEditingWidgetId(item.i);
-                                setSelectedWidgetId(item.i);
-                                const widgetTitle =
-                                  (payload as any).title ||
-                                  (payload as any).sectionId ||
-                                  item.type;
-                                const widgetType = item.type;
-                                const targetId =
-                                  item.type === "widget_group" &&
-                                  payload.type === "widget_group"
-                                    ? payload.groupId
-                                    : item.i;
-                                const message = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, groupId: ${targetId}, layoutId: ${item.i}). What changes can I make?`;
-                                const resolvedCanvasId = canvasId ?? loadCanvasId;
-                                const resolvedDraftScope = resolvedCanvasId
-                                  ? draftScopeIdForCanvasTab(resolvedCanvasId)
-                                  : draftScopeId;
-                                window.dispatchEvent(
-                                  new CustomEvent(COHI_WORKBENCH_EDIT_WIDGET_EVENT, {
-                                    detail: {
-                                      message,
-                                      widgetId: targetId,
-                                      widgetTitle: String(widgetTitle),
-                                      widgetType,
-                                      draftScopeId: resolvedDraftScope,
-                                      canvasId: resolvedCanvasId,
-                                    },
-                                  }),
-                                );
-                              }
-                            : () => {
-                                setEditingWidgetId(item.i);
-                                setSelectedWidgetId(item.i);
-                                setShowCohiPanel(true);
-                                const widgetTitle =
-                                  (payload as any).title ||
-                                  (payload as any).sectionId ||
-                                  item.type;
-                                const widgetType = item.type;
-                                const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
-                                cohiSendMessage(contextMsg);
-                              }
-                        }
-                      >
-                        <WidgetRenderer
-                          item={displayItem}
-                          height={item.h}
-                          width={item.w}
-                          canEdit={canEdit}
-                          onUpdatePayload={
-                            canEdit &&
-                            (item.type === "text_block" ||
-                              item.type === "rich_text" ||
-                              item.type === "widget_group" ||
-                              (item.type === "cohi_widget" &&
-                                payload.type === "cohi_widget"))
-                              ? (p) =>
-                                  updateWidgetPayload(
-                                    item.i,
-                                    p,
-                                    item.type === "cohi_widget" ? { recordHistory: true } : undefined,
-                                  )
-                              : canEdit && isLegacyLoanDetail
-                                ? (p) =>
-                                    setItemsWithHistory((prev) =>
-                                      prev.map((i) =>
-                                        i.i === item.i
-                                          ? {
-                                              ...i,
-                                              type: "widget_group" as const,
-                                              payload: p,
-                                            }
-                                          : i,
-                                      ),
-                                    )
-                                : undefined
-                          }
-                          otherGroups={
-                            item.type === "widget_group" || isLegacyLoanDetail
-                              ? items
-                                  .filter(
-                                    (it) =>
-                                      it.type === "widget_group" &&
-                                      it.payload.type === "widget_group" &&
-                                      it.i !== item.i,
-                                  )
-                                  .map((it) => ({
-                                    id: it.i,
-                                    title:
-                                      (it.payload as any).title ||
-                                      "Untitled Group",
-                                  }))
-                              : undefined
-                          }
-                          onMoveItemOut={
-                            item.type === "widget_group" || isLegacyLoanDetail
-                              ? (movedItem, targetGroupId) => {
-                                  // Add the moved item to the target group's items array
-                                  setItemsWithHistory((prev) =>
-                                    prev.map((it) => {
-                                      if (
-                                        it.i !== targetGroupId ||
-                                        it.payload.type !== "widget_group"
-                                      )
-                                        return it;
-                                      const gp = it.payload;
-                                      const currentItems =
-                                        gp.items ||
-                                        gp.widgetIds.map((id: string) => ({
-                                          kind: "registry" as const,
-                                          defId: id,
-                                        }));
-                                      const updatedItems = [
-                                        ...currentItems,
-                                        movedItem,
-                                      ];
-                                      return {
-                                        ...it,
-                                        payload: {
-                                          ...gp,
-                                          items: updatedItems,
-                                          widgetIds: updatedItems
-                                            .filter(
-                                              (i: any) => i.kind === "registry",
-                                            )
-                                            .map((i: any) => i.defId),
-                                        },
-                                      };
-                                    }),
-                                  );
-                                  toast({
-                                    title: "Moved to group",
-                                    description: `Widget moved successfully`,
-                                  });
-                                }
-                              : undefined
-                          }
-                        />
-                      </CanvasWidgetCard>
-                    </Rnd>
-                  );
-                })
+                <WorkbenchCanvasItemsLayer
+                  items={items}
+                  itemsForRender={itemsForRender}
+                  canEdit={canEdit}
+                  selectedWidgetId={selectedWidgetId}
+                  editingWidgetId={editingWidgetId}
+                  setSelectedWidgetId={setSelectedWidgetId}
+                  setEditingWidgetId={setEditingWidgetId}
+                  updateItemRect={updateItemRect}
+                  updateWidgetPayload={updateWidgetPayload}
+                  setItemsWithHistory={setItemsWithHistory}
+                  duplicateWidget={duplicateWidget}
+                  removeWidget={removeWidget}
+                  bringToFront={bringToFront}
+                  sendToBack={sendToBack}
+                  handleExportWidgetExcel={handleExportWidgetExcel}
+                  defaultGroupWidth={defaultGroupWidth}
+                  embeddedCohiHidden={embeddedCohiHidden}
+                  setShowCohiPanel={setShowCohiPanel}
+                  cohiSendMessage={cohiSendMessage}
+                  canvasId={canvasId}
+                  loadCanvasId={loadCanvasId}
+                  draftScopeId={draftScopeId}
+                />
               ) : (
-                <div className="flex items-center justify-center p-8 min-h-[400px]">
-                  <div className="text-center max-w-2xl w-full">
-                    {!embeddedCohiHidden ? (
-                      <>
-                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
-                          <Sparkles className="w-7 h-7 text-white" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
-                          What would you like to review?
-                        </h3>
-                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                          Ask Cohi to prepare dashboards, analyze performance,
-                          or build executive presentations.
-                        </p>
-
-                        {/* Primary: Natural language input */}
-                        <div className="max-w-lg mx-auto mb-6">
-                          <button
-                            type="button"
-                            onClick={() => setShowCohiPanel(true)}
-                            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-lg transition-all group text-left"
-                          >
-                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
-                              <Sparkles className="h-4 w-4 text-white" />
-                            </div>
-                            <span className="flex-1 text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
-                              &ldquo;Prepare a board-ready overview of monthly
-                              performance&rdquo;
-                            </span>
-                            <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 shrink-0 group-hover:text-violet-500 transition-colors" />
-                          </button>
-                        </div>
-
-                        {/* Quick executive prompts */}
-                        <div className="flex flex-wrap gap-2 justify-center mb-6">
-                          {[
-                            {
-                              label: "Executive Dashboard",
-                              prompt:
-                                "Build me a comprehensive executive dashboard with key KPIs, production trends, and pull-through analysis",
-                            },
-                            {
-                              label: "Monthly Performance",
-                              prompt:
-                                "Prepare a monthly performance overview with funded volume, pull-through, turn times, and highlights",
-                            },
-                            {
-                              label: "Pipeline Review",
-                              prompt:
-                                "Show me a pipeline review dashboard with active loans by stage, aging analysis, and fallout risk",
-                            },
-                            {
-                              label: "Board Presentation",
-                              prompt:
-                                "Create a board-ready presentation with executive summary, key metrics, trends, and recommendations",
-                            },
-                          ].map((q) => (
-                            <button
-                              key={q.label}
-                              type="button"
-                              onClick={() => {
-                                setShowCohiPanel(true);
-                                setTimeout(
-                                  () => cohiSendMessage(q.prompt),
-                                  300,
-                                );
-                              }}
-                              className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
-                            >
-                              {q.label}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                          <LayoutDashboard className="w-7 h-7 text-slate-500 dark:text-slate-400" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
-                          Your canvas is empty
-                        </h3>
-                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                          Add widgets from the library or browse templates
-                          below.
-                        </p>
-                      </>
-                    )}
-
-                    {/* Secondary: Browse library */}
-                    <div className="flex items-center justify-center gap-4">
-                      <div className="h-px flex-1 max-w-[60px] bg-slate-200 dark:bg-slate-700" />
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                        or browse templates
-                      </span>
-                      <div className="h-px flex-1 max-w-[60px] bg-slate-200 dark:bg-slate-700" />
-                    </div>
-                    <div className="flex gap-2 justify-center mt-3">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="gap-2 text-slate-500 dark:text-slate-400 text-xs"
-                          >
-                            <LayoutDashboard className="h-3.5 w-3.5" />
-                            Dashboard Library
-                            <ChevronDown className="h-3 w-3" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="center"
-                          className="w-72 max-h-80 overflow-y-auto"
-                        >
-                          {DASHBOARD_SECTION_GROUPS.map((group, gi) => (
-                            <React.Fragment key={group.label}>
-                              {gi > 0 && <DropdownMenuSeparator />}
-                              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-slate-400">
-                                {group.label}
-                              </DropdownMenuLabel>
-                              {group.items.map((section) => {
-                                const Icon = section.icon;
-                                return (
-                                  <DropdownMenuItem
-                                    key={section.id}
-                                    onClick={() =>
-                                      addDashboardSection(
-                                        section.id,
-                                        section.title,
-                                      )
-                                    }
-                                    className="gap-2"
-                                  >
-                                    <Icon
-                                      className={`h-4 w-4 ${section.iconClass ?? "text-slate-500"}`}
-                                    />
-                                    <span>{section.title}</span>
-                                  </DropdownMenuItem>
-                                );
-                              })}
-                            </React.Fragment>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                </div>
+                <WorkbenchEmptyState
+                  embeddedCohiHidden={embeddedCohiHidden}
+                  onOpenCohi={() => setShowCohiPanel(true)}
+                  onQuickPrompt={(prompt) => cohiSendMessage(prompt)}
+                  onAddDashboardSection={addDashboardSection}
+                />
               )}
               {annotations.length > 0 && (
                 <svg
@@ -5697,7 +3802,7 @@ export function WorkbenchCanvas({
                   </g>
                 </svg>
               )}
-            </div>
+            </WorkbenchCanvasSurface>
           </div>
         </div>
 
@@ -5737,459 +3842,51 @@ export function WorkbenchCanvas({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        <WorkbenchShareDialog
+          open={shareDialogOpen}
+          onOpenChange={setShareDialogOpen}
+          canvasVisibility={canvasVisibility}
+          setCanvasVisibility={setCanvasVisibility}
+          userRole={user?.role}
+          tenantUsers={tenantUsers}
+          tenantUsersLoaded={tenantUsersLoaded}
+          tenantGroups={tenantGroups}
+          tenantGroupsLoaded={tenantGroupsLoaded}
+          canvasShares={canvasShares}
+          toggleSharedUser={toggleSharedUser}
+          toggleSharedGroup={toggleSharedGroup}
+          setSharePermission={setSharePermission}
+          canTransferOwnership={canTransferOwnership}
+          transferOwnershipUserId={transferOwnershipUserId}
+          setTransferOwnershipUserId={setTransferOwnershipUserId}
+          transferOwnershipSaving={transferOwnershipSaving}
+          handleTransferOwnership={handleTransferOwnership}
+          handleSaveVisibility={handleSaveVisibility}
+          visibilitySaving={visibilitySaving}
+          hasItems={hasItems}
+          onOpenReportBuilder={() => {
+            setShowReportBuilder(true);
+            setShareDialogOpen(false);
+          }}
+          onEmailScreenshot={() => {
+            handleEmailScreenshot();
+            setShareDialogOpen(false);
+          }}
+          onCopyShareLink={handleCopyShareLink}
+          onEmailLink={handleEmailLink}
+          shareFavorited={shareFavorited}
+          onToggleFavorite={handleToggleFavorite}
+          favoriteLoading={favoriteLoading}
+        />
 
-        <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Share2 className="h-5 w-5 text-slate-500" />
-                Share canvas
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              {/* Visibility selector */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Visibility
-                </label>
-                <div className="space-y-1.5">
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
-                      canvasVisibility === "private"
-                        ? "border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800",
-                    )}
-                    onClick={() => setCanvasVisibility("private")}
-                  >
-                    <Lock className="h-4 w-4 text-slate-500 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-slate-700 dark:text-slate-200">
-                        Private
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Only you can view and edit
-                      </div>
-                    </div>
-                    {canvasVisibility === "private" && (
-                      <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
-                      canvasVisibility === "shared"
-                        ? "border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30"
-                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800",
-                    )}
-                    onClick={() => setCanvasVisibility("shared")}
-                  >
-                    <Users className="h-4 w-4 text-slate-500 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-slate-700 dark:text-slate-200">
-                        Specific people
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Share with selected users (read-only)
-                      </div>
-                    </div>
-                    {canvasVisibility === "shared" && (
-                      <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
-                    )}
-                  </button>
-                  {/* Global option — only for admins */}
-                  {(
-                    ["super_admin", "platform_admin", "tenant_admin"] as const
-                  ).includes(user?.role as any) && (
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
-                        canvasVisibility === "global"
-                          ? "border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30"
-                          : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800",
-                      )}
-                      onClick={() => setCanvasVisibility("global")}
-                    >
-                      <Globe className="h-4 w-4 text-slate-500 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-slate-700 dark:text-slate-200">
-                          Global (entire tenant)
-                        </div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                          All users in this organization can view
-                        </div>
-                      </div>
-                      {canvasVisibility === "global" && (
-                        <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Users + Groups with permission — shown when visibility is 'shared' */}
-              {canvasVisibility === "shared" && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Users
-                    </label>
-                    {tenantUsers.length > 0 ? (
-                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
-                        {tenantUsers.map((u) => {
-                          const shareEntry = canvasShares.find(
-                            (s) => s.userId === u.id,
-                          );
-                          const selected = !!shareEntry;
-                          return (
-                            <div
-                              key={u.id}
-                              className={cn(
-                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-                                selected
-                                  ? "bg-violet-50 dark:bg-violet-900/20"
-                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                              )}
-                            >
-                              <button
-                                type="button"
-                                className="flex items-center gap-2.5 flex-1 min-w-0"
-                                onClick={() => toggleSharedUser(u.id)}
-                              >
-                                <div
-                                  className={cn(
-                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
-                                    selected
-                                      ? "bg-violet-600 border-violet-600 text-white"
-                                      : "border-slate-300 dark:border-slate-600",
-                                  )}
-                                >
-                                  {selected && <Check className="h-3 w-3" />}
-                                </div>
-                                <div className="flex-1 min-w-0 truncate">
-                                  <span className="text-slate-700 dark:text-slate-200">
-                                    {u.full_name || u.email}
-                                  </span>
-                                  {u.full_name && (
-                                    <span className="ml-1.5 text-xs text-slate-400">
-                                      {u.email}
-                                    </span>
-                                  )}
-                                </div>
-                              </button>
-                              {selected && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 gap-1 text-xs shrink-0"
-                                    >
-                                      {shareEntry.permission === "editor"
-                                        ? "Editor"
-                                        : "Viewer"}
-                                      <ChevronDown className="h-3 w-3" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          u.id,
-                                          "user",
-                                          "viewer",
-                                        )
-                                      }
-                                    >
-                                      Viewer
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          u.id,
-                                          "user",
-                                          "editor",
-                                        )
-                                      }
-                                    >
-                                      Editor
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
-                        {tenantUsersLoaded
-                          ? "No users found in this tenant."
-                          : "Loading users..."}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Groups
-                    </label>
-                    {tenantGroupsLoaded && tenantGroups.length > 0 ? (
-                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
-                        {tenantGroups.map((g) => {
-                          const shareEntry = canvasShares.find(
-                            (s) => s.groupId === g.id,
-                          );
-                          const selected = !!shareEntry;
-                          return (
-                            <div
-                              key={g.id}
-                              className={cn(
-                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-                                selected
-                                  ? "bg-violet-50 dark:bg-violet-900/20"
-                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                              )}
-                            >
-                              <button
-                                type="button"
-                                className="flex items-center gap-2.5 flex-1 min-w-0"
-                                onClick={() => toggleSharedGroup(g.id)}
-                              >
-                                <div
-                                  className={cn(
-                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
-                                    selected
-                                      ? "bg-violet-600 border-violet-600 text-white"
-                                      : "border-slate-300 dark:border-slate-600",
-                                  )}
-                                >
-                                  {selected && <Check className="h-3 w-3" />}
-                                </div>
-                                <span className="text-slate-700 dark:text-slate-200 truncate">
-                                  {g.name}
-                                </span>
-                              </button>
-                              {selected && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 gap-1 text-xs shrink-0"
-                                    >
-                                      {shareEntry.permission === "editor"
-                                        ? "Editor"
-                                        : "Viewer"}
-                                      <ChevronDown className="h-3 w-3" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          g.id,
-                                          "group",
-                                          "viewer",
-                                        )
-                                      }
-                                    >
-                                      Viewer
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        setSharePermission(
-                                          g.id,
-                                          "group",
-                                          "editor",
-                                        )
-                                      }
-                                    >
-                                      Editor
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
-                        {tenantGroupsLoaded
-                          ? "No groups. Admins can create groups in Admin → Groups."
-                          : "Loading groups..."}
-                      </p>
-                    )}
-                  </div>
-                  {canvasShares.length > 0 && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {canvasShares.length} share
-                      {canvasShares.length !== 1 ? "s" : ""} (Viewer =
-                      read-only, Editor = can edit)
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {canTransferOwnership && (
-                <div className="rounded-lg border border-amber-200/80 dark:border-amber-800/50 bg-amber-50/40 dark:bg-amber-950/20 p-3 space-y-2">
-                  <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                    Transfer ownership
-                  </label>
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
-                    Make another user the canvas owner. You keep edit access as
-                    an editor. Use this when a client should own a canvas you
-                    created (e.g. after moving off a platform admin account).
-                  </p>
-                  <Select
-                    value={transferOwnershipUserId || "__none__"}
-                    onValueChange={(v) =>
-                      setTransferOwnershipUserId(v === "__none__" ? "" : v)
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose new owner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Choose user…</SelectItem>
-                      {tenantUsers.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.full_name
-                            ? `${u.full_name} (${u.email})`
-                            : u.email}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full border-amber-300/80"
-                    disabled={
-                      !transferOwnershipUserId ||
-                      transferOwnershipSaving ||
-                      !tenantUsersLoaded
-                    }
-                    onClick={handleTransferOwnership}
-                  >
-                    {transferOwnershipSaving
-                      ? "Transferring…"
-                      : "Transfer ownership"}
-                  </Button>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex flex-col gap-2 pt-1">
-                <Button
-                  onClick={handleSaveVisibility}
-                  disabled={visibilitySaving}
-                  className="w-full"
-                >
-                  {visibilitySaving ? "Saving..." : "Save sharing settings"}
-                </Button>
-              </div>
-              <div className="h-px bg-slate-200 dark:bg-slate-700" />
-              <div className="space-y-2">
-                <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-0.5">
-                  Export canvas
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowReportBuilder(true);
-                      setShareDialogOpen(false);
-                    }}
-                    disabled={!hasItems}
-                    className="w-full gap-2"
-                  >
-                    <Presentation className="h-4 w-4" />
-                    PowerPoint Editor
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      handleEmailScreenshot();
-                      setShareDialogOpen(false);
-                    }}
-                    className="w-full gap-2"
-                  >
-                    <Mail className="h-4 w-4" />
-                    Copy image for email
-                  </Button>
-                </div>
-              </div>
-              <div className="h-px bg-slate-200 dark:bg-slate-700" />
-              <div className="flex flex-col gap-2">
-                <Button
-                  variant="outline"
-                  onClick={handleCopyShareLink}
-                  className="w-full gap-2"
-                >
-                  <LinkIcon className="h-4 w-4" />
-                  Copy link
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleEmailLink}
-                  className="w-full gap-2"
-                >
-                  <Mail className="h-4 w-4" />
-                  Email link
-                </Button>
-                <Button
-                  variant={shareFavorited ? "secondary" : "outline"}
-                  onClick={handleToggleFavorite}
-                  className="w-full"
-                  disabled={favoriteLoading}
-                >
-                  {shareFavorited
-                    ? "Remove from bookmarks"
-                    : "Add to bookmarks"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Save className="h-5 w-5 text-slate-500" />
-                Save canvas
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Title
-                </label>
-                <Input
-                  placeholder="Untitled canvas"
-                  value={saveTitle}
-                  onChange={(e) => setSaveTitle(e.target.value)}
-                  className="mt-2"
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => setSaveDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleSaveConfirm} disabled={isSaving}>
-                  {isSaving ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <WorkbenchSaveDialog
+          open={saveDialogOpen}
+          onOpenChange={setSaveDialogOpen}
+          saveTitle={saveTitle}
+          setSaveTitle={setSaveTitle}
+          onConfirm={handleSaveConfirm}
+          isSaving={isSaving}
+        />
 
         <Dialog open={aiBackgroundOpen} onOpenChange={setAiBackgroundOpen}>
           <DialogContent className="sm:max-w-md">
