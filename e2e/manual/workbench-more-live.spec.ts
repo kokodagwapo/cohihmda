@@ -8,6 +8,7 @@ import { test, expect } from "@playwright/test";
 import {
   dismissBlockingOverlays,
   forceUnifiedChat,
+  forceWorkbenchChatScopeSync,
   gotoWithUnifiedChatShell,
   selectUnifiedChatType,
   unifiedChatMessageInput,
@@ -16,6 +17,7 @@ import {
   openFreshWorkbenchChat,
   seedBoardReadyDashboard,
   seedDeterministicBoard,
+  seedAdditionalDeterministicBoard,
   waitForChatInputReady,
   waitForWorkbenchCanvasPopulated,
 } from "../helpers/workbenchLive";
@@ -688,6 +690,95 @@ test.describe("More live workbench @manual-live", () => {
       name: "Collapse after mobile→desktop resize",
       status: "works",
       observed: "toggle ok",
+    });
+  });
+
+  test("@COHI-398 M26 tab switch prompts to switch chat scope", async ({ page }) => {
+    await forceWorkbenchChatScopeSync(page);
+    await skipIfLoggedOut(page);
+    let status: Status = "works";
+    let observed = "";
+    try {
+      const canvasA = await seedDeterministicBoard(page);
+      await selectUnifiedChatType(page, "Workbench");
+      await sendTurn(page, "Summarize this board in one sentence.");
+      await expect(page.getByTestId("workbench-chat-scope-chip")).toBeVisible({
+        timeout: 60_000,
+      });
+      const persistedAfterA = await page.evaluate(() =>
+        sessionStorage.getItem("cohi_workbench_conversation_scope"),
+      );
+      if (!persistedAfterA) {
+        throw new Error("conversation scope not persisted after chat on canvas A");
+      }
+      const canvasB = await seedAdditionalDeterministicBoard(page);
+      expect(canvasB).not.toBe(canvasA);
+      await selectUnifiedChatType(page, "Workbench");
+      const dialog = page.getByTestId("workbench-scope-switch-dialog");
+      await expect(dialog).toBeVisible({ timeout: 45_000 });
+      await dialog.getByRole("button", { name: "Keep current chat" }).click();
+      await expect(page.getByTestId("workbench-chat-scope-pinned-banner")).toBeVisible({
+        timeout: 10_000,
+      });
+      observed = "canvas B load → scope dialog → pinned banner";
+    } catch (e) {
+      status = "broken";
+      observed = e instanceof Error ? e.message : String(e);
+    }
+    await record(page, {
+      id: "M26",
+      name: "Tab switch scope prompt",
+      status,
+      observed,
+    });
+  });
+
+  test("@COHI-398 M27 new canvas intent confirm dialog", async ({ page }) => {
+    await forceWorkbenchChatScopeSync(page);
+    await skipIfLoggedOut(page);
+    let status: Status = "works";
+    let observed = "";
+    try {
+      await seedDeterministicBoard(page);
+      const input = unifiedChatMessageInput(page);
+      await input.fill("Add a sales chart on a new canvas");
+      await input.press("Enter");
+      const dialog = page.getByTestId("workbench-new-canvas-intent-dialog");
+      await expect(dialog).toBeVisible({ timeout: 10_000 });
+      await dialog.getByRole("button", { name: "Use current canvas" }).click();
+      observed = "new-canvas intent dialog shown; continued on current canvas";
+    } catch (e) {
+      status = "broken";
+      observed = e instanceof Error ? e.message : String(e);
+    }
+    await record(page, {
+      id: "M27",
+      name: "New canvas intent confirm",
+      status,
+      observed,
+    });
+  });
+
+  test("@COHI-398 M28 workbench chat scope chip visible", async ({ page }) => {
+    await forceWorkbenchChatScopeSync(page);
+    await skipIfLoggedOut(page);
+    let status: Status = "works";
+    let observed = "";
+    try {
+      await seedDeterministicBoard(page);
+      await sendTurn(page, "What widgets are on this board?");
+      const chip = page.getByTestId("workbench-chat-scope-chip");
+      await expect(chip).toBeVisible({ timeout: 15_000 });
+      observed = (await chip.textContent()) ?? "chip visible";
+    } catch (e) {
+      status = "broken";
+      observed = e instanceof Error ? e.message : String(e);
+    }
+    await record(page, {
+      id: "M28",
+      name: "Chat scope chip",
+      status,
+      observed,
     });
   });
 });

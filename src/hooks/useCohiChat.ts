@@ -16,6 +16,7 @@ import { serializeWidgetCatalog } from "@/utils/widgetCatalogSerializer";
 import type { WidgetAction, CanvasStateSnapshot } from "@/types/widgetActions";
 import {
   deliverWorkbenchWidgetActions,
+  dispatchWorkbenchBindCanvas,
   filterExecutableWorkbenchActions,
   gateWorkbenchActionsForUserQuestion,
   COHI_WORKBENCH_BIND_CANVAS_EVENT,
@@ -28,6 +29,20 @@ import {
   resetActiveWorkbenchDraftSession,
   setActiveWorkbenchDraftScope,
 } from "@/lib/workbench/workbenchChatHandoff";
+import {
+  activeContextToScopeRef,
+  dispatchWorkbenchScopeMismatchActions,
+  getLatestWorkbenchActiveContext,
+  isWorkbenchChatScopeSyncEnabled,
+  isWorkbenchScopeAlignedWithActiveTab,
+  trackWorkbenchScopeSyncEvent,
+  clearPersistedWorkbenchConversationScope,
+  persistWorkbenchConversationScope,
+  readPersistedWorkbenchConversationScope,
+  type WorkbenchActiveContext,
+  type WorkbenchChatScopeRef,
+  type WorkbenchScopeMismatchActionsDetail,
+} from "@/lib/workbench/workbenchChatScopeSync";
 import {
   getWorkbenchCanvasBridge,
   getWorkbenchCanvasIdForDraft,
@@ -309,6 +324,61 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const [workbenchSavedCanvasId, setWorkbenchSavedCanvasId] = useState<
     string | null
   >(null);
+  const [workbenchChatScope, setWorkbenchChatScope] = useState<
+    WorkbenchChatScopeRef | null
+  >(() =>
+    typeof window !== "undefined"
+      ? readPersistedWorkbenchConversationScope()
+      : null,
+  );
+  const [workbenchScopePinned, setWorkbenchScopePinned] = useState(false);
+  const [workbenchPinnedScopeLabel, setWorkbenchPinnedScopeLabel] = useState<
+    string | null
+  >(null);
+  const [pendingScopeSwitchTarget, setPendingScopeSwitchTarget] =
+    useState<WorkbenchActiveContext | null>(null);
+  const [scopeMismatchActions, setScopeMismatchActions] =
+    useState<WorkbenchScopeMismatchActionsDetail | null>(null);
+
+  const setWorkbenchChatScopeRef = useCallback((scope: WorkbenchChatScopeRef | null) => {
+    setWorkbenchChatScope(scope);
+    persistWorkbenchConversationScope(scope);
+    if (scope?.label) {
+      setWorkbenchPinnedScopeLabel(scope.label);
+    }
+  }, []);
+
+  const tryDeliverWorkbenchWidgetActions = useCallback(
+    (
+      draftScopeId: string,
+      actions: WidgetAction[],
+      conversationScope: WorkbenchChatScopeRef,
+      conversationId: string | null,
+    ): number => {
+      if (!actions.length) return 0;
+      if (
+        isWorkbenchChatScopeSyncEnabled() &&
+        !isWorkbenchScopeAlignedWithActiveTab(conversationScope)
+      ) {
+        dispatchWorkbenchScopeMismatchActions({
+          actions,
+          conversationScope,
+          draftScopeId,
+          conversationId,
+        });
+        setScopeMismatchActions({
+          actions,
+          conversationScope,
+          draftScopeId,
+          conversationId,
+        });
+        return 0;
+      }
+      deliverWorkbenchWidgetActions(draftScopeId, actions);
+      return actions.length;
+    },
+    [],
+  );
 
   const resetWorkbenchChatSession = useCallback(() => {
     const urlCanvasId =
@@ -327,6 +397,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
     resetActiveWorkbenchDraftSession();
     setWorkbenchSavedCanvasId(null);
+    setWorkbenchChatScope(null);
+    clearPersistedWorkbenchConversationScope();
+    setWorkbenchScopePinned(false);
+    setWorkbenchPinnedScopeLabel(null);
+    setPendingScopeSwitchTarget(null);
+    setScopeMismatchActions(null);
   }, []);
 
   useEffect(() => {
@@ -591,6 +667,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
             const scopeId = savedCanvasId ?? draftScopeId;
             const scopeType = savedCanvasId ? ("canvas" as const) : ("draft" as const);
+            const scopeLabel =
+              getLatestWorkbenchActiveContext()?.tabTitle ?? undefined;
+            setWorkbenchChatScopeRef({
+              type: scopeType,
+              id: scopeId,
+              label: scopeLabel,
+            });
+            setWorkbenchScopePinned(false);
             const streamConversationId = isNewConversation
               ? registerNewUnifiedConversation({ type: scopeType, id: scopeId })
               : activeSessionId!;
@@ -626,9 +710,20 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               parsed.actions,
               effectiveQuestion,
             );
-            if (autoActions.length > 0) {
-              deliverWorkbenchWidgetActions(draftScopeId, autoActions);
-            }
+            const turnScope: WorkbenchChatScopeRef = {
+              type: scopeType,
+              id: scopeId,
+              label: scopeLabel,
+            };
+            const appliedCount =
+              autoActions.length > 0
+                ? tryDeliverWorkbenchWidgetActions(
+                    draftScopeId,
+                    autoActions,
+                    turnScope,
+                    conversationId,
+                  )
+                : 0;
 
             const assistantMessage: ChatMessage = {
               id: assistantMessageId,
@@ -639,7 +734,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               timestamp: new Date(),
               workbenchActions:
                 autoActions.length > 0 ? autoActions : undefined,
-              workbenchActionsAppliedCount: autoActions.length,
+              workbenchActionsAppliedCount: appliedCount,
             };
             applyMessagesForStream(streamConversationId, (prev) =>
               prev.map((m) =>
@@ -953,6 +1048,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               getWorkbenchCanvasIdForDraft(draftScopeId);
             const scopeId = savedCanvasId ?? draftScopeId;
             const scopeType = savedCanvasId ? ("canvas" as const) : ("draft" as const);
+            const scopeLabel =
+              getLatestWorkbenchActiveContext()?.tabTitle ?? undefined;
+            setWorkbenchChatScopeRef({
+              type: scopeType,
+              id: scopeId,
+              label: scopeLabel,
+            });
 
             const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
               client,
@@ -969,11 +1071,22 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             setSessionId(conversationId);
             const autoActions = gateWorkbenchActionsForUserQuestion(
               parsed.actions,
-              effectiveQuestion,
+              refinement,
             );
-            if (autoActions.length > 0) {
-              deliverWorkbenchWidgetActions(draftScopeId, autoActions);
-            }
+            const turnScope: WorkbenchChatScopeRef = {
+              type: scopeType,
+              id: scopeId,
+              label: scopeLabel,
+            };
+            const appliedCount =
+              autoActions.length > 0
+                ? tryDeliverWorkbenchWidgetActions(
+                    draftScopeId,
+                    autoActions,
+                    turnScope,
+                    conversationId,
+                  )
+                : 0;
             const assistantMessage: ChatMessage = {
               id: assistantMessageId,
               role: "assistant",
@@ -983,7 +1096,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               timestamp: new Date(),
               workbenchActions:
                 autoActions.length > 0 ? autoActions : undefined,
-              workbenchActionsAppliedCount: autoActions.length,
+              workbenchActionsAppliedCount: appliedCount,
             };
             const applyFinal = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
               if (streamConversationId) {
@@ -1138,6 +1251,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       applyMessagesForStream,
       setLoadingForStream,
       workbenchSavedCanvasId,
+      tryDeliverWorkbenchWidgetActions,
+      setWorkbenchChatScopeRef,
     ]
   );
   const clearMessages = useCallback(() => {
@@ -1328,10 +1443,20 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           if (loadedChatType === "workbench" && rowScope?.id) {
             if (rowScope.type === "canvas") {
               setWorkbenchSavedCanvasId(rowScope.id);
+              setWorkbenchChatScopeRef({
+                type: "canvas",
+                id: rowScope.id,
+              });
             } else if (rowScope.type === "draft") {
               setActiveWorkbenchDraftScope(rowScope.id);
               setWorkbenchSavedCanvasId(null);
+              setWorkbenchChatScopeRef({
+                type: "draft",
+                id: rowScope.id,
+              });
             }
+            setWorkbenchScopePinned(false);
+            setPendingScopeSwitchTarget(null);
           }
 
           const raw = (row.messages ?? []) as Array<{
@@ -1438,7 +1563,109 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         }
       }
     },
-    [getEffectiveTenantId, tenantId, chatType, sessionId],
+    [getEffectiveTenantId, tenantId, chatType, sessionId, setWorkbenchChatScopeRef],
+  );
+
+  const syncWorkbenchChatToActiveContext = useCallback(
+    async (ctx: WorkbenchActiveContext) => {
+      const scopeRef = activeContextToScopeRef(ctx);
+      setWorkbenchChatScopeRef(scopeRef);
+      setWorkbenchScopePinned(false);
+      setPendingScopeSwitchTarget(null);
+      setScopeMismatchActions(null);
+      setActiveWorkbenchDraftScope(ctx.draftScopeId);
+      markWorkbenchCanvasNavBound();
+      if (ctx.isSavedCanvas && ctx.canvasId) {
+        rememberWorkbenchDraftTab(ctx.draftScopeId, ctx.tabId);
+        setWorkbenchSavedCanvasId(ctx.canvasId);
+        dispatchWorkbenchBindCanvas(ctx.canvasId);
+      } else {
+        setWorkbenchSavedCanvasId(null);
+      }
+
+      if (!isUnifiedChatClientEnabled()) {
+        viewingSessionRef.current = null;
+        setSessionId(null);
+        setMessages([]);
+        return;
+      }
+
+      try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+        const scopeType = ctx.isSavedCanvas && ctx.canvasId ? "canvas" : "draft";
+        const scopeKey =
+          ctx.isSavedCanvas && ctx.canvasId ? ctx.canvasId : ctx.draftScopeId;
+        const rows = await client.listConversations({
+          scope_type: scopeType,
+          scope_key: scopeKey,
+          chat_type: "workbench",
+          limit: 1,
+        });
+        if (rows[0]?.id) {
+          await loadSession(rows[0].id);
+        } else {
+          viewingSessionRef.current = null;
+          setSessionId(null);
+          setMessages([]);
+          setConversationForkLinks(null);
+        }
+      } catch (err) {
+        console.warn("[useCohiChat] syncWorkbenchChatToActiveContext:", err);
+        viewingSessionRef.current = null;
+        setSessionId(null);
+        setMessages([]);
+      }
+    },
+    [getEffectiveTenantId, tenantId, loadSession, setWorkbenchChatScopeRef],
+  );
+
+  const pinWorkbenchChatScope = useCallback(() => {
+    if (workbenchChatScope) {
+      setWorkbenchScopePinned(true);
+      setWorkbenchPinnedScopeLabel(
+        workbenchChatScope.label ?? workbenchPinnedScopeLabel,
+      );
+    }
+  }, [workbenchChatScope, workbenchPinnedScopeLabel]);
+
+  const acceptPendingWorkbenchScopeSwitch = useCallback(async () => {
+    const target = pendingScopeSwitchTarget;
+    if (!target) return;
+    trackWorkbenchScopeSyncEvent("scope_switch_confirmed");
+    await syncWorkbenchChatToActiveContext(target);
+  }, [pendingScopeSwitchTarget, syncWorkbenchChatToActiveContext]);
+
+  const cancelPendingWorkbenchScopeSwitch = useCallback(() => {
+    if (pendingScopeSwitchTarget) {
+      trackWorkbenchScopeSyncEvent("scope_switch_cancelled");
+      pinWorkbenchChatScope();
+    }
+    setPendingScopeSwitchTarget(null);
+  }, [pendingScopeSwitchTarget, pinWorkbenchChatScope]);
+
+  const resolveScopeMismatchActions = useCallback(
+    (mode: "active" | "conversation") => {
+      const pending = scopeMismatchActions;
+      if (!pending) return;
+      if (mode === "active") {
+        const active = getLatestWorkbenchActiveContext();
+        const draftScopeId =
+          active?.draftScopeId ?? resolveWorkbenchDraftScopeId();
+        deliverWorkbenchWidgetActions(draftScopeId, pending.actions);
+        trackWorkbenchScopeSyncEvent("action_apply_mismatch_resolved_active");
+      } else {
+        deliverWorkbenchWidgetActions(
+          pending.draftScopeId,
+          pending.actions,
+        );
+        trackWorkbenchScopeSyncEvent(
+          "action_apply_mismatch_resolved_conversation",
+        );
+      }
+      setScopeMismatchActions(null);
+    },
+    [scopeMismatchActions],
   );
 
   /**
@@ -1559,5 +1786,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     conversationForkLinks,
     beginChatTypeFork,
     undoChatTypeFork,
+    workbenchSavedCanvasId,
+    workbenchChatScope,
+    workbenchScopePinned,
+    workbenchPinnedScopeLabel,
+    pendingScopeSwitchTarget,
+    setPendingScopeSwitchTarget,
+    scopeMismatchActions,
+    syncWorkbenchChatToActiveContext,
+    acceptPendingWorkbenchScopeSwitch,
+    cancelPendingWorkbenchScopeSwitch,
+    resolveScopeMismatchActions,
+    pinWorkbenchChatScope,
   };
 }

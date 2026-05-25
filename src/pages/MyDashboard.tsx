@@ -19,10 +19,19 @@ import {
   rememberWorkbenchDraftTab,
   resetActiveWorkbenchDraftSession,
   setActiveWorkbenchDraftScope,
+  getOrCreateActiveWorkbenchDraftScope,
   COHI_WORKBENCH_FOCUS_CANVAS_EVENT,
   dispatchCohiChatResume,
   type WorkbenchChatHandoffLocationState,
 } from '@/lib/workbench/workbenchChatHandoff';
+import {
+  buildActiveContextFromTab,
+  dispatchWorkbenchActiveContext,
+  COHI_WORKBENCH_REQUEST_NEW_TAB_EVENT,
+  COHI_WORKBENCH_NEW_TAB_READY_EVENT,
+  type WorkbenchRequestNewTabDetail,
+  type WorkbenchNewTabReadyDetail,
+} from '@/lib/workbench/workbenchChatScopeSync';
 
 type CanvasListItem = {
   id: string;
@@ -383,12 +392,52 @@ export default function MyDashboard() {
   // Create a new blank canvas tab
   const handleNewCanvas = useCallback(() => {
     resetActiveWorkbenchDraftSession();
+    const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
     const newTabId = `new-${Date.now()}`;
+    setTabDraftScopes((prev) => ({ ...prev, [newTabId]: draftScopeId }));
     setOpenTabs((prev) => [...prev, newTabId]);
     setActiveTabId(newTabId);
     setLoadCanvasId(null);
     setCanvasKey((k) => k + 1);
     updateUrl(null);
+    dispatchWorkbenchActiveContext(
+      buildActiveContextFromTab({
+        tabId: newTabId,
+        tabTitle: 'New Canvas',
+        tabDraftScopes: { [newTabId]: draftScopeId },
+      }),
+    );
+  }, [updateUrl]);
+
+  /** New canvas tab requested from unified workbench chat (confirm-first flow). */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { requestId } = (e as CustomEvent<WorkbenchRequestNewTabDetail>).detail ?? {};
+      if (!requestId) return;
+      resetActiveWorkbenchDraftSession();
+      const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+      const newTabId = `new-${Date.now()}`;
+      setTabDraftScopes((prev) => ({ ...prev, [newTabId]: draftScopeId }));
+      setOpenTabs((prev) => [...prev, newTabId]);
+      setActiveTabId(newTabId);
+      setLoadCanvasId(null);
+      setCanvasKey((k) => k + 1);
+      updateUrl(null);
+      const context = buildActiveContextFromTab({
+        tabId: newTabId,
+        tabTitle: 'New Canvas',
+        tabDraftScopes: { [newTabId]: draftScopeId },
+      });
+      dispatchWorkbenchActiveContext(context);
+      window.dispatchEvent(
+        new CustomEvent<WorkbenchNewTabReadyDetail>(COHI_WORKBENCH_NEW_TAB_READY_EVENT, {
+          detail: { requestId, context },
+        }),
+      );
+    };
+    window.addEventListener(COHI_WORKBENCH_REQUEST_NEW_TAB_EVENT, handler);
+    return () =>
+      window.removeEventListener(COHI_WORKBENCH_REQUEST_NEW_TAB_EVENT, handler);
   }, [updateUrl]);
 
   // Close a tab (with unsaved warning); navigates to hub when last tab closes
@@ -463,12 +512,31 @@ export default function MyDashboard() {
   }, [fetchCanvases]);
 
   // Get tab title from canvas list or override titles
-  const getTabTitle = (tabId: string) => {
+  const getTabTitle = useCallback((tabId: string) => {
     if (tabId.startsWith('new-')) return 'New Canvas';
     if (tabTitles[tabId]) return tabTitles[tabId];
     const canvas = canvasList.find((c) => c.id === tabId);
     return canvas?.title || 'Untitled';
-  };
+  }, [tabTitles, canvasList]);
+
+  const emitActiveWorkbenchContext = useCallback(
+    (tabId: string | null) => {
+      if (!tabId) return;
+      dispatchWorkbenchActiveContext(
+        buildActiveContextFromTab({
+          tabId,
+          tabTitle: getTabTitle(tabId),
+          tabDraftScopes,
+        }),
+      );
+    },
+    [getTabTitle, tabDraftScopes],
+  );
+
+  useEffect(() => {
+    if (isHydratingWorkbench || !activeTabId) return;
+    emitActiveWorkbenchContext(activeTabId);
+  }, [activeTabId, isHydratingWorkbench, emitActiveWorkbenchContext, tabDraftScopes]);
 
   // Handle dirty-state changes from the active canvas
   const handleDirtyChange = useCallback((dirty: boolean) => {
@@ -575,7 +643,7 @@ export default function MyDashboard() {
                 size="icon"
                 className="h-7 w-7 ml-1 shrink-0 rounded-md text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30"
                 onClick={handleNewCanvas}
-                title="New canvas"
+                title="New canvas (new board + new chat scope)"
               >
                 <Plus className="h-3.5 w-3.5" />
               </Button>
