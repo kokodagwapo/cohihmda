@@ -100,6 +100,7 @@ import {
   shouldForkOnChatTypeChange,
 } from "@/lib/workbench/workbenchChatHandoff";
 import { ConversationForkChips } from "@/components/cohi/ConversationForkChips";
+import { useWorkbenchChatScopeGuard } from "@/components/cohi/WorkbenchChatScopeGuard";
 import { formatChatTypeLabel } from "@/lib/unifiedChatTypeStyles";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { PAGE_INSIGHTS_CARD } from "@/components/cohi/pageContentStyles";
@@ -547,6 +548,15 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     conversationForkLinks,
     beginChatTypeFork,
     undoChatTypeFork,
+    workbenchChatScope = null,
+    workbenchScopePinned = false,
+    workbenchPinnedScopeLabel = null,
+    pendingScopeSwitchTarget = null,
+    setPendingScopeSwitchTarget = () => {},
+    scopeMismatchActions = null,
+    acceptPendingWorkbenchScopeSwitch = async () => {},
+    cancelPendingWorkbenchScopeSwitch = () => {},
+    resolveScopeMismatchActions = () => {},
   } = unifiedSession ?? legacyChat;
 
   const startNewChatSession = useCallback(async () => {
@@ -562,6 +572,20 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     unifiedSession?.researchDeepAnalysis ?? researchDeepAnalysis;
   const setActiveResearchDeepAnalysis =
     unifiedSession?.setResearchDeepAnalysis ?? setResearchDeepAnalysis;
+
+  const workbenchScopeGuard = useWorkbenchChatScopeGuard({
+    activeChatType,
+    workbenchChatScope,
+    workbenchScopePinned,
+    workbenchPinnedScopeLabel,
+    pendingScopeSwitchTarget,
+    setPendingScopeSwitchTarget,
+    scopeMismatchActions,
+    acceptPendingWorkbenchScopeSwitch,
+    cancelPendingWorkbenchScopeSwitch,
+    resolveScopeMismatchActions,
+    sendMessage,
+  });
 
   const { uploads: availableUploads, listUploads: listAvailableUploads } =
     useResearchUploads(tenantId);
@@ -1087,11 +1111,25 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         ? idsForSend
         : undefined;
 
-    await sendMessage(input.trim() || "Analyze the attached dataset.", {
+    const messageText = input.trim() || "Analyze the attached dataset.";
+    const sendOpts = {
       forceNewConversation,
       datasetUploadIds: idsForSend.length > 0 ? idsForSend : undefined,
       researchUploadIds: researchIdsForNewSession,
-    });
+    };
+
+    if (activeChatType === "workbench") {
+      const sent = await workbenchScopeGuard.preflightWorkbenchSend(
+        messageText,
+        sendOpts,
+      );
+      if (!sent) {
+        setInput("");
+        return;
+      }
+    } else {
+      await sendMessage(messageText, sendOpts);
+    }
 
     if (researchIdsForNewSession) {
       setAttachedUploadIds([]);
@@ -1200,12 +1238,19 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       expandShellIfCompact();
       navigateWorkbenchOnSubmit(forceNewConversation);
       setInput(question);
-      sendMessage(question, { forceNewConversation });
+      const opts = { forceNewConversation };
+      if (activeChatType === "workbench") {
+        void workbenchScopeGuard.preflightWorkbenchSend(question, opts);
+      } else {
+        void sendMessage(question, opts);
+      }
     },
     [
       expandShellIfCompact,
       navigateWorkbenchOnSubmit,
       sendMessage,
+      activeChatType,
+      workbenchScopeGuard,
     ],
   );
 
@@ -2482,6 +2527,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 >
                   AI
                 </Badge>
+                {workbenchScopeGuard.scopeChip}
               </div>
               <p className="text-[11px] sm:text-xs text-slate-600/90 dark:text-slate-400/90 font-normal mt-0.5 leading-snug line-clamp-2 sm:line-clamp-1 sm:truncate">
                 Ask about your pipeline & performance
@@ -2510,7 +2556,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               size="icon"
               className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
               onClick={() => void startNewChatSession()}
-              title="New conversation"
+              title={
+                activeChatType === "workbench"
+                  ? "New chat thread on this canvas"
+                  : "New conversation"
+              }
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
@@ -2625,6 +2675,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             disabled={isLoading}
           />
         )}
+
+        {workbenchScopeGuard.pinnedBanner}
 
         {!hideInPanelHistory && (
         <ChatHistorySidebar
@@ -2900,6 +2952,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         />
       )}
       {panelBody}
+      {workbenchScopeGuard.dialogs}
 
       {/* Drilldown Sheet – appears in front of chat overlay (z-[110] above chat z-[100]) */}
       <Sheet open={drilldownOpen} onOpenChange={setDrilldownOpen}>

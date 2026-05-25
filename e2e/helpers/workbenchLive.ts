@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { e2eAuthHeaders } from "./e2eAuth";
 import {
+  dismissBlockingOverlays,
   gotoWithUnifiedChatShell,
   selectUnifiedChatType,
   unifiedChatMessageInput,
@@ -117,6 +118,35 @@ export async function seedDeterministicBoard(
     timeout: 60_000,
   });
   await waitForChatInputReady(page);
+  return canvasId;
+}
+
+/** Add another deterministic canvas tab without resetting via /my-dashboard hub. */
+export async function seedAdditionalDeterministicBoard(
+  page: Page,
+  fixture: "board-ready-min" = "board-ready-min",
+): Promise<string> {
+  const base = (page.context().baseURL ?? process.env.E2E_BASE_URL ?? "http://localhost:5000").replace(
+    /\/$/,
+    "",
+  );
+  const headers = await e2eAuthHeaders(page);
+  const res = await page.request.post(`${base}/api/cohi-chat/workbench/test-seed`, {
+    headers,
+    data: { fixture },
+  });
+  if (!res.ok()) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `test-seed failed (${res.status()}): ${body.slice(0, 400)} — set WORKBENCH_TEST_SEED_ENABLED=1`,
+    );
+  }
+  const { canvasId } = (await res.json()) as { canvasId: string };
+  await page.goto(`/my-dashboard/${canvasId}`, { waitUntil: "domcontentloaded" });
+  await dismissBlockingOverlays(page);
+  await expect(page.locator('[data-testid^="canvas-item-"]').first()).toBeVisible({
+    timeout: 60_000,
+  });
   return canvasId;
 }
 

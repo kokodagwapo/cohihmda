@@ -66,6 +66,17 @@ export const UNIFIED_CHAT_STUB_TEXT =
 export const QA_AGENT_RUN_TAG = "wave6-e2e-unified-chat";
 
 /** Runs before any document load in this browser context (CI-safe vs page-only init). */
+/** Enable workbench chat ↔ canvas scope coupling (COHI-398). */
+export async function forceWorkbenchChatScopeSync(page: Page): Promise<void> {
+  await page.context().addInitScript(() => {
+    try {
+      localStorage.setItem("cohi_workbench_chat_scope_sync", "1");
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 export async function forceUnifiedChat(page: Page): Promise<void> {
   await page.context().addInitScript(() => {
     try {
@@ -80,6 +91,8 @@ export async function forceUnifiedChat(page: Page): Promise<void> {
         "cohi-chat-changes-announce-handled",
         new Date().toISOString(),
       );
+      localStorage.setItem("cohi_workbench_chat_scope_sync", "1");
+      sessionStorage.setItem("cohi_workbench_chat_scope_sync", "1");
     } catch {
       /* ignore */
     }
