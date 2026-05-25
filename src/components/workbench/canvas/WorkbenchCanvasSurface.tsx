@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 export type WorkbenchCanvasSurfaceProps = {
   canvasContentWidth: number;
   canvasContentHeight: number;
+  /** Comma-separated widget titles for e2e canvas state probes */
+  widgetTitleSummary?: string;
   children: ReactNode;
 };
 
@@ -10,6 +12,7 @@ export type WorkbenchCanvasSurfaceProps = {
 export function WorkbenchCanvasSurface({
   canvasContentWidth,
   canvasContentHeight,
+  widgetTitleSummary,
   children,
 }: WorkbenchCanvasSurfaceProps) {
   return (
@@ -38,6 +41,8 @@ export function WorkbenchCanvasSurface({
             }
           `}</style>
       <div
+        data-testid="canvas-widget-titles"
+        aria-label={widgetTitleSummary ?? ""}
         className="relative"
         style={{
           width: canvasContentWidth,

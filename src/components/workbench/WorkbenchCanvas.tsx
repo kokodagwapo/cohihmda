@@ -3484,6 +3484,19 @@ export function WorkbenchCanvas({
     });
   }, [items]);
 
+  const widgetTitleSummary = useMemo(() => {
+    const titles: string[] = [];
+    for (const it of items) {
+      const p = it.payload;
+      if (p.type === "cohi_widget") titles.push(p.title);
+      else if (p.type === "widget_group") titles.push(p.title);
+      else if (p.type === "registry_widget") {
+        titles.push(getWidgetDefinition(p.definitionId)?.name ?? p.definitionId);
+      }
+    }
+    return titles.filter(Boolean).join(", ");
+  }, [items]);
+
   const hasItems = items.length > 0;
 
   const handleClearCanvas = useCallback(() => {
@@ -3615,6 +3628,7 @@ export function WorkbenchCanvas({
             <WorkbenchCanvasSurface
               canvasContentWidth={canvasContentWidth}
               canvasContentHeight={canvasContentHeight}
+              widgetTitleSummary={widgetTitleSummary}
             >
               {hasItems ? (
                 <WorkbenchCanvasItemsLayer

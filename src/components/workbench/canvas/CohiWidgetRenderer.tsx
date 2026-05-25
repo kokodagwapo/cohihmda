@@ -1410,7 +1410,12 @@ export function CohiWidgetRenderer({
   }, [sourceType, title, explanation, sql, data]);
 
   return (
-    <div className="h-full w-full flex flex-col bg-white dark:bg-slate-900 rounded-lg overflow-hidden">
+    <div
+      className="h-full w-full flex flex-col bg-white dark:bg-slate-900 rounded-lg overflow-hidden"
+      data-widget-title={title}
+      data-chart-type={chartType}
+      data-filterable={filterInjectionEnabled === false ? "false" : "true"}
+    >
       {/* ─── Compact title bar for standalone widgets (not inside a group) ─── */}
       {!hideTitle && (
         <div className="flex items-center gap-1.5 px-2.5 h-7 min-h-[28px] shrink-0 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/60 dark:bg-slate-800/40">

@@ -9,11 +9,44 @@ import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard
 import {
   createLayoutItem,
   type CanvasLayoutItem,
+  type CanvasWidgetPayload,
 } from "@/components/workbench/canvas/types";
+import { getWidgetDefinition } from "@/components/widgets/registry";
 import {
   COHI_WORKBENCH_EDIT_WIDGET_EVENT,
   draftScopeIdForCanvasTab,
 } from "@/lib/workbench/workbenchChatHandoff";
+
+function resolveCanvasItemWidgetTitle(item: CanvasLayoutItem): string {
+  const payload = item.payload as CanvasWidgetPayload;
+  if (payload.type === "cohi_widget") return payload.title ?? "";
+  if (payload.type === "widget_group") return payload.title ?? "";
+  if (payload.type === "registry_widget") {
+    const def = getWidgetDefinition(payload.definitionId);
+    return def?.name ?? payload.definitionId;
+  }
+  if (payload.type === "dashboard_section") {
+    return (payload as { title?: string; sectionId?: string }).title ?? "";
+  }
+  return "";
+}
+
+function resolveCanvasItemChartType(item: CanvasLayoutItem): string {
+  const payload = item.payload;
+  if (payload.type === "cohi_widget") {
+    return payload.vizConfig?.type ?? "";
+  }
+  return "";
+}
+
+function resolveCanvasItemFilterable(item: CanvasLayoutItem): string {
+  const payload = item.payload;
+  if (payload.type === "cohi_widget") {
+    const filterable = payload.filterConfig?.filterable;
+    return filterable === false ? "false" : "true";
+  }
+  return "";
+}
 
 const DASHBOARD_HIDEABLE_SECTIONS: Record<
   string,
@@ -235,10 +268,18 @@ export function WorkbenchCanvasItemsLayer({
             }
           : undefined;
 
+        const widgetTitle = resolveCanvasItemWidgetTitle(item);
+        const chartType = resolveCanvasItemChartType(item);
+
         return (
           <Rnd
             key={item.i}
+            data-testid={`canvas-item-${item.i}`}
             data-item-id={item.i}
+            data-widget-type={item.type}
+            data-widget-title={widgetTitle}
+            data-chart-type={chartType || undefined}
+            data-filterable={resolveCanvasItemFilterable(item) || undefined}
             size={{ width: item.w, height: item.h }}
             position={{ x: item.x, y: item.y }}
             onDragStart={() => setSelectedWidgetId(item.i)}

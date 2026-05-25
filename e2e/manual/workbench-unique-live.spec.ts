@@ -12,19 +12,27 @@ import {
 import {
   openFreshWorkbenchChat,
   seedBoardReadyDashboard,
+  seedDeterministicBoard,
   waitForChatInputReady,
 } from "../helpers/workbenchLive";
 import {
   assertVisibleAfterHover,
   widgetGroupCollapseToggle,
 } from "../helpers/responsiveControls";
-import { captureReconcileTrace } from "../helpers/reconcileTrace";
-import { pollCanvasTextGone } from "../helpers/workbenchLiveAssertions";
+import {
+  captureReconcileTrace,
+  formatTraceSuffix,
+} from "../helpers/reconcileTrace";
+import {
+  expectCanvasMissingWidget,
+} from "../helpers/workbenchCanvasState";
 
 const OUT = path.join("test-results", "unique-live");
 const REPORT = path.join(OUT, "REPORT.md");
 
-type Row = { id: string; name: string; status: string; observed: string };
+type Status = "works" | "broken" | "rough" | "skipped";
+
+type Row = { id: string; name: string; status: Status; observed: string };
 
 const rows: Row[] = [];
 
@@ -32,15 +40,19 @@ async function record(
   page: import("@playwright/test").Page,
   r: Row,
   tracePrompt?: string,
+  options?: { allowBroken?: boolean },
 ) {
   let observed = r.observed.replace(/\|/g, "/");
   if ((r.status === "broken" || r.status === "rough") && tracePrompt) {
-    const trace = await captureReconcileTrace(page.request, tracePrompt, { page });
-    if (trace) observed += ` | trace=${trace}`;
+    const capture = await captureReconcileTrace(page, tracePrompt);
+    observed += formatTraceSuffix(capture);
   }
   rows.push({ ...r, observed });
   fs.appendFileSync(REPORT, `| ${r.id} | ${r.name} | ${r.status} | ${observed} |\n`);
   console.log(`\n[${r.id}] ${r.name}: ${r.status}\n  → ${observed}`);
+  if (r.status === "broken" && !options?.allowBroken) {
+    expect.soft(false, `${r.id}: ${observed}`).toBe(true);
+  }
 }
 
 async function sendTurn(page: import("@playwright/test").Page, message: string) {
@@ -195,7 +207,7 @@ test.describe("Unique live workbench @manual-live", () => {
   });
 
   test("U07 period switch L6M", async ({ page }) => {
-    await seedBoardReadyDashboard(page);
+    await seedDeterministicBoard(page);
     await sendTurn(page, "Switch the dashboard to last 6 months.");
     const footers = page.locator("p.text-violet-600, p.text-violet-400");
     const last =
@@ -250,18 +262,25 @@ test.describe("Unique live workbench @manual-live", () => {
   });
 
   test("U08 remove funded volume only", async ({ page }) => {
-    await seedBoardReadyDashboard(page);
+    await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the funded volume widget from the dashboard.");
     await waitForChatInputReady(page);
-    const gone = await pollCanvasTextGone(page, /Total Volume|funded volume/i);
+    let status: Status = "works";
+    let observed = "removed";
+    try {
+      await expectCanvasMissingWidget(page, /Total Volume|funded volume/i);
+    } catch {
+      status = "broken";
+      observed = "widget still present";
+    }
     await record(
       page,
       {
         id: "U08",
         name: "Remove funded volume",
-        status: gone ? "works" : "broken",
-        observed: `gone=${gone}`,
+        status,
+        observed,
       },
       "Remove the funded volume widget from the dashboard.",
     );

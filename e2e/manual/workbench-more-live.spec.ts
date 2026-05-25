@@ -15,6 +15,7 @@ import {
 import {
   openFreshWorkbenchChat,
   seedBoardReadyDashboard,
+  seedDeterministicBoard,
   waitForChatInputReady,
   waitForWorkbenchCanvasPopulated,
 } from "../helpers/workbenchLive";
@@ -22,8 +23,14 @@ import {
   assertVisibleAfterHover,
   widgetGroupCollapseToggle,
 } from "../helpers/responsiveControls";
-import { captureReconcileTrace } from "../helpers/reconcileTrace";
-import { pollCanvasTextGone } from "../helpers/workbenchLiveAssertions";
+import {
+  captureReconcileTrace,
+  formatTraceSuffix,
+} from "../helpers/reconcileTrace";
+import {
+  expectCanvasHasWidget,
+  expectCanvasMissingWidget,
+} from "../helpers/workbenchCanvasState";
 
 const OUT = path.join("test-results", "more-live");
 const REPORT = path.join(OUT, "REPORT.md");
@@ -38,11 +45,12 @@ async function record(
   page: import("@playwright/test").Page,
   r: Row,
   tracePrompt?: string,
+  options?: { allowBroken?: boolean },
 ) {
   let observed = r.observed.replace(/\|/g, "/");
   if ((r.status === "broken" || r.status === "rough") && tracePrompt) {
-    const trace = await captureReconcileTrace(page.request, tracePrompt, { page });
-    if (trace) observed += ` | trace=${trace}`;
+    const capture = await captureReconcileTrace(page, tracePrompt);
+    observed += formatTraceSuffix(capture);
   }
   fs.mkdirSync(OUT, { recursive: true });
   rows.push({ ...r, observed });
@@ -51,6 +59,9 @@ async function record(
     `| ${r.id} | ${r.name} | **${r.status}** | ${observed} |\n`,
   );
   console.log(`\n[${r.id}] ${r.name}: ${r.status}\n  → ${observed}`);
+  if (r.status === "broken" && !options?.allowBroken) {
+    expect.soft(false, `${r.id}: ${observed}`).toBe(true);
+  }
 }
 
 async function skipIfLoggedOut(page: import("@playwright/test").Page) {
@@ -217,18 +228,25 @@ test.describe("More live workbench @manual-live", () => {
   });
 
   test("M06 remove funded volume via chat", async ({ page }) => {
-    await seedBoardReadyDashboard(page);
+    await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the funded volume widget from the dashboard.");
     await waitForChatInputReady(page);
-    const gone = await pollCanvasTextGone(page, /Total Volume|funded volume/i);
+    let status: Status = "works";
+    let observed = "removed";
+    try {
+      await expectCanvasMissingWidget(page, /Total Volume|funded volume/i);
+    } catch {
+      status = "broken";
+      observed = "widget still present";
+    }
     await record(
       page,
       {
         id: "M06",
         name: "Remove funded volume",
-        status: gone ? "works" : "broken",
-        observed: `gone=${gone}`,
+        status,
+        observed,
       },
       "Remove the funded volume widget from the dashboard.",
     );
@@ -499,66 +517,56 @@ test.describe("More live workbench @manual-live", () => {
   });
 
   test("M21 all-time KPI period via chat", async ({ page }) => {
-    await seedBoardReadyDashboard(page);
+    await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Show funded volume as an all-time KPI.");
     await waitForChatInputReady(page);
-    const footers = page.locator("p.text-violet-600, p.text-violet-400");
-    const last =
-      (await footers.count()) > 0
-        ? ((await footers.last().textContent()) ?? "")
-        : "";
-    const allTimePattern =
-      /all[- ]?time|all time|since inception|lifetime|Added all-time KPI|All-time Funded Volume|Total Volume|total volume|funded volume all-time/i;
-    let ok = allTimePattern.test(last);
-    if (!ok) {
-      try {
-        await expect
-          .poll(
-            async () => {
-              const canvas =
-                (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-              return allTimePattern.test(canvas);
-            },
-            { timeout: 60_000, intervals: [2000, 3000] },
-          )
-          .toBe(true);
-        ok = true;
-      } catch {
-        const canvas =
-          (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-        ok = allTimePattern.test(canvas);
-      }
+    let status: Status = "works";
+    let observed = "all-time widget present";
+    try {
+      await expectCanvasHasWidget(page, /^All-time Funded Volume$/i, {
+        timeoutMs: 90_000,
+      });
+      const allTimeWidget = page.locator('[data-widget-title="All-time Funded Volume"]').first();
+      await expect(allTimeWidget).toHaveAttribute("data-filterable", "false", {
+        timeout: 15_000,
+      });
+    } catch {
+      status = "broken";
+      observed = "missing All-time Funded Volume or filterable not false";
     }
-    const canvasSnap =
-      (await page.locator("#workbench-canvas-root").textContent()) ?? "";
     await record(
       page,
       {
         id: "M21",
         name: "All-time KPI",
-        status: ok ? "works" : "broken",
-        observed: ok
-          ? last.slice(0, 80) || canvasSnap.slice(0, 40)
-          : last.slice(0, 80) || canvasSnap.slice(0, 40),
+        status,
+        observed,
       },
       "Show funded volume as an all-time KPI.",
     );
   });
 
   test("M22 remove pull-through only", async ({ page }) => {
-    await seedBoardReadyDashboard(page);
+    await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the pull-through rate widget from the dashboard.");
     await waitForChatInputReady(page);
-    const gone = await pollCanvasTextGone(page, /pull[- ]?through/i);
+    let status: Status = "works";
+    let observed = "removed";
+    try {
+      await expectCanvasMissingWidget(page, /pull[- ]?through/i);
+    } catch {
+      status = "broken";
+      observed = "pull-through still present";
+    }
     await record(
       page,
       {
         id: "M22",
         name: "Remove pull-through",
-        status: gone ? "works" : "broken",
-        observed: `gone=${gone}`,
+        status,
+        observed,
       },
       "Remove the pull-through rate widget from the dashboard.",
     );
@@ -603,38 +611,39 @@ test.describe("More live workbench @manual-live", () => {
   });
 
   test("M24 switch chart to bar via chat", async ({ page }) => {
-    await seedBoardReadyDashboard(page);
+    await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
-    const { actionSummary } = await sendTurn(
-      page,
-      "Change pull-through by branch chart to a bar chart.",
-    );
+    await sendTurn(page, "Change pull-through by branch chart to a bar chart.");
     await waitForChatInputReady(page);
-    let hasBar = false;
+    let status: Status = "works";
+    let observed = "bar chart";
     try {
       await expect
         .poll(
-          async () =>
-            page.locator("#workbench-canvas-root .recharts-bar-rectangle").count(),
-          { timeout: 25_000, intervals: [1000, 2000] },
+          async () => {
+            const barType = await page
+              .locator('[data-widget-title*="Pull-Through by Branch" i][data-chart-type="bar"]')
+              .count();
+            if (barType > 0) return true;
+            const rects = await page
+              .locator('[data-widget-type="cohi_widget"] .recharts-bar-rectangle, [data-widget-type="group_inner"][data-chart-type="bar"] .recharts-bar-rectangle')
+              .count();
+            return rects;
+          },
+          { timeout: 45_000, intervals: [1000, 2000] },
         )
         .toBeGreaterThan(0);
-      hasBar = true;
     } catch {
-      hasBar = false;
+      status = "broken";
+      observed = "bar chart not visible";
     }
-    const footerOk = /bar|chart|pull[- ]?through/i.test(actionSummary);
     await record(
       page,
       {
         id: "M24",
         name: "Chart type bar",
-        status: hasBar ? "works" : footerOk ? "broken" : "broken",
-        observed: hasBar
-          ? `barRect=true`
-          : footerOk
-            ? `footer-only`
-            : `barRect=false footer=false`,
+        status,
+        observed,
       },
       "Change pull-through by branch chart to a bar chart.",
     );

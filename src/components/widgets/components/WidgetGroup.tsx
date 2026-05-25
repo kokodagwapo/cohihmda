@@ -5983,9 +5983,29 @@ export function WidgetGroup({
                   ? layoutItem.h * ROW_HEIGHT - GRID_MARGIN[1]
                   : 200;
 
+                const groupWidgetTitle =
+                  item.kind === "registry"
+                    ? getWidgetDefinition(item.defId)?.name ?? item.defId
+                    : item.kind === "cohi"
+                      ? item.title ?? ""
+                      : "";
+                const groupChartType =
+                  item.kind === "cohi" ? item.vizConfig?.type ?? "" : "";
+                const groupFilterable =
+                  item.kind === "cohi"
+                    ? item.filterConfig?.filterable === false
+                      ? "false"
+                      : "true"
+                    : "";
+
                 return (
                   <div
                     key={key}
+                    data-testid={`group-widget-${groupId}__${key}`}
+                    data-widget-title={groupWidgetTitle}
+                    data-widget-type={item.kind}
+                    data-chart-type={groupChartType || undefined}
+                    data-filterable={groupFilterable || undefined}
                     className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden transition-shadow hover:shadow-md"
                   >
                     <GridCellWidget
