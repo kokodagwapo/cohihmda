@@ -55,11 +55,24 @@ import {
   parseRequestedPeriodFromText,
   reconcileWidgetActionPeriods,
   augmentPeriodSwitchActions,
+  augmentAllTimeStripPeriodOnlyActions,
+  augmentAllTimeCreateWidgetFromQuestion,
+  augmentAllTimeKpiToGroup,
+  augmentAllTimeReconcileModifyGroupAddCohi,
+  periodSwitchAssistantMessage,
+  stripBuildActionsForAnalyticalQuestion,
   normalizeWorkbenchWidgetIds,
   augmentGroupRemoveFromQuestion,
+  augmentRestoreWidgetFromQuestion,
+  augmentChartTypeFromQuestion,
+  augmentAddRegistryWidgetFromQuestion,
+  stripBuildActionsForChartTypeChange,
+  rewriteGroupedDeleteWidgetActions,
+  stripRecreateOnRemoveOnly,
   isChartTypeChangeRequest,
   isAllTimeRequest,
   isPeriodSwitchOnlyRequest,
+  isAnalyticalOnlyRequest,
   shouldBuildExecutiveDashboardOnEmptyCanvas,
   type WorkbenchLlmPreset,
 } from "../services/workbench/workbenchWidgetPeriodReconcile.js";
@@ -1612,11 +1625,18 @@ export async function runWorkbenchChatTurn(
         (canvasState?.totalItems ?? 0) > 0 &&
         isChartTypeChangeRequest(question, ...historyTexts)
       ) {
-        personaSupplement += `\n\n## Chart type change (CRITICAL)\nUpdate the existing widget with **modify_widget** using the widget's stable id from CANVAS STATE (e.g. cohi__id__idx). Set changes.type to the target chart type and provide SQL grouped appropriately. Do NOT use create_widget.`;
+        personaSupplement += `\n\n## Chart type change (CRITICAL)\nFor catalog/chart widgets (e.g. pull-through by branch, volume by branch), use **modify_registry_widget** with configOverrides.chartType (bar|line|pie|area) and the widget's stable id from CANVAS STATE (e.g. company-scorecard-pullthrough-by-branch__N). For cohi SQL widgets use **modify_widget** with changes.type. Do NOT use create_widget.`;
       }
 
       if (isAllTimeRequest(question, ...historyTexts)) {
         personaSupplement += `\n\n## All-time scope (CRITICAL)\nUser requested all-time / lifetime metrics. Set filterConfig.filterable to false and defaultPreset to null on new widgets. SQL must compute the full-range metric without relying on injected date filters.`;
+      }
+
+      if (
+        (canvasState?.totalItems ?? 0) > 0 &&
+        isAnalyticalOnlyRequest(question, ...historyTexts)
+      ) {
+        personaSupplement += `\n\n## Analytical question (CRITICAL)\nThe user is asking WHY or HOW — not requesting new widgets. Use query_data and/or explain in message with an empty or query-only actions array. Do NOT create_widget or create_dashboard.`;
       }
 
       if (
@@ -1763,6 +1783,28 @@ export async function runWorkbenchChatTurn(
             action.config.type = mapped;
           }
         }
+        if (
+          action.type === "modify_widget" &&
+          action.changes &&
+          typeof action.changes.type === "string"
+        ) {
+          const t = action.changes.type.toLowerCase().trim();
+          if (!VALID_VIZ_TYPES.has(t)) {
+            const mapped =
+              t === "chart" || t === "bar_chart" || t === "barchart"
+                ? "bar"
+                : t === "line_chart" || t === "linechart"
+                  ? "line"
+                : t === "pie_chart" || t === "piechart"
+                  ? "pie"
+                : t === "number" || t === "metric" || t === "metric-card"
+                  ? "kpi"
+                : t === "hbar" || t === "h_bar" || t === "horizontal"
+                  ? "horizontal_bar"
+                  : "bar";
+            action.changes.type = mapped;
+          }
+        }
       }
 
       reconcileWidgetActionPeriods(validActions, {
@@ -1777,6 +1819,34 @@ export async function runWorkbenchChatTurn(
               groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
             }
           : undefined,
+      });
+      augmentAllTimeStripPeriodOnlyActions(validActions, {
+        userQuestion: question,
+      });
+      augmentAllTimeCreateWidgetFromQuestion(validActions, {
+        userQuestion: question,
+        canvasState: canvasState
+          ? {
+              totalItems: canvasState.totalItems,
+              groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
+            }
+          : undefined,
+      });
+      augmentAllTimeKpiToGroup(validActions, {
+        userQuestion: question,
+        canvasState: canvasState
+          ? {
+              totalItems: canvasState.totalItems,
+              groups: canvasState.groups?.map((g) => ({ groupId: g.groupId })),
+            }
+          : undefined,
+      });
+      augmentAllTimeReconcileModifyGroupAddCohi(validActions, {
+        userQuestion: question,
+      });
+      stripBuildActionsForAnalyticalQuestion(validActions, {
+        userQuestion: question,
+        canvasTotalItems: canvasState?.totalItems,
       });
       if (canvasState) {
         const canvasRefs = {
@@ -1794,11 +1864,39 @@ export async function runWorkbenchChatTurn(
             title: w.title,
           })),
         };
+        stripRecreateOnRemoveOnly(validActions, question);
+        stripBuildActionsForChartTypeChange(validActions, question);
+        augmentChartTypeFromQuestion(validActions, {
+          userQuestion: question,
+          canvasState: canvasRefs,
+        });
+        augmentAddRegistryWidgetFromQuestion(validActions, {
+          userQuestion: question,
+          canvasState: canvasRefs,
+        });
         augmentGroupRemoveFromQuestion(validActions, {
           userQuestion: question,
           canvasState: canvasRefs,
         });
+        augmentRestoreWidgetFromQuestion(validActions, {
+          userQuestion: question,
+          canvasState: canvasRefs,
+        });
+        rewriteGroupedDeleteWidgetActions(validActions, canvasRefs);
         normalizeWorkbenchWidgetIds(validActions, canvasRefs);
+
+        if (process.env.WORKBENCH_RECONCILE_DEBUG === "1") {
+          console.log(
+            `[CohiWorkbench] reconcile pipeline question=${JSON.stringify(question?.slice(0, 80))} actions=${JSON.stringify(
+              validActions.map((a: { type?: string; groupId?: string; widgetId?: string; configOverrides?: unknown }) => ({
+                type: a.type,
+                groupId: a.groupId,
+                widgetId: a.widgetId,
+                chartType: (a.configOverrides as { chartType?: string })?.chartType,
+              })),
+            )}`,
+          );
+        }
       }
 
       // Log modify_widget actions for debugging (instanceId, sql provided?, changes keys)
@@ -2177,6 +2275,30 @@ export async function runWorkbenchChatTurn(
           );
           if (secondActions.length > 0) {
             validActions = [...validActions, ...secondActions];
+            reconcileWidgetActionPeriods(validActions, {
+              requestedPeriod,
+              userQuestion: question,
+            });
+            augmentPeriodSwitchActions(validActions, {
+              userQuestion: question,
+              canvasState: canvasState
+                ? {
+                    totalItems: canvasState.totalItems,
+                    groups: canvasState.groups?.map((g) => ({
+                      groupId: g.groupId,
+                    })),
+                  }
+                : undefined,
+            });
+            stripBuildActionsForAnalyticalQuestion(validActions, {
+              userQuestion: question,
+              canvasTotalItems: canvasState?.totalItems,
+            });
+            const periodMsg = periodSwitchAssistantMessage(
+              validActions,
+              question,
+            );
+            if (periodMsg) finalMessage = periodMsg;
           }
 
           console.log(
@@ -2188,6 +2310,19 @@ export async function runWorkbenchChatTurn(
           finalMessage +=
             "\n\n(I ran the queries but encountered an issue formulating the final answer. The query results are attached.)";
         }
+      }
+
+      stripBuildActionsForAnalyticalQuestion(validActions, {
+        userQuestion: question,
+        canvasTotalItems: canvasState?.totalItems,
+      });
+
+      const periodOnlyMessage = periodSwitchAssistantMessage(
+        validActions,
+        question,
+      );
+      if (periodOnlyMessage) {
+        finalMessage = periodOnlyMessage;
       }
 
       const response = {
