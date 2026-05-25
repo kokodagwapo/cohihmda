@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { reconcileActionsForEval, runAgencyEval } from "./runAgencyEval.js";
+import { expectChartType } from "./assertions.js";
 
 describe("runAgencyEval", () => {
   it("reconcile injects remove for funded volume", () => {
@@ -39,13 +40,7 @@ describe("runAgencyEval", () => {
       },
       [],
     );
-    expect(
-      actions.some(
-        (a) =>
-          a.type === "modify_registry_widget" &&
-          a.configOverrides?.chartType === "line",
-      ),
-    ).toBe(true);
+    expect(() => expectChartType(actions, "line")).not.toThrow();
   });
 
   it("runAgencyEval passes anchor suite", () => {
