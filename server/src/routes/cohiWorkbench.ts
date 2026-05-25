@@ -1442,6 +1442,53 @@ When replacing a catalog widget with a SQL-backed widget, use the tenant schema 
  * Returns the available agent personas for the workbench panel UI.
  */
 /**
+ * POST /api/cohi-chat/workbench/test-seed
+ * Inserts a deterministic canvas for e2e (local only when WORKBENCH_TEST_SEED_ENABLED=1).
+ */
+router.post(
+  "/test-seed",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    if (process.env.WORKBENCH_TEST_SEED_ENABLED !== "1") {
+      return res.status(404).json({ error: "Test seed disabled" });
+    }
+    try {
+      const fixture =
+        typeof (req.body as { fixture?: string })?.fixture === "string"
+          ? (req.body as { fixture: string }).fixture
+          : "board-ready-min";
+      if (fixture !== "board-ready-min") {
+        return res.status(400).json({ error: `Unknown fixture: ${fixture}` });
+      }
+      const { buildBoardReadyMinContent } = await import(
+        "../services/workbench/boardReadyMinFixture.js"
+      );
+      const content = buildBoardReadyMinContent();
+      const { tenantPool } = getTenantContext(req);
+      const result = await tenantPool.query(
+        `INSERT INTO public.workbench_canvases
+           (user_id, title, layout_version, content, visibility, created_by_role, shared_with_user_ids)
+         VALUES ($1, $2, $3, $4, 'private', $5, '{}')
+         RETURNING id`,
+        [
+          req.userId,
+          "E2E Board Ready Min",
+          "freeform-v1",
+          JSON.stringify(content),
+          req.userRole || "user",
+        ],
+      );
+      res.json({ canvasId: result.rows[0].id, fixture });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[CohiWorkbench] test-seed error:", message);
+      res.status(500).json({ error: message });
+    }
+  },
+);
+
+/**
  * GET /api/cohi-chat/workbench/reconcile-trace?n=10
  * Last reconcile pipeline snapshots (local/e2e only when WORKBENCH_RECONCILE_DEBUG=1).
  */
