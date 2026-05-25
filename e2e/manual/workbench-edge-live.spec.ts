@@ -72,7 +72,7 @@ test.describe("Workbench edge live", () => {
     await forceUnifiedChat(page);
   });
 
-  test("E01 move widget to another group via chat", async ({ page }) => {
+  test("@COHI-398 E01 move widget to another group via chat", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(
@@ -89,7 +89,7 @@ test.describe("Workbench edge live", () => {
     });
   });
 
-  test("E02 lock group filters toolbar", async ({ page }) => {
+  test("@COHI-398 E02 lock group filters toolbar", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const lockBtn = page
@@ -116,7 +116,7 @@ test.describe("Workbench edge live", () => {
     });
   });
 
-  test("E03 export menu on cohi viz footer", async ({ page }) => {
+  test("@COHI-398 E03 export menu on cohi viz footer", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(
@@ -137,7 +137,7 @@ test.describe("Workbench edge live", () => {
     });
   });
 
-  test("E04 conversation sidebar overflow menu", async ({ page }) => {
+  test("@COHI-398 E04 conversation sidebar overflow menu", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await skipIfLoggedOut(page);
     await dismissBlockingOverlays(page);
@@ -164,7 +164,7 @@ test.describe("Workbench edge live", () => {
     });
   });
 
-  test("E05 maximize widget then restore", async ({ page }) => {
+  test("@COHI-398 E05 maximize widget then restore", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const group = page.locator("#workbench-canvas-root .group\\/widgetgroup").first();
@@ -184,3 +184,4 @@ test.describe("Workbench edge live", () => {
     });
   });
 });
+

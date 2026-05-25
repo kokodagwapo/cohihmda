@@ -11,7 +11,7 @@ async function isAnyVisible(candidates: Locator[]) {
 }
 
 test.describe("Workbench", () => {
-  test("@smoke loads my-dashboard and core canvas controls", async ({ userPage }) => {
+  test("@COHI-398 @smoke loads my-dashboard and core canvas controls", async ({ userPage }) => {
     // /my-dashboard (no canvas id) now redirects to the /workbench hub; accept either route.
     await userPage.goto("/my-dashboard", { waitUntil: "domcontentloaded" });
     await expect(userPage).toHaveURL(/\/(my-dashboard|workbench)/);
@@ -68,7 +68,7 @@ test.describe("Workbench", () => {
     await expect(saveDialogHeading).toBeHidden();
   });
 
-  test("enforces view-only mode for non-owner canvases when applicable", async ({ userPage }) => {
+  test("@COHI-398 enforces view-only mode for non-owner canvases when applicable", async ({ userPage }) => {
     await userPage.goto("/my-dashboard", { waitUntil: "domcontentloaded" });
     const readonlyBanner = userPage.getByTestId("workbench-readonly-banner");
     if (await readonlyBanner.isVisible().catch(() => false)) {
@@ -97,7 +97,7 @@ test.describe("Workbench", () => {
   ] as const;
 
   for (const [path, heading] of paths) {
-    test(`@smoke opens ${path}`, async ({ userPage }) => {
+    test(`@COHI-398 @smoke opens ${path}`, async ({ userPage }) => {
       await userPage.goto(path, { waitUntil: "domcontentloaded" });
       await expect(userPage).toHaveURL(new RegExp(path.replace(/\//g, "\\/")));
       const hasHeading = await userPage.getByRole("heading", { name: heading }).isVisible().catch(() => false);
@@ -109,3 +109,5 @@ test.describe("Workbench", () => {
     });
   }
 });
+
+

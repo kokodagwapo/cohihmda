@@ -104,7 +104,7 @@ test.describe("More live workbench @manual-live", () => {
     await forceUnifiedChat(page);
   });
 
-  test("M01 suggested prompts on fresh workbench", async ({ page }) => {
+  test("@COHI-398 M01 suggested prompts on fresh workbench", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await skipIfLoggedOut(page);
     const suggestions = page.getByTestId("unified-chat-suggestions");
@@ -127,7 +127,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M02 workbench to Chat fork chip", async ({ page }) => {
+  test("@COHI-398 M02 workbench to Chat fork chip", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Show me one MTD funded units number.");
@@ -158,7 +158,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M03 share dialog opens", async ({ page }) => {
+  test("@COHI-398 M03 share dialog opens", async ({ page }) => {
     await page.setViewportSize({ width: 834, height: 1194 });
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
@@ -179,7 +179,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M04 edit widget shows Stop editing", async ({ page }) => {
+  test("@COHI-398 M04 edit widget shows Stop editing", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(
@@ -207,7 +207,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M05 maximize widget modal", async ({ page }) => {
+  test("@COHI-398 M05 maximize widget modal", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const canvas = page.locator("#workbench-canvas-root");
@@ -227,7 +227,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M06 remove funded volume via chat", async ({ page }) => {
+  test("@COHI-398 M06 remove funded volume via chat", async ({ page }) => {
     await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the funded volume widget from the dashboard.");
@@ -252,7 +252,7 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test("M07 period switch prior year", async ({ page }) => {
+  test("@COHI-398 M07 period switch prior year", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const { actionSummary } = await sendTurn(
@@ -268,7 +268,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M08 analytical question no spurious widgets", async ({ page }) => {
+  test("@COHI-398 M08 analytical question no spurious widgets", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const groupsBefore = (
@@ -292,7 +292,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M09 rename dashboard group section title", async ({ page }) => {
+  test("@COHI-398 M09 rename dashboard group section title", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, 'Rename the dashboard group title to "Board KPIs".');
@@ -306,7 +306,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M10 switch to Research chat type", async ({ page }) => {
+  test("@COHI-398 M10 switch to Research chat type", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await skipIfLoggedOut(page);
     await selectUnifiedChatType(page, "Research");
@@ -328,7 +328,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M11 PowerPoint editor opens", async ({ page }) => {
+  test("@COHI-398 M11 PowerPoint editor opens", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
@@ -364,7 +364,7 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test("M12 pull-through remove and re-add regression", async ({ page }) => {
+  test("@COHI-398 M12 pull-through remove and re-add regression", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the pull-through rate widget from the dashboard.");
@@ -382,7 +382,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M13 insight builder type switch", async ({ page }) => {
+  test("@COHI-398 M13 insight builder type switch", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "What KPIs matter for pipeline conversion?");
@@ -412,7 +412,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M14 cohi chat panel in split insights", async ({ page }) => {
+  test("@COHI-398 M14 cohi chat panel in split insights", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await gotoWithUnifiedChatShell(page, "/insights", { timeout: 60_000 });
     await skipIfLoggedOut(page);
@@ -429,7 +429,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M16 remove funded units registry widget", async ({ page }) => {
+  test("@COHI-398 M16 remove funded units registry widget", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the funded units widget from the dashboard.");
@@ -443,7 +443,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M17 chart type line via chat", async ({ page }) => {
+  test("@COHI-398 M17 chart type line via chat", async ({ page }) => {
     await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Change pull-through by branch chart to a line chart.");
@@ -482,7 +482,7 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test("M18 duplicate widget toolbar", async ({ page }) => {
+  test("@COHI-398 M18 duplicate widget toolbar", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const group = page.locator("#workbench-canvas-root .group\\/widgetgroup").first();
@@ -501,7 +501,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M19 workbench chat type card visible on landing", async ({ page }) => {
+  test("@COHI-398 M19 workbench chat type card visible on landing", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     await skipIfLoggedOut(page);
     const card = page.getByText("Workbench", { exact: true }).first();
@@ -514,7 +514,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M20 set_widget_title via chat on pull-through", async ({ page }) => {
+  test("@COHI-398 M20 set_widget_title via chat on pull-through", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, 'Rename pull-through widget title to "PT %".');
@@ -528,7 +528,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M21 all-time KPI period via chat", async ({ page }) => {
+  test("@COHI-398 M21 all-time KPI period via chat", async ({ page }) => {
     await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Show funded volume as an all-time KPI.");
@@ -559,7 +559,7 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test("M22 remove pull-through only", async ({ page }) => {
+  test("@COHI-398 M22 remove pull-through only", async ({ page }) => {
     await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the pull-through rate widget from the dashboard.");
@@ -587,7 +587,7 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test("M23 WAC KPI on board-ready canvas", async ({ page }) => {
+  test("@COHI-398 M23 WAC KPI on board-ready canvas", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const { actionSummary } = await sendTurn(
@@ -625,7 +625,7 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test("M24 switch chart to bar via chat", async ({ page }) => {
+  test("@COHI-398 M24 switch chart to bar via chat", async ({ page }) => {
     await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Change pull-through by branch chart to a bar chart.");
@@ -664,7 +664,7 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test("M25 readonly share link banner", async ({ page }) => {
+  test("@COHI-398 M25 readonly share link banner", async ({ page }) => {
     await record(page, {
       id: "M25",
       name: "Share dialog (duplicate)",
@@ -673,7 +673,7 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 
-  test("M15 widget group collapse after resize", async ({ page }) => {
+  test("@COHI-398 M15 widget group collapse after resize", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await page.setViewportSize({ width: 1050, height: 800 });
@@ -691,3 +691,4 @@ test.describe("More live workbench @manual-live", () => {
     });
   });
 });
+

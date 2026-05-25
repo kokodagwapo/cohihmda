@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
 // --- Chat shell (no LLM) ---
 
 for (const vp of STRESS_VIEWPORTS) {
-  test(`RC-chat-composer @ ${vp.id} (${vp.width})`, async ({ page }) => {
+  test(`@COHI-398 RC-chat-composer @ ${vp.id} (${vp.width})`, async ({ page }) => {
     await page.setViewportSize({ width: vp.width, height: vp.height });
     await gotoWithUnifiedChatShell(page, "/my-dashboard/new", { timeout: 60_000 });
     await dismissBlockingOverlays(page);
@@ -54,7 +54,7 @@ for (const vp of STRESS_VIEWPORTS) {
   });
 }
 
-test("RC-insights-split-handle visible on desktop split", async ({ page }) => {
+test("@COHI-398 RC-insights-split-handle visible on desktop split", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/insights", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -67,13 +67,13 @@ test("RC-insights-split-handle visible on desktop split", async ({ page }) => {
   await assertNoPageHorizontalOverflow(page);
 });
 
-test("RC-insights-split-handle hidden on mobile full", async ({ page }) => {
+test("@COHI-398 RC-insights-split-handle hidden on mobile full", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoWithUnifiedChatShell(page, "/insights", { timeout: 60_000 });
   await expect(page.getByTestId("chat-split-resize-handle")).toBeHidden();
 });
 
-test("RC-insights-layout-modes @ phone hides Split", async ({ page }) => {
+test("@COHI-398 RC-insights-layout-modes @ phone hides Split", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/insights", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -82,7 +82,7 @@ test("RC-insights-layout-modes @ phone hides Split", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Split" })).toHaveCount(0);
 });
 
-test("RC-insights-resize-split-to-compact keeps composer", async ({ page }) => {
+test("@COHI-398 RC-insights-resize-split-to-compact keeps composer", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/insights", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -103,7 +103,7 @@ async function skipIfLoggedOut(page: import("@playwright/test").Page) {
   if (login) test.skip(true, "auth session expired — run npx tsx e2e/manual-auth-setup.ts");
 }
 
-test("RC-workbench-hub-mobile-menu @ 390", async ({ page }) => {
+test("@COHI-398 RC-workbench-hub-mobile-menu @ 390", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/workbench/favorites", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -123,7 +123,7 @@ test("RC-workbench-hub-mobile-menu @ 390", async ({ page }) => {
   await expect(page.getByRole("menuitem", { name: "Dashboard" })).toBeVisible();
 });
 
-test("RC-workbench-hub-create-label @ 1440", async ({ page }) => {
+test("@COHI-398 RC-workbench-hub-create-label @ 1440", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/workbench/favorites", { waitUntil: "domcontentloaded" });
   await dismissBlockingOverlays(page);
@@ -154,7 +154,7 @@ test.describe("RC-canvas controls (seeded once)", () => {
   });
 
   for (const vp of CANVAS_TOOLBAR_VIEWPORTS) {
-    test(`RC-canvas-toolbar @ ${vp.id}`, async () => {
+    test(`@COHI-398 RC-canvas-toolbar @ ${vp.id}`, async () => {
       await canvasPage.setViewportSize({ width: vp.width, height: vp.height });
       await dismissBlockingOverlays(canvasPage);
 
@@ -197,7 +197,7 @@ test.describe("RC-canvas controls (seeded once)", () => {
     });
   }
 
-  test("RC-cohi-dock-chip reachable after resize", async () => {
+  test("@COHI-398 RC-cohi-dock-chip reachable after resize", async () => {
     for (const w of [390, 834, 1440] as const) {
       await canvasPage.setViewportSize({ width: w, height: 844 });
       const chip = canvasPage.getByTestId("workbench-cohi-toggle");
@@ -207,7 +207,7 @@ test.describe("RC-canvas controls (seeded once)", () => {
     }
   });
 
-  test("RC-widget-collapse-expand @ 834", async () => {
+  test("@COHI-398 RC-widget-collapse-expand @ 834", async () => {
     await canvasPage.setViewportSize({ width: 834, height: 1194 });
     const toggle = widgetGroupCollapseToggle(canvasPage);
     await expect(toggle).toBeVisible({ timeout: 20_000 });
@@ -220,7 +220,7 @@ test.describe("RC-canvas controls (seeded once)", () => {
     await expect(toggle).toHaveAttribute("aria-label", "Collapse group");
   });
 
-  test("RC-chart-type-footer @ 768 scrollable", async () => {
+  test("@COHI-398 RC-chart-type-footer @ 768 scrollable", async () => {
     await canvasPage.setViewportSize({ width: 768, height: 1024 });
     const barBtn = canvasPage.getByRole("button", { name: "Bar", exact: true }).first();
     if (!(await barBtn.isVisible().catch(() => false))) {
@@ -235,7 +235,7 @@ test.describe("RC-canvas controls (seeded once)", () => {
     }
   });
 
-  test("RC-widget-hover-actions @ 1280", async () => {
+  test("@COHI-398 RC-widget-hover-actions @ 1280", async () => {
     await canvasPage.setViewportSize({ width: 1280, height: 800 });
     const canvas = canvasPage.locator("#workbench-canvas-root");
     const widgetCard = canvas.locator(".group\\/widgetgroup, [class*='group/widget']").first();
@@ -261,7 +261,7 @@ test.describe("RC-canvas controls (seeded once)", () => {
     }
   });
 
-  test("RC-resize-1440-to-tablet-toolbar-persists", async () => {
+  test("@COHI-398 RC-resize-1440-to-tablet-toolbar-persists", async () => {
     await canvasPage.setViewportSize({ width: 1440, height: 900 });
     await assertControlReachable(
       canvasPage,
@@ -285,7 +285,7 @@ test.describe("RC-canvas controls (seeded once)", () => {
     );
   });
 
-  test("RC-filter-expand-toggle @ 834", async () => {
+  test("@COHI-398 RC-filter-expand-toggle @ 834", async () => {
     await canvasPage.setViewportSize({ width: 834, height: 1194 });
     const expandFilters = canvasPage.getByTitle("Expand filters").first();
     if (!(await expandFilters.isVisible().catch(() => false))) {
@@ -298,3 +298,4 @@ test.describe("RC-canvas controls (seeded once)", () => {
     await expect(collapseFilters).toBeVisible();
   });
 });
+

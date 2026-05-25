@@ -2,7 +2,7 @@ import { test, expect } from "./fixtures";
 import { NavigationPO } from "./page-objects/navigation.po";
 
 test.describe("Global Navigation", () => {
-  test("@smoke desktop nav renders top-level items and dropdowns", async ({ userPage }) => {
+  test("@COHI-398 @smoke desktop nav renders top-level items and dropdowns", async ({ userPage }) => {
     const nav = new NavigationPO(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("button", { name: "Dashboards menu" })).toBeVisible();
@@ -15,7 +15,7 @@ test.describe("Global Navigation", () => {
     }
   });
 
-  test("@smoke user menu contains settings and logout", async ({ userPage }) => {
+  test("@COHI-398 @smoke user menu contains settings and logout", async ({ userPage }) => {
     const nav = new NavigationPO(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     const hasUserMenuTrigger = (await userPage.getByTestId("user-menu-trigger").count()) > 0;
@@ -29,7 +29,7 @@ test.describe("Global Navigation", () => {
     await expect(menuActions.first()).toBeVisible();
   });
 
-  test("mobile menu toggle works on small viewport", async ({ userPage }) => {
+  test("@COHI-398 mobile menu toggle works on small viewport", async ({ userPage }) => {
     const nav = new NavigationPO(userPage);
     await userPage.setViewportSize({ width: 390, height: 844 });
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
@@ -37,3 +37,5 @@ test.describe("Global Navigation", () => {
     test.skip(!opened, "Mobile menu trigger is not rendered in this viewport/layout.");
   });
 });
+
+

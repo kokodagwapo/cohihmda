@@ -43,13 +43,13 @@ async function deleteScheduleIfPresent(userPage: Page, scheduleName: string): Pr
 
 test.describe("@critical @COHI-400 Distributions workflows", () => {
   test.describe.configure({ mode: "serial" });
-  test("@smoke distributions page renders with schedule controls", async ({ userPage }) => {
+  test("@COHI-398 @smoke distributions page renders with schedule controls", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("heading", { name: "Communications Center" })).toBeVisible();
     await expect(userPage.getByRole("button", { name: /New schedule/i })).toBeVisible();
   });
 
-  test("multi-day weekday selection shows preview runs", async ({ userPage }) => {
+  test("@COHI-398 multi-day weekday selection shows preview runs", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await userPage.getByRole("button", { name: /New schedule|Create schedule/i }).first().click();
     await expect(
@@ -71,7 +71,7 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
     });
   });
 
-  test('handles monthly day picker and preview text', async ({ userPage }) => {
+  test('@COHI-398 handles monthly day picker and preview text', async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await userPage.getByRole("button", { name: /New schedule|Create schedule/i }).first().click();
     await expect(
@@ -98,7 +98,7 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
     });
   });
 
-  test("schedule create and edit dialog flow", async ({ userPage }) => {
+  test("@COHI-398 schedule create and edit dialog flow", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await userPage.getByRole("button", { name: /New schedule|Create schedule/i }).first().click();
 
@@ -119,7 +119,7 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
     ).toBeVisible();
   });
 
-  test("send-now and history actions are wired for existing schedules", async ({
+  test("@COHI-398 send-now and history actions are wired for existing schedules", async ({
     adminPage,
   }) => {
     const fixtureName = `E2E Schedule Action ${Date.now()}`;
@@ -142,7 +142,7 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
     }
   });
 
-  test("delete action prompts before removing schedule", async ({ adminPage }) => {
+  test("@COHI-398 delete action prompts before removing schedule", async ({ adminPage }) => {
     const fixtureName = `E2E Schedule Delete ${Date.now()}`;
     await createScheduleFixture(adminPage, fixtureName);
 
@@ -156,3 +156,5 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
     await deleteScheduleIfPresent(adminPage, fixtureName);
   });
 });
+
+

@@ -36,7 +36,7 @@ test.describe("Workbench chat follow-up in same conversation", () => {
     });
   });
 
-  test("@critical reuses conversationId on second workbench turn after split", async ({
+  test("@COHI-398 @critical reuses conversationId on second workbench turn after split", async ({
     userPage,
   }) => {
     const streamPosts: Array<{ conversationId?: string; message?: string }> = [];
@@ -112,3 +112,5 @@ test.describe("Workbench chat follow-up in same conversation", () => {
     ).toBeVisible({ timeout: 20_000 });
   });
 });
+
+

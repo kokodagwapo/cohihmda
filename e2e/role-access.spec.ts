@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures";
 
 test.describe("@critical Consolidated role access matrix", () => {
-  test("tenant_admin can access admin area", async ({ adminPage }) => {
+  test("@COHI-398 tenant_admin can access admin area", async ({ adminPage }) => {
     await adminPage.goto("/admin", { waitUntil: "domcontentloaded" });
     await expect(adminPage).toHaveURL(/\/admin/);
     await expect(
@@ -9,7 +9,7 @@ test.describe("@critical Consolidated role access matrix", () => {
     ).toBeVisible();
   });
 
-  test("tenant_user can access insights but is blocked from admin", async ({
+  test("@COHI-398 tenant_user can access insights but is blocked from admin", async ({
     userPage,
   }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
@@ -19,7 +19,7 @@ test.describe("@critical Consolidated role access matrix", () => {
     await expect(userPage.getByText(/Access Denied/i)).toBeVisible();
   });
 
-  test("tenant_canvas_only_user is constrained to canvas-only experience", async ({
+  test("@COHI-398 tenant_canvas_only_user is constrained to canvas-only experience", async ({
     canvasOnlyPage,
   }) => {
     // Canvas-only users are redirected off full-app routes into the allowed shell:
@@ -40,3 +40,4 @@ test.describe("@critical Consolidated role access matrix", () => {
     await expect(canvasOnlyPage.getByRole("heading", { name: /Access Denied/i })).toBeVisible();
   });
 });
+

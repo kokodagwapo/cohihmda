@@ -90,7 +90,7 @@ test.describe("Unique live workbench @manual-live", () => {
     if (login) test.skip(true, "auth expired — npx tsx e2e/manual-auth-setup.ts");
   }
 
-  test("U01 rename widget title via chat", async ({ page }) => {
+  test("@COHI-398 U01 rename widget title via chat", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, 'Rename the pull-through rate widget title to "PT Rate".');
@@ -104,7 +104,7 @@ test.describe("Unique live workbench @manual-live", () => {
     });
   });
 
-  test("U02 switch chart to line via chat", async ({ page }) => {
+  test("@COHI-398 U02 switch chart to line via chat", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Change pull-through by branch chart to a line chart.");
@@ -138,7 +138,7 @@ test.describe("Unique live workbench @manual-live", () => {
     );
   });
 
-  test("U03 collapse group then expand manually", async ({ page }) => {
+  test("@COHI-398 U03 collapse group then expand manually", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     const toggle = widgetGroupCollapseToggle(page);
     await expect(toggle).toBeVisible({ timeout: 20_000 });
@@ -153,7 +153,7 @@ test.describe("Unique live workbench @manual-live", () => {
     });
   });
 
-  test("U04 duplicate funded units via toolbar", async ({ page }) => {
+  test("@COHI-398 U04 duplicate funded units via toolbar", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const group = page.locator("#workbench-canvas-root .group\\/widgetgroup").first();
@@ -172,7 +172,7 @@ test.describe("Unique live workbench @manual-live", () => {
     });
   });
 
-  test("U05 executive vs board-ready wording", async ({ page }) => {
+  test("@COHI-398 U05 executive vs board-ready wording", async ({ page }) => {
     await openFreshWorkbenchChat(page);
     const { main } = await sendTurn(
       page,
@@ -187,7 +187,7 @@ test.describe("Unique live workbench @manual-live", () => {
     });
   });
 
-  test("U06 resize while waiting — composer stays enabled", async ({ page }) => {
+  test("@COHI-398 U06 resize while waiting — composer stays enabled", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openFreshWorkbenchChat(page);
     const input = unifiedChatMessageInput(page);
@@ -206,7 +206,7 @@ test.describe("Unique live workbench @manual-live", () => {
     });
   });
 
-  test("U07 period switch L6M", async ({ page }) => {
+  test("@COHI-398 U07 period switch L6M", async ({ page }) => {
     await seedDeterministicBoard(page);
     await sendTurn(page, "Switch the dashboard to last 6 months.");
     const footers = page.locator("p.text-violet-600, p.text-violet-400");
@@ -261,7 +261,7 @@ test.describe("Unique live workbench @manual-live", () => {
     );
   });
 
-  test("U08 remove funded volume only", async ({ page }) => {
+  test("@COHI-398 U08 remove funded volume only", async ({ page }) => {
     await seedDeterministicBoard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the funded volume widget from the dashboard.");
@@ -286,7 +286,7 @@ test.describe("Unique live workbench @manual-live", () => {
     );
   });
 
-  test("U09 pull-through remove and re-add", async ({ page }) => {
+  test("@COHI-398 U09 pull-through remove and re-add", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Remove the pull-through rate widget from the dashboard.");
@@ -303,7 +303,7 @@ test.describe("Unique live workbench @manual-live", () => {
     });
   });
 
-  test("U10 duplicate second widget via toolbar", async ({ page }) => {
+  test("@COHI-398 U10 duplicate second widget via toolbar", async ({ page }) => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     const group = page.locator("#workbench-canvas-root .group\\/widgetgroup").first();
@@ -332,3 +332,4 @@ test.describe("Unique live workbench @manual-live", () => {
     });
   });
 });
+

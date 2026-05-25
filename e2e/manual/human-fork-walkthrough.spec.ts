@@ -27,7 +27,7 @@ test.describe("Human fork walkthrough @manual-live", () => {
     await forceUnifiedChat(page);
   });
 
-  test("tenant admin can switch Workbench → Chat and fork UX", async ({ page }) => {
+  test("@COHI-398 tenant admin can switch Workbench → Chat and fork UX", async ({ page }) => {
     const log: string[] = [];
     const note = (s: string) => {
       log.push(s);
@@ -97,3 +97,4 @@ test.describe("Human fork walkthrough @manual-live", () => {
     );
   });
 });
+

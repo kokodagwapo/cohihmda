@@ -95,7 +95,7 @@ test.describe("Unified chat workbench modify_group", () => {
     });
   });
 
-  test("@critical removes a group widget via modify_group remove", async ({ userPage }) => {
+  test("@COHI-398 @critical removes a group widget via modify_group remove", async ({ userPage }) => {
     await gotoWithUnifiedChatShell(userPage, "/my-dashboard/new");
     await selectUnifiedChatType(userPage, "Workbench");
 
@@ -117,3 +117,5 @@ test.describe("Unified chat workbench modify_group", () => {
     await expect(userPage.getByText("Funded Volume", { exact: true })).toBeVisible();
   });
 });
+
+

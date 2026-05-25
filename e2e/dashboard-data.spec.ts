@@ -65,7 +65,7 @@ async function expectInsightsSections(page: Page): Promise<void> {
 }
 
 test.describe("@regression Dashboard data integrity", () => {
-  test("insights dashboard loads API-backed insights and leaderboard data", async ({ userPage }) => {
+  test("@COHI-398 insights dashboard loads API-backed insights and leaderboard data", async ({ userPage }) => {
     // Use optional waits: the leaderboard request is gated on tenant/channel
     // selection and can be slow or skipped entirely in some environments. We
     // still require the insights API to respond (that's the primary contract),
@@ -134,7 +134,7 @@ test.describe("@regression Dashboard data integrity", () => {
     }
   });
 
-  test("fallout forecast page receives structured top-tiering API data", async ({ userPage }) => {
+  test("@COHI-398 fallout forecast page receives structured top-tiering API data", async ({ userPage }) => {
     const falloutDataResponsePromise = waitForApi(
       userPage,
       "fallout data API",
@@ -167,7 +167,7 @@ test.describe("@regression Dashboard data integrity", () => {
     await expect(userPage.locator("button, [role='button']").first()).toBeVisible();
   });
 
-  test("pricing dashboard loads KPI/report/detail data contracts", async ({ userPage }) => {
+  test("@COHI-398 pricing dashboard loads KPI/report/detail data contracts", async ({ userPage }) => {
     const kpisResponsePromise = waitForApi(
       userPage,
       "pricing kpis API",
@@ -242,4 +242,5 @@ test.describe("@regression Dashboard data integrity", () => {
     }
   });
 });
+
 

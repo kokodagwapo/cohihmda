@@ -55,7 +55,7 @@ const PROBES: Probe[] = [
     name: "Executive overview",
     prompt: "Give me an executive overview.",
     evaluate: ({ mainText, canvasText }) => ({
-      verdict: /Funded|widget|dashboard/i.test(`${mainText} ${canvasText}`)
+      verdict: /Funded|widget|dashboard/i.test(`@COHI-398 ${mainText} ${canvasText}`)
         ? "pass"
         : "surprise",
       note: "Executive overview response",
@@ -68,7 +68,7 @@ const PROBES: Probe[] = [
     seed: "Build a minimal dashboard: funded units and funded volume for this month",
     prompt: "Change the funded volume chart to a bar chart.",
     evaluate: ({ mainText, canvasText }) => ({
-      verdict: /bar|Updated|modify/i.test(`${mainText} ${canvasText}`)
+      verdict: /bar|Updated|modify/i.test(`@COHI-398 ${mainText} ${canvasText}`)
         ? "pass"
         : /Wrong widget|No changes applied/i.test(mainText)
           ? "fail"
@@ -118,7 +118,7 @@ test.describe("Workbench explore batch 3 @explore-live", () => {
     fs.writeFileSync(LOG_PATH, "");
   });
 
-  test("batch 3 UX probes", async ({ userPage }) => {
+  test("@COHI-398 batch 3 UX probes", async ({ userPage }) => {
     await forceUnifiedChat(userPage);
 
     for (const probe of PROBES) {
@@ -173,3 +173,4 @@ test.describe("Workbench explore batch 3 @explore-live", () => {
     }
   });
 });
+
