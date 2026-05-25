@@ -55,6 +55,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ChartShell } from '@/components/widgets/components/ChartShell';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import { useCohiWidgetData, type DateFilter, type DimensionFilter } from '@/hooks/useCohiWidgetData';
 import {
@@ -1416,7 +1417,7 @@ export function CohiWidgetRenderer({
 
   return (
     <div
-      className="h-full w-full flex flex-col bg-white dark:bg-slate-900 rounded-lg overflow-hidden"
+      className="group h-full w-full flex flex-col bg-white dark:bg-slate-900 rounded-lg overflow-hidden"
       data-widget-title={title}
       data-chart-type={chartType}
       data-filterable={filterInjectionEnabled === false ? "false" : "true"}
@@ -1616,72 +1617,81 @@ export function CohiWidgetRenderer({
       )}
 
       {/* Body – minimal padding so charts fill available space */}
-      {pullThroughQuality && (
-        <div className={cn(
-          "shrink-0 px-2 py-1 text-[10px] border-b",
-          pullThroughQuality.over100
-            ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800/40"
-            : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60",
-        )}>
-          {pullThroughQuality.minCompleted
-            ? `Pull-through safeguard: min completed_count >= ${pullThroughQuality.minCompleted}`
-            : allowLowSamplePullThrough
-              ? "Pull-through safeguard override active: low-sample segments included by explicit request"
-              : "Pull-through safeguard: no minimum denominator detected"}
-          {!pullThroughQuality.hasAuditCounts ? " · Warning: funded_count/completed_count columns not present in result." : ""}
-          {pullThroughQuality.over100 ? " · Data quality warning: rate > 100 detected." : ""}
-        </div>
-      )}
-      <div className="flex-1 min-h-0 overflow-hidden px-1 py-0.5">
-        {loading ? (
-          <div className="flex items-center justify-center h-full gap-1.5 text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-xs">Loading...</span>
+      <ChartShell
+        className="flex-1 min-h-0"
+        customTypeStrip={
+          compatibleTypes.length > 0 ? (
+            <div className="flex items-center gap-px px-1.5 py-1 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40 shrink-0 overflow-x-auto">
+              <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-0.5 shrink-0">
+                Type:
+              </span>
+              {compatibleTypes.map(({ type, label, Icon }) => (
+                <button
+                  key={type}
+                  type="button"
+                  disabled={!canChangeChartType}
+                  className={cn(
+                    'h-5 px-1.5 rounded text-[9px] font-medium whitespace-nowrap canvas-interactive transition-colors flex items-center gap-0.5 shrink-0',
+                    chartType === type
+                      ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
+                      : 'text-slate-400 dark:text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 hover:text-slate-600 dark:hover:text-slate-300',
+                    !canChangeChartType && 'opacity-50 cursor-not-allowed',
+                  )}
+                  onClick={() => setChartType(type)}
+                  title={label}
+                >
+                  <Icon className="w-2.5 h-2.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : undefined
+        }
+        footer={
+          explanation ? (
+            <div className="px-2 py-0.5 border-t border-slate-100 dark:border-slate-800 opacity-0 group-hover:opacity-100 transition-opacity">
+              <p className="text-[9px] text-slate-400 dark:text-slate-500 line-clamp-1 leading-tight" title={explanation}>
+                {explanation}
+              </p>
+            </div>
+          ) : undefined
+        }
+      >
+        {pullThroughQuality && (
+          <div className={cn(
+            "shrink-0 px-2 py-1 text-[10px] border-b",
+            pullThroughQuality.over100
+              ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800/40"
+              : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60",
+          )}>
+            {pullThroughQuality.minCompleted
+              ? `Pull-through safeguard: min completed_count >= ${pullThroughQuality.minCompleted}`
+              : allowLowSamplePullThrough
+                ? "Pull-through safeguard override active: low-sample segments included by explicit request"
+                : "Pull-through safeguard: no minimum denominator detected"}
+            {!pullThroughQuality.hasAuditCounts ? " · Warning: funded_count/completed_count columns not present in result." : ""}
+            {pullThroughQuality.over100 ? " · Data quality warning: rate > 100 detected." : ""}
           </div>
-        ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full gap-1.5 text-red-500">
-            <AlertCircle className="h-4 w-4" />
-            <p className="text-[10px] text-center max-w-[200px]">{error}</p>
-            <Button variant="outline" size="sm" onClick={refetch} className="text-[10px] h-6 canvas-interactive">
-              Retry
-            </Button>
-          </div>
-        ) : (
-          renderChart(effectiveConfig, data || [], width, height)
         )}
-      </div>
-
-      {/* Chart type switcher – compact row, only shows compatible types */}
-      <div className="flex items-center gap-px px-1.5 py-1 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40 shrink-0 overflow-x-auto">
-        {compatibleTypes.map(({ type, label, Icon }) => (
-          <button
-            key={type}
-            type="button"
-            disabled={!canChangeChartType}
-            className={cn(
-              'h-5 px-1.5 rounded text-[9px] font-medium whitespace-nowrap canvas-interactive transition-colors flex items-center gap-0.5 shrink-0',
-              chartType === type
-                ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
-                : 'text-slate-400 dark:text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 hover:text-slate-600 dark:hover:text-slate-300',
-              !canChangeChartType && 'opacity-50',
-            )}
-            onClick={() => setChartType(type)}
-            title={label}
-          >
-            <Icon className="w-2.5 h-2.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Explanation tooltip – only on hover to save space */}
-      {explanation && (
-        <div className="px-2 py-0.5 border-t border-slate-100 dark:border-slate-800 opacity-0 group-hover:opacity-100 transition-opacity">
-          <p className="text-[9px] text-slate-400 dark:text-slate-500 line-clamp-1 leading-tight" title={explanation}>
-            {explanation}
-          </p>
+        <div className="flex-1 min-h-0 overflow-hidden px-1 py-0.5 h-full">
+          {loading ? (
+            <div className="flex items-center justify-center h-full gap-1.5 text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-xs">Loading...</span>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center h-full gap-1.5 text-red-500">
+              <AlertCircle className="h-4 w-4" />
+              <p className="text-[10px] text-center max-w-[200px]">{error}</p>
+              <Button variant="outline" size="sm" onClick={refetch} className="text-[10px] h-6 canvas-interactive">
+                Retry
+              </Button>
+            </div>
+          ) : (
+            renderChart(effectiveConfig, data || [], width, height)
+          )}
         </div>
-      )}
+      </ChartShell>
     </div>
   );
 }

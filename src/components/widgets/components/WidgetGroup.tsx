@@ -102,9 +102,10 @@ import {
 } from "@/stores/widgetSectionStore";
 import { getWidgetDefinition } from "@/components/widgets/registry";
 import {
-  ChartTypeStrip,
-  type ChartCardChartType,
-} from "@/components/widgets/components/ChartTypeStrip";
+  ChartShell,
+  chartShellContentHeight,
+  normalizeChartCardType,
+} from "@/components/widgets/components/ChartShell";
 import type { ColumnDef } from "@/components/views/LoanDetailView";
 import { normalizeFilterState } from "@/utils/loanDetailFilters";
 import type { ColumnFilterState } from "@/utils/loanDetailFilters";
@@ -2542,9 +2543,7 @@ function GridCellRegistryWidget({
     canvasCanEdit &&
     !!onConfigChange &&
     definition.category === "chart";
-  const contentHeight = showChartTypeStrip
-    ? Math.max(80, height - CHART_TYPE_STRIP_H)
-    : height;
+  const contentHeight = chartShellContentHeight(height, showChartTypeStrip);
 
   const config = {
     ...definition?.config,
@@ -2572,28 +2571,24 @@ function GridCellRegistryWidget({
   };
 
   return (
-    <div className="h-full w-full flex flex-col min-h-0">
-      <div className="flex-1 min-h-0 min-w-0">
-        <Component
-          data={selectedData}
-          loading={loading}
-          error={error}
-          width={width}
-          height={contentHeight}
-          config={config}
-          onConfigChange={onConfigChange}
-        />
-      </div>
-      {showChartTypeStrip && (
-        <ChartTypeStrip
-          value={chartType}
-          disabled={!canvasCanEdit}
-          onChange={(type) =>
-            onConfigChange?.({ ...(configProp ?? {}), chartType: type })
-          }
-        />
-      )}
-    </div>
+    <ChartShell
+      showChartTypeStrip={showChartTypeStrip}
+      chartType={chartType}
+      chartTypeStripDisabled={!canvasCanEdit}
+      onChartTypeChange={(type) =>
+        onConfigChange?.({ ...(configProp ?? {}), chartType: type })
+      }
+    >
+      <Component
+        data={selectedData}
+        loading={loading}
+        error={error}
+        width={width}
+        height={contentHeight}
+        config={config}
+        onConfigChange={onConfigChange}
+      />
+    </ChartShell>
   );
 }
 
@@ -2653,18 +2648,29 @@ function GridCellCohiWidget({
 
 function MaximizeDialog({
   item,
+  maximizedIndex,
   open,
   onClose,
   dateFilter,
   dimensionFilters,
   filterSyncEnabled,
+  canvasCanEdit = true,
+  onVizTypeChange,
+  onRegistryConfigChange,
 }: {
   item: GroupWidgetItem | null;
+  maximizedIndex: number;
   open: boolean;
   onClose: () => void;
   dateFilter: DateFilter | null;
   dimensionFilters: DimensionFilter[] | null;
   filterSyncEnabled: boolean;
+  canvasCanEdit?: boolean;
+  onVizTypeChange?: (index: number, type: string) => void;
+  onRegistryConfigChange?: (
+    index: number,
+    config: Record<string, unknown>,
+  ) => void;
 }) {
   if (!item) return null;
 
@@ -2695,13 +2701,29 @@ function MaximizeDialog({
         </DialogHeader>
         <div className="flex-1 min-h-0 overflow-auto p-6">
           {item.kind === "registry" ? (
-            <MaximizeRegistryWidget defId={item.defId} />
+            <MaximizeRegistryWidget
+              defId={item.defId}
+              config={item.config}
+              canvasCanEdit={canvasCanEdit}
+              onConfigChange={
+                maximizedIndex >= 0 && onRegistryConfigChange
+                  ? (config) =>
+                      onRegistryConfigChange(maximizedIndex, config)
+                  : undefined
+              }
+            />
           ) : (
             <MaximizeCohiWidget
               item={item}
               dateFilter={dateFilter}
               dimensionFilters={dimensionFilters}
               filterSyncEnabled={filterSyncEnabled}
+              canEdit={canvasCanEdit}
+              onVizTypeChange={
+                maximizedIndex >= 0 && onVizTypeChange
+                  ? (type) => onVizTypeChange(maximizedIndex, type)
+                  : undefined
+              }
             />
           )}
         </div>
@@ -2710,7 +2732,17 @@ function MaximizeDialog({
   );
 }
 
-function MaximizeRegistryWidget({ defId }: { defId: string }) {
+function MaximizeRegistryWidget({
+  defId,
+  config: configProp,
+  canvasCanEdit = true,
+  onConfigChange,
+}: {
+  defId: string;
+  config?: Record<string, unknown>;
+  canvasCanEdit?: boolean;
+  onConfigChange?: (config: Record<string, unknown>) => void;
+}) {
   const definition = getWidgetDefinition(defId);
   if (!definition) return null;
 
@@ -2719,15 +2751,39 @@ function MaximizeRegistryWidget({ defId }: { defId: string }) {
     definition.dataSelector,
   );
 
+  const chartType = normalizeChartCardType(configProp?.chartType);
+  const showChartTypeStrip =
+    canvasCanEdit &&
+    !!onConfigChange &&
+    definition.category === "chart";
+  const contentHeight = chartShellContentHeight(700, showChartTypeStrip);
+
   const Component = definition.component;
+  const mergedConfig = {
+    ...definition.config,
+    ...configProp,
+    chartType,
+  };
+
   return (
-    <Component
-      data={data}
-      loading={loading}
-      error={error}
-      width={1200}
-      height={700}
-    />
+    <ChartShell
+      showChartTypeStrip={showChartTypeStrip}
+      chartType={chartType}
+      chartTypeStripDisabled={!canvasCanEdit}
+      onChartTypeChange={(type) =>
+        onConfigChange?.({ ...(configProp ?? {}), chartType: type })
+      }
+    >
+      <Component
+        data={data}
+        loading={loading}
+        error={error}
+        width={1200}
+        height={contentHeight}
+        config={mergedConfig}
+        onConfigChange={onConfigChange}
+      />
+    </ChartShell>
   );
 }
 
@@ -2736,11 +2792,15 @@ function MaximizeCohiWidget({
   dateFilter,
   dimensionFilters,
   filterSyncEnabled,
+  canEdit = true,
+  onVizTypeChange,
 }: {
   item: Extract<GroupWidgetItem, { kind: "cohi" }>;
   dateFilter: DateFilter | null;
   dimensionFilters: DimensionFilter[] | null;
   filterSyncEnabled: boolean;
+  canEdit?: boolean;
+  onVizTypeChange?: (type: string) => void;
 }) {
   const { selectedTenantId } = useTenantStore();
   return (
@@ -2757,6 +2817,8 @@ function MaximizeCohiWidget({
       filterSyncEnabled={filterSyncEnabled}
       initialFilters={item.savedFilters}
       allowLowSamplePullThrough={item.allowLowSamplePullThrough}
+      canEdit={canEdit}
+      onVizTypeChange={onVizTypeChange}
       hideTitle
     />
   );
@@ -6139,11 +6201,19 @@ export function WidgetGroup({
       {/* ═══════ Maximize dialog ═══════ */}
       <MaximizeDialog
         item={maximizedItem}
+        maximizedIndex={
+          maximizedItem != null
+            ? items.findIndex((it) => it === maximizedItem)
+            : -1
+        }
         open={maximizedItem !== null}
         onClose={() => setMaximizedItem(null)}
         dateFilter={groupDateFilter}
         dimensionFilters={groupDimensionFilters}
         filterSyncEnabled={effectiveFilterSync}
+        canvasCanEdit={canEdit}
+        onVizTypeChange={handleVizTypeChange}
+        onRegistryConfigChange={handleRegistryConfigChange}
       />
 
       {/* Actors table columns modal (workbench only) */}
