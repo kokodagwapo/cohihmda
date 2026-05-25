@@ -33,6 +33,7 @@ export function wrapCohiWidgetInGroup(
     filterable: true,
     dateColumn: "application_date",
   };
+  const filterable = filterConfig.filterable !== false;
   const initialFilters = filterConfigToInitialState(filterConfig);
   const groupSavedFilters = buildGroupSavedFiltersFromFilterConfig(filterConfig);
 
@@ -58,7 +59,7 @@ export function wrapCohiWidgetInGroup(
           savedFilters: initialFilters,
         },
       ],
-      filterSync: true,
+      filterSync: filterable,
       ...(groupSavedFilters ? { savedFilters: groupSavedFilters } : {}),
     },
     pos,

@@ -105,9 +105,7 @@ import {
   type CanvasBackground,
   type CanvasAnnotation,
   type WidgetFilterConfig,
-  type WidgetFilterState,
 } from "@/components/workbench/canvas/types";
-import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import { getWidgetDefinition } from "@/components/widgets/registry";
 import { WidgetDataProvider } from "@/components/widgets/data";
 import { WorkbenchCohiPanel } from "@/components/workbench/WorkbenchCohiPanel";
@@ -124,10 +122,6 @@ import type {
   ModifyGroupAction,
   GroupOperation,
   ModifyRegistryWidgetAction,
-  CreateDashboardAction,
-  DashboardGroupSpec,
-  StandaloneWidgetSpec,
-  ConvertToSqlWidgetAction,
   CanvasStateSnapshot,
 } from "@/types/widgetActions";
 import { applyWorkbenchWidgetActions } from "@/lib/workbench/applyWorkbenchWidgetActions";
@@ -135,13 +129,22 @@ import {
   applyModifyGroupOperations,
   applyModifyRegistryWidget,
   applyDeleteWidgetFromItems,
+  applyConvertToSqlWidget,
+  applyCreateDashboard,
+  applyCreateWidget,
+  applyCreateCanvas,
+  applyModifyWidget,
   type WidgetGroupPayloadShape,
+  type WidgetActionReducerOutcome,
 } from "@/lib/workbench/canvas/handlers/widgetActionDispatch";
-import { buildGroupSavedFiltersFromFilterConfig } from "@/lib/workbench/workbenchPresetMapping";
+import {
+  buildGroupSavedFiltersFromFilterConfig,
+  filterConfigToInitialState,
+} from "@/lib/workbench/workbenchPresetMapping";
+import { wrapCohiWidgetInGroup } from "@/lib/workbench/workbenchCohiLayoutUtils";
 import { registerWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
 import { buildCanvasStateSnapshot } from "@/lib/workbench/buildCanvasStateSnapshot";
 import { resolveWidgetGroupIndex } from "@/lib/workbench/resolveWidgetGroupIndex";
-import { resolveGroupWidgetItemIndex } from "@/lib/workbench/resolveGroupWidgetItem";
 import {
   loadWorkbenchDraftLayout,
   saveWorkbenchDraftLayout,
@@ -192,77 +195,25 @@ function compactFiltersForPersistence(
   return Object.keys(out).length > 0 ? (out as Partial<SectionFilters>) : undefined;
 }
 
-/**
- * Converts a WidgetFilterConfig returned by the AI into an initial WidgetFilterState.
- * The savedFilters drives the group's initial filter bar selection.
- */
-function filterConfigToInitialState(fc: WidgetFilterConfig | undefined): WidgetFilterState | undefined {
-  if (!fc || !fc.filterable) return undefined;
-  const state: WidgetFilterState = {};
-  if (fc.dateColumn && fc.dateColumn !== 'application_date') {
-    state.dateField = fc.dateColumn;
+type WorkbenchToastFn = (props: {
+  title: string;
+  description?: string;
+  variant?: "destructive";
+}) => void;
+
+function commitWidgetActionReducerOutcome(
+  outcome: WidgetActionReducerOutcome,
+  setItemsWithHistory: (
+    items: CanvasLayoutItem[] | ((prev: CanvasLayoutItem[]) => CanvasLayoutItem[]),
+  ) => void,
+  toast: WorkbenchToastFn,
+) {
+  if (outcome.result === "ok") {
+    setItemsWithHistory(outcome.items);
   }
-  if (fc.defaultPreset) {
-    try {
-      // Validate it's a known preset key before storing
-      computePresetDateRange(fc.defaultPreset as any);
-      state.preset = fc.defaultPreset;
-    } catch {
-      // Unknown preset — omit, widget will use its default
-    }
+  if (outcome.toast) {
+    toast(outcome.toast);
   }
-  return Object.keys(state).length > 0 ? state : undefined;
-}
-
-/**
- * Wraps a single AI-generated cohi widget in a lightweight widget_group so it
- * gets the full group filter bar (date, dimension, "add filter") instead of the
- * limited standalone toolbar.
- */
-function wrapCohiWidgetInGroup(
-  action: { sql: string; title: string; config: any; explanation?: string; filterConfig?: WidgetFilterConfig; allowLowSamplePullThrough?: boolean },
-  idx: string,
-  pos: { x: number; y: number; w: number; h: number },
-): CanvasLayoutItem {
-  const groupId = `cohi-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const widgetId = `cohi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
-  const filterConfig: WidgetFilterConfig = action.filterConfig ?? { filterable: true, dateColumn: 'application_date' };
-  const initialFilters = filterConfigToInitialState(filterConfig);
-
-  // Use filterConfig.dateColumn to initialise the group's own savedFilters so
-  // the filter bar starts on the right date column & preset.
-  const groupSavedFilters = filterConfig.filterable && filterConfig.dateColumn
-    ? {
-        dateField: filterConfig.dateColumn,
-        ...(filterConfig.defaultPreset ? { periodSelection: { preset: filterConfig.defaultPreset as any } } : {}),
-      }
-    : undefined;
-
-  return createLayoutItem(
-    groupId,
-    'widget_group',
-    {
-      type: 'widget_group' as const,
-      groupId,
-      title: action.title,
-      sectionType: 'company-scorecard' as SectionType,
-      widgetIds: [],
-      items: [{
-        kind: 'cohi' as const,
-        id: widgetId,
-        sql: action.sql,
-        title: action.title,
-        vizConfig: action.config,
-        explanation: action.explanation,
-        filterConfig,
-        allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
-        savedFilters: initialFilters,
-      }],
-      filterSync: true,
-      ...(groupSavedFilters ? { savedFilters: groupSavedFilters } : {}),
-    },
-    pos,
-  );
 }
 
 /**
@@ -1784,192 +1735,27 @@ export function WorkbenchCanvas({
           break;
         }
         case "convert_to_sql_widget": {
-          const convAction = action as ConvertToSqlWidgetAction;
-          const groupIdx = resolveWidgetGroupIndex(items, convAction.groupId);
-          if (groupIdx < 0) {
-            toast({
-              title: "Group not found",
-              description: `No dashboard group with id ${convAction.groupId}`,
-              variant: "destructive",
-            });
-            break;
-          }
-          const layoutItem = items[groupIdx];
-          const payload = layoutItem.payload as {
-            type: "widget_group";
-            groupId: string;
-            title: string;
-            sectionType: SectionType;
-            widgetIds: string[];
-            items?: GroupWidgetItem[];
-            widgetLayouts?: Record<
-              string,
-              { x: number; y: number; w: number; h: number }
-            >;
-            layoutVersion?: number;
-          };
-          const LAYOUT_VER = 8;
-          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry")
-              return `${groupItem.defId}__${idx}`;
-            return `cohi__${groupItem.id}__${idx}`;
-          }
-          const itemsList = Array.isArray(payload.items)
-            ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({
-                kind: "registry" as const,
-                defId,
-              }));
-          const targetIdx = itemsList.findIndex(
-            (it, i) =>
-              it.kind === "registry" &&
-              (itemKey(it, i) === convAction.widgetId ||
-                it.defId === convAction.widgetId),
+          commitWidgetActionReducerOutcome(
+            applyConvertToSqlWidget(items, action),
+            setItemsWithHistory,
+            toast,
           );
-          if (targetIdx < 0) {
-            toast({
-              title: "Widget not found",
-              description: `No registry widget "${convAction.widgetId}" in that group`,
-              variant: "destructive",
-            });
-            break;
-          }
-          const oldKey = itemKey(itemsList[targetIdx], targetIdx);
-          const newCohi: GroupWidgetItem = {
-            kind: "cohi",
-            id: `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            sql: convAction.sql,
-            title: convAction.title,
-            vizConfig: convAction.vizConfig,
-          };
-          const updatedItems = itemsList.map((it, i) =>
-            i === targetIdx ? newCohi : it,
-          );
-          const newKey = itemKey(newCohi, targetIdx);
-          const layouts = { ...(payload.widgetLayouts ?? {}) };
-          if (layouts[oldKey]) {
-            layouts[newKey] = layouts[oldKey];
-            delete layouts[oldKey];
-          }
-          const nextPayload = {
-            ...payload,
-            items: updatedItems,
-            widgetLayouts:
-              Object.keys(layouts).length > 0 ? layouts : undefined,
-            layoutVersion: LAYOUT_VER,
-          } as typeof layoutItem.payload;
-          setItemsWithHistory((prev) =>
-            prev.map((it, i) =>
-              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
-            ),
-          );
-          toast({
-            title: "Widget converted",
-            description:
-              convAction.explanation?.substring(0, 80) ||
-              "Replaced with SQL-backed widget",
-          });
           break;
         }
         case "create_dashboard": {
-          const dashAction = action as CreateDashboardAction;
-          const newItems: CanvasLayoutItem[] = [];
-          let yOffset = 20;
-          const groupGap = 20;
-          const defaultGroupSize = { w: 1000, h: 800 };
-
-          for (const group of dashAction.groups) {
-            const groupId = `cohi-dash-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-            const groupItems: GroupWidgetItem[] = group.widgets.map((w) => {
-              if (w.kind === "registry") {
-                return { kind: "registry" as const, defId: w.defId };
-              }
-              const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-              const fc: WidgetFilterConfig = (w as any).filterConfig ?? { filterable: true, dateColumn: 'application_date' };
-              return {
-                kind: "cohi" as const,
-                id,
-                sql: w.sql,
-                title: w.title,
-                vizConfig: w.vizConfig,
-                filterConfig: fc,
-                allowLowSamplePullThrough: !!(w as any).allowLowSamplePullThrough,
-                savedFilters: filterConfigToInitialState(fc),
-              };
-            });
-            const pos = group.canvasPosition ?? {
-              x: 20,
-              y: yOffset,
-              w: defaultGroupSize.w,
-              h: defaultGroupSize.h,
-            };
-            const sectionType = (group.sectionType ??
-              "company-scorecard") as SectionType;
-            const groupPayload = {
-              type: "widget_group" as const,
-              groupId,
-              title: group.title,
-              sectionType,
-              widgetIds: groupItems
-                .filter(
-                  (i): i is Extract<GroupWidgetItem, { kind: "registry" }> =>
-                    i.kind === "registry",
-                )
-                .map((i) => i.defId),
-              items: groupItems,
-            };
-            newItems.push(
-              createLayoutItem(
-                `canvas-${groupId}`,
-                "widget_group",
-                groupPayload,
-                pos,
-              ),
-            );
-            yOffset = pos.y + pos.h + groupGap;
-          }
-
-          for (const spec of dashAction.standaloneWidgets ?? []) {
-            if (spec.kind !== "cohi") continue;
-            const pos = spec.canvasPosition ?? {
-              x: 20,
-              y: yOffset,
-              w: 700,
-              h: 440,
-            };
-            // Standalone cohi specs also get auto-grouped for the filter bar
-            const groupItem = wrapCohiWidgetInGroup(spec as any, Math.random().toString(36).slice(2, 6), pos);
-            newItems.push(groupItem);
-            yOffset = pos.y + pos.h + groupGap;
-          }
-
-          setItemsWithHistory((prev) => [...prev, ...newItems]);
-          toast({
-            title: "Dashboard created",
-            description:
-              dashAction.explanation?.substring(0, 80) ||
-              `Added ${dashAction.groups.length} group(s)`,
-          });
+          commitWidgetActionReducerOutcome(
+            applyCreateDashboard(items, action),
+            setItemsWithHistory,
+            toast,
+          );
           break;
         }
         case "create_widget": {
-          // Wrap in a widget_group for the full filter bar experience.
-          const yBottom = items.reduce(
-            (max, it) => Math.max(max, it.y + it.h),
-            0,
+          commitWidgetActionReducerOutcome(
+            applyCreateWidget(items, action, { canvasWidth: width }),
+            setItemsWithHistory,
+            toast,
           );
-          const groupItem = wrapCohiWidgetInGroup(
-            action as any,
-            Math.random().toString(36).slice(2, 6),
-            {
-              x: 12,
-              y: yBottom + 16,
-              w: Math.min(Math.max(width - 56, 400), 700),
-              h: 440,
-            },
-          );
-          setItemsWithHistory((prev) => [...prev, groupItem]);
-          toast({ title: "Widget added", description: action.title });
           break;
         }
         case "delete_widget": {
@@ -1990,106 +1776,16 @@ export function WorkbenchCanvas({
           break;
         }
         case "create_canvas": {
-          // Build a full canvas from multiple dashboard sections
-          const sectionKeys = action.sectionKeys ?? [];
-          if (sectionKeys.length === 0) {
-            toast({ title: "No sections specified", variant: "destructive" });
-            break;
-          }
           if (action.title) setSaveTitle(action.title);
-          const newItems: CanvasLayoutItem[] = [];
-          let yOffset = 0;
-          const groupW = Math.max(width - 32, 480);
-          const EMBED_HEIGHTS: Record<string, number> = {
-            executiveDashboard: 700,
-            leaderboard: 850,
-          };
-
-          for (const key of sectionKeys) {
-            const itemId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-            const sectionTitle = key
-              .replace(/([A-Z])/g, " $1")
-              .replace(/^./, (s) => s.toUpperCase())
-              .trim();
-
-            // Standalone widgets – add as registry_widget directly
-            const standalone = STANDALONE_WIDGETS[key];
-            if (standalone) {
-              newItems.push(
-                createLayoutItem(
-                  itemId,
-                  "registry_widget",
-                  {
-                    type: "registry_widget",
-                    definitionId: standalone.defId,
-                  },
-                  {
-                    x: 0,
-                    y: yOffset,
-                    w: Math.min(standalone.w, groupW),
-                    h: standalone.h,
-                  },
-                ),
-              );
-              yOffset += standalone.h + 24;
-              continue;
-            }
-
-            // Full dashboard sections – add as widget_group
-            const section = SECTION_TO_WIDGETS[key];
-            if (!section) continue;
-            const groupId = `cohi-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-            const embedH = EMBED_HEIGHTS[key];
-            let groupH: number;
-            if (embedH && section.widgetIds.length <= 2) {
-              groupH = embedH;
-            } else {
-              const kpiCount = section.widgetIds.filter((id) => {
-                const def = getWidgetDefinition(id);
-                return def?.category === "kpi";
-              }).length;
-              const kpiRows = Math.ceil(kpiCount / 7);
-              const chartCount = section.widgetIds.filter((id) => {
-                const d = getWidgetDefinition(id);
-                return (
-                  d?.category === "chart" || d?.category === "distribution"
-                );
-              }).length;
-              const tableCount = section.widgetIds.filter((id) => {
-                const d = getWidgetDefinition(id);
-                return d?.category === "table";
-              }).length;
-              const chartRows = Math.ceil(chartCount / 2);
-              const contentH =
-                kpiRows * 80 + chartRows * 210 + tableCount * 280 + 20;
-              groupH = Math.max(350, 110 + contentH);
-            }
-
-            newItems.push(
-              createLayoutItem(
-                itemId,
-                "widget_group",
-                {
-                  type: "widget_group",
-                  groupId,
-                  title: sectionTitle,
-                  sectionType: section.sectionType as SectionType,
-                  widgetIds: section.widgetIds,
-                },
-                { x: 0, y: yOffset, w: groupW, h: groupH },
-              ),
-            );
-            yOffset += groupH + 24;
-          }
-
-          if (newItems.length > 0) {
-            setItemsWithHistory((prev) => [...prev, ...newItems]);
-            toast({
-              title: action.title || "Canvas created",
-              description: `Added ${newItems.length} dashboard section${newItems.length !== 1 ? "s" : ""} to canvas`,
-            });
-          }
+          commitWidgetActionReducerOutcome(
+            applyCreateCanvas(items, action, {
+              canvasWidth: width,
+              sectionToWidgets: SECTION_TO_WIDGETS,
+              standaloneWidgets: STANDALONE_WIDGETS,
+            }),
+            setItemsWithHistory,
+            toast,
+          );
           break;
         }
         case "generate_report": {
@@ -2151,199 +1847,11 @@ export function WorkbenchCanvas({
           break;
         }
         case "modify_widget": {
-          const targetIdx = items.findIndex((it) => it.i === action.instanceId);
-          if (
-            editingWidgetId &&
-            action.instanceId !== editingWidgetId &&
-            targetIdx < 0
-          ) {
-            toast({
-              title: "Wrong widget",
-              description:
-                "Cohi tried to modify a widget that isn't on this canvas. Select the widget and use Edit with Cohi, or ask using its title.",
-              variant: "destructive",
-            });
-            break;
-          }
-          const hasSql = !!(action.sql && String(action.sql).trim());
-          const hasChanges =
-            action.changes && Object.keys(action.changes).length > 0;
-          const hasTitle = !!(action.title && String(action.title).trim());
-          if (!hasSql && !hasChanges && !hasTitle) {
-            toast({
-              title: "No changes applied",
-              description:
-                "Cohi didn't provide SQL or config changes. Try asking to remove a column or change the query explicitly.",
-              variant: "destructive",
-            });
-            break;
-          }
-          if (hasSql) {
-            const trimmed = String(action.sql).trim();
-            const upper = trimmed.toUpperCase();
-            if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
-              toast({
-                title: "Invalid SQL",
-                description:
-                  "Widget SQL must start with SELECT or WITH. The change was not applied.",
-                variant: "destructive",
-              });
-              break;
-            }
-          }
-          const mergeVizConfig = (existingViz: Record<string, unknown>) => {
-            const changes = action.changes as Partial<typeof existingViz> & {
-              tableConfig?: Record<string, unknown>;
-            };
-            const mergedVizBase =
-              action.changes && Object.keys(action.changes).length > 0
-              ? {
-                  ...existingViz,
-                  ...action.changes,
-                  ...(changes.tableConfig
-                    ? {
-                        tableConfig: {
-                          ...((
-                            existingViz as {
-                              tableConfig?: Record<string, unknown>;
-                            }
-                          ).tableConfig || {}),
-                          ...changes.tableConfig,
-                        },
-                      }
-                    : {}),
-                }
-              : existingViz;
-            const isLikelyTableWidget =
-              (existingViz as { type?: string }).type === "table" ||
-              !!(existingViz as { tableConfig?: unknown }).tableConfig;
-            const shouldRefreshTableColumnsFromData = hasSql && isLikelyTableWidget;
-            const mergedViz = (() => {
-              if (!shouldRefreshTableColumnsFromData) return mergedVizBase;
-              const tableConfig = (
-                mergedVizBase as { tableConfig?: Record<string, unknown> }
-              ).tableConfig;
-              if (!tableConfig || typeof tableConfig !== "object")
-                return mergedVizBase;
-              // SQL changed but no explicit header mapping was provided.
-              // Drop stale saved columns so headers derive from the new result keys.
-              const { columns: _dropColumns, ...restTableConfig } = tableConfig as {
-                columns?: unknown;
-                [key: string]: unknown;
-              };
-              return {
-                ...(mergedVizBase as Record<string, unknown>),
-                tableConfig:
-                  Object.keys(restTableConfig).length > 0
-                    ? restTableConfig
-                    : undefined,
-              } as typeof mergedVizBase;
-            })();
-            const shouldPersistVizConfig =
-              (action.changes && Object.keys(action.changes).length > 0) ||
-              shouldRefreshTableColumnsFromData;
-            return { mergedViz, shouldPersistVizConfig };
-          };
-
-          if (targetIdx >= 0) {
-            const target = items[targetIdx];
-            if (target.payload.type !== "cohi_widget") {
-              toast({
-                title: "Cannot modify",
-                description: "Only SQL-backed widgets can be modified via chat",
-                variant: "destructive",
-              });
-              break;
-            }
-
-            const updated = [...items];
-            const existingViz = (target.payload.vizConfig || {}) as Record<
-              string,
-              unknown
-            >;
-            const { mergedViz, shouldPersistVizConfig } =
-              mergeVizConfig(existingViz);
-            updated[targetIdx] = {
-              ...target,
-              payload: {
-                ...target.payload,
-                ...(action.sql ? { sql: action.sql } : {}),
-                ...(action.title ? { title: action.title } : {}),
-                ...(shouldPersistVizConfig
-                  ? { vizConfig: mergedViz as typeof target.payload.vizConfig }
-                  : {}),
-              },
-            };
-            setItemsWithHistory(updated);
-            toast({
-              title: "Widget updated",
-              description:
-                action.explanation?.substring(0, 80) || "Changes applied",
-            });
-            break;
-          }
-
-          // Support editing SQL widgets nested inside widget_group payload.items.
-          let modifiedGrouped = false;
-          const updatedItems = items.map((layoutItem) => {
-            if (
-              layoutItem.payload.type !== "widget_group" ||
-              !Array.isArray((layoutItem.payload as any).items)
-            ) {
-              return layoutItem;
-            }
-            const payload = layoutItem.payload as {
-              items: GroupWidgetItem[];
-            } & typeof layoutItem.payload;
-            const matchIdx = resolveGroupWidgetItemIndex(
-              payload.items,
-              action.instanceId,
-            );
-            const nextGroupItems = payload.items.map((groupItem, idx) => {
-              if (groupItem.kind !== "cohi" || idx !== matchIdx) {
-                return groupItem;
-              }
-              modifiedGrouped = true;
-              const existingViz = (groupItem.vizConfig || {}) as Record<
-                string,
-                unknown
-              >;
-              const { mergedViz, shouldPersistVizConfig } =
-                mergeVizConfig(existingViz);
-              return {
-                ...groupItem,
-                ...(action.sql ? { sql: action.sql } : {}),
-                ...(action.title ? { title: action.title } : {}),
-                ...(shouldPersistVizConfig
-                  ? { vizConfig: mergedViz as typeof groupItem.vizConfig }
-                  : {}),
-              };
-            });
-            if (!modifiedGrouped) return layoutItem;
-            return {
-              ...layoutItem,
-              payload: {
-                ...layoutItem.payload,
-                items: nextGroupItems,
-              },
-            };
-          });
-
-          if (modifiedGrouped) {
-            setItemsWithHistory(updatedItems);
-            toast({
-              title: "Widget updated",
-              description:
-                action.explanation?.substring(0, 80) || "Changes applied",
-            });
-            break;
-          }
-
-          toast({
-            title: "Widget not found",
-            description: `No widget with id ${action.instanceId}`,
-            variant: "destructive",
-          });
+          commitWidgetActionReducerOutcome(
+            applyModifyWidget(items, action, { editingWidgetId }),
+            setItemsWithHistory,
+            toast,
+          );
           break;
         }
         default:
