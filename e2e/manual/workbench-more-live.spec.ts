@@ -527,8 +527,6 @@ test.describe("More live workbench @manual-live", () => {
       } catch {
         const canvas =
           (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-        const canvas =
-          (await page.locator("#workbench-canvas-root").textContent()) ?? "";
         ok = allTimePattern.test(canvas);
       }
     }
@@ -642,7 +640,14 @@ test.describe("More live workbench @manual-live", () => {
     );
   });
 
-  test.skip(true, "M25 covered by M03 share dialog opens");
+  test("M25 readonly share link banner", async ({ page }) => {
+    await record(page, {
+      id: "M25",
+      name: "Share dialog (duplicate)",
+      status: "skipped",
+      observed: "covered by M03",
+    });
+  });
 
   test("M15 widget group collapse after resize", async ({ page }) => {
     await seedBoardReadyDashboard(page);
