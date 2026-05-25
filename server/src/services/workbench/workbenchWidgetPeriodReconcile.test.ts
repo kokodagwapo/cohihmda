@@ -144,6 +144,24 @@ describe("workbenchWidgetPeriodReconcile", () => {
     expect(actions[0].type).toBe("teach");
   });
 
+  it("seeds create_widget when all-time ask has only empty modify_group", () => {
+    const actions = [
+      {
+        type: "modify_group",
+        groupId: "grp-1",
+        operations: [],
+        explanation: "Updated dashboard group",
+      },
+    ];
+    augmentAllTimeCreateWidgetFromQuestion(actions, {
+      userQuestion: "Show funded volume as an all-time KPI",
+      canvasState: { totalItems: 3, groups: [{ groupId: "grp-1" }] },
+    });
+    expect(actions.some((a) => (a as { type: string }).type === "create_widget")).toBe(
+      true,
+    );
+  });
+
   it("seeds create_widget after stripping period-only on all-time", () => {
     const actions = [
       {

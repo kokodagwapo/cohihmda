@@ -86,3 +86,39 @@ cd server; npm run dev
 # separate shell
 npx playwright test e2e/manual/workbench-more-live.spec.ts e2e/manual/workbench-unique-live.spec.ts --config=playwright.manual-live.config.ts
 ```
+
+## Post-H (slice H, 2026-05-25)
+
+**48/48 Playwright passed** (~26 min): more-live + unique-live + edge-live + more-responsive (NR01–NR08).
+
+### G1–G6 red rows (targeted H2 run — all works)
+
+| ID | Status | Observed |
+|----|--------|----------|
+| M11 | **works** | `reportBuilder=true` (assert `Slides (n)` inline ReportBuilder, not `role=dialog`) |
+| M21 | **works** | canvas/Total Volume (isolated run) |
+| M23 | **works** | `wac=true` |
+| U02 | **works** | `lineCurve=true` (expect.poll) |
+| U07 | **works** | `Updated dashboard period` + period chip |
+
+### Full-suite recorded gaps (out of H scope; trace on broken/rough)
+
+| ID | Status | Note |
+|----|--------|------|
+| M06 | broken | `gone=false` remove funded volume |
+| M21 | broken | flaky in full serial run — M21 poll hardened post-H |
+| M22 | broken | `gone=false` |
+| M24 | broken | `barRect=false` |
+| M25 | rough | share banner `dialog=false` |
+| U08 | broken | `gone=false` |
+
+### H code changes
+
+- [e2e/helpers/reconcileTrace.ts](e2e/helpers/reconcileTrace.ts): `baseURL` from Playwright `page.context()`
+- [WidgetGroup.tsx](src/components/widgets/components/WidgetGroup.tsx): period chip reads `savedFiltersProp` before store sync
+- [workbenchWidgetPeriodReconcile.ts](server/src/services/workbench/workbenchWidgetPeriodReconcile.ts): `actionsIncludeWidgetAdd`, volume SQL, empty `modify_group` all-time seed
+- M11: `Slides (\d+)` + Back to Canvas; M21/U02/U07 polls
+
+### H5 — next branch (recommended)
+
+**H5.A — Canvas toward &lt;1,500 lines** (`WorkbenchCanvas.tsx` ~4524). Extract `itemsForRender` map → `WorkbenchCanvasItemsLayer.tsx`, then layout reducer + autosave hook. Agency-eval CI (H5.B) and remaining rough rows M06/M22/M24/M25/U08 (H5.C) after canvas split.

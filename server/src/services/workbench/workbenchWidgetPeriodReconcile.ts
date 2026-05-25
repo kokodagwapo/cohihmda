@@ -356,9 +356,27 @@ export function stripBuildActionsForAnalyticalQuestion(
 function inferAllTimeKpiTitle(userQuestion: string): string {
   const q = userQuestion.toLowerCase();
   if (/\bunits\b/.test(q)) return "Total Units";
-  if (/\bvolume\b/.test(q)) return "Total Volume";
+  if (/\bvolume\b/.test(q)) return "All-time Funded Volume";
   if (/\bpull[- ]?through\b/.test(q)) return "Pull-Through Rate";
   return "All-time KPI";
+}
+
+function inferAllTimeKpiSql(userQuestion: string): string {
+  const q = userQuestion.toLowerCase();
+  if (/\bvolume\b/.test(q)) {
+    return "SELECT COALESCE(SUM(l.loan_amount), 0) AS total FROM public.loans l WHERE l.funding_date IS NOT NULL";
+  }
+  return "SELECT COUNT(*) AS total FROM public.loans l WHERE l.funding_date IS NOT NULL";
+}
+
+function actionsIncludeWidgetAdd(typed: MutableWorkbenchActionLike[]): boolean {
+  return typed.some((a) => {
+    if (a.type === "create_widget" || a.type === "create_dashboard") return true;
+    if (a.type !== "modify_group" || !Array.isArray(a.operations)) return false;
+    return (a.operations as Array<{ op?: string }>).some(
+      (o) => o.op === "add_cohi" || o.op === "add_registry",
+    );
+  });
 }
 
 /** Drop period-only modify_group ops mis-routed for all-time KPI asks. */
@@ -410,27 +428,12 @@ export function augmentAllTimeCreateWidgetFromQuestion(
   if (!options.canvasState?.groups?.[0]?.groupId) return;
 
   const typed = actions as MutableWorkbenchActionLike[];
-  if (typed.some((a) => a.type === "create_widget")) return;
-
-  const hasAllTimeAddCohi = typed.some(
-    (a) =>
-      a.type === "modify_group" &&
-      Array.isArray(a.operations) &&
-      (
-        a.operations as Array<{
-          op?: string;
-          filterConfig?: WidgetFilterConfigLike;
-        }>
-      ).some(
-        (o) => o.op === "add_cohi" && o.filterConfig?.filterable === false,
-      ),
-  );
-  if (hasAllTimeAddCohi) return;
+  if (actionsIncludeWidgetAdd(typed)) return;
 
   typed.unshift({
     type: "create_widget",
     title: inferAllTimeKpiTitle(options.userQuestion ?? ""),
-    sql: "SELECT COUNT(*) AS total FROM public.loans l WHERE l.funding_date IS NOT NULL",
+    sql: inferAllTimeKpiSql(options.userQuestion ?? ""),
     config: { type: "kpi", data: [] },
     filterConfig: {
       filterable: true,
@@ -489,7 +492,7 @@ export function augmentAllTimeKpiToGroup(
         allowLowSamplePullThrough: !!cw.allowLowSamplePullThrough,
       },
     ],
-    explanation: cw.explanation ?? "Added all-time KPI",
+    explanation: "Added all-time KPI for funded volume",
   });
 
   actions.length = 0;

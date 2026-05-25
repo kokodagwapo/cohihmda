@@ -34,7 +34,7 @@ async function record(
 ) {
   let observed = r.observed.replace(/\|/g, "/");
   if ((r.status === "broken" || r.status === "rough") && tracePrompt) {
-    const trace = await captureReconcileTrace(page.request, tracePrompt);
+    const trace = await captureReconcileTrace(page.request, tracePrompt, { page });
     if (trace) observed += ` | trace=${trace}`;
   }
   rows.push({ ...r, observed });
@@ -96,12 +96,23 @@ test.describe("Unique live workbench @manual-live", () => {
     await skipIfLoggedOut(page);
     await sendTurn(page, "Change pull-through by branch chart to a line chart.");
     await waitForChatInputReady(page);
-    await page.waitForTimeout(2000);
-    const hasLine = await page
-      .locator("#workbench-canvas-root .recharts-line-curve")
-      .first()
-      .isVisible({ timeout: 15_000 })
-      .catch(() => false);
+    let hasLine = false;
+    try {
+      await expect
+        .poll(
+          async () =>
+            page
+              .locator("#workbench-canvas-root .recharts-line-curve")
+              .first()
+              .isVisible()
+              .catch(() => false),
+          { timeout: 25_000, intervals: [1000, 2000] },
+        )
+        .toBe(true);
+      hasLine = true;
+    } catch {
+      hasLine = false;
+    }
     await record(
       page,
       {
@@ -195,10 +206,31 @@ test.describe("Unique live workbench @manual-live", () => {
     const chipText = (await periodChip.textContent().catch(() => "")) ?? "";
     const chipAria = (await periodChip.getAttribute("aria-label").catch(() => "")) ?? "";
     const footerOk = /period|L6M|6 month|Updated/i.test(last);
-    const canvasOk =
-      /L6M|last 6 months|6 month/i.test(canvas) ||
+    let chipOk =
       /L6M|last 6 months|6 month/i.test(chipText) ||
       /L6M|last 6 months|6 month/i.test(chipAria);
+    if (!chipOk) {
+      try {
+        await expect
+          .poll(
+            async () => {
+              const text =
+                (await periodChip.textContent().catch(() => "")) ?? "";
+              const aria =
+                (await periodChip.getAttribute("aria-label").catch(() => "")) ??
+                "";
+              return /last 6 months|6 month/i.test(text) || /last 6 months/i.test(aria);
+            },
+            { timeout: 15_000, intervals: [500, 1000] },
+          )
+          .toBe(true);
+        chipOk = true;
+      } catch {
+        chipOk = false;
+      }
+    }
+    const canvasOk =
+      /L6M|last 6 months|6 month/i.test(canvas) || chipOk;
     const works = footerOk && canvasOk;
     await record(
       page,

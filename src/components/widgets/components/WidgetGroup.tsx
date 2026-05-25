@@ -3133,7 +3133,8 @@ export function WidgetGroup({
   }, [effectiveFilterSync, filters.periodSelection?.preset, items]);
 
   const groupPeriodChipLabel = useMemo(() => {
-    const ps = filters.periodSelection;
+    const ps =
+      filters.periodSelection ?? savedFiltersProp?.periodSelection;
     if (ps?.type === "preset" && ps.preset) {
       return getPeriodPresetMeta(ps.preset).title;
     }
@@ -3143,8 +3144,16 @@ export function WidgetGroup({
     if (ps?.type === "custom" && ps.dateRange) {
       return `${ps.dateRange.start} – ${ps.dateRange.end}`;
     }
+    const legacyPreset = savedFiltersProp?.preset as PeriodPreset | undefined;
+    if (legacyPreset) {
+      return getPeriodPresetMeta(legacyPreset).title;
+    }
     return null;
-  }, [filters.periodSelection]);
+  }, [
+    filters.periodSelection,
+    savedFiltersProp?.periodSelection,
+    savedFiltersProp?.preset,
+  ]);
 
   // ─── Build dimension filters (branch, loan officer, dynamic, etc.) for cohi widgets ───
   const groupDimensionFilters = useMemo<DimensionFilter[] | null>(() => {

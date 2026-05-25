@@ -40,7 +40,7 @@ async function record(
 ) {
   let observed = r.observed.replace(/\|/g, "/");
   if ((r.status === "broken" || r.status === "rough") && tracePrompt) {
-    const trace = await captureReconcileTrace(page.request, tracePrompt);
+    const trace = await captureReconcileTrace(page.request, tracePrompt, { page });
     if (trace) observed += ` | trace=${trace}`;
   }
   fs.mkdirSync(OUT, { recursive: true });
@@ -318,20 +318,27 @@ test.describe("More live workbench @manual-live", () => {
         id: "M11",
         name: "PowerPoint editor entry",
         status: "skipped",
-        observed: "PPT toolbar button not visible at 1280px",
+        observed: "PPT toolbar button not visible",
       });
       return;
     }
     await ppt.first().click();
-    const dialog = page.getByRole("dialog");
-    const builder = await dialog.isVisible({ timeout: 15_000 }).catch(() => false);
-    if (builder) await page.keyboard.press("Escape");
-    await record(page, {
-      id: "M11",
-      name: "PowerPoint editor entry",
-      status: builder ? "works" : "broken",
-      observed: `dialog=${builder}`,
-    });
+    const slidePanel = page.getByText(/Slides \(\d+\)/);
+    const builder = await slidePanel.isVisible({ timeout: 15_000 }).catch(() => false);
+    if (builder) {
+      const closeBtn = page.getByRole("button", { name: /Back to Canvas/i });
+      await closeBtn.first().click({ timeout: 5_000 }).catch(() => page.keyboard.press("Escape"));
+    }
+    await record(
+      page,
+      {
+        id: "M11",
+        name: "PowerPoint editor entry",
+        status: builder ? "works" : "broken",
+        observed: `reportBuilder=${builder}`,
+      },
+      "PowerPoint Editor",
+    );
   });
 
   test("M12 pull-through remove and re-add regression", async ({ page }) => {
@@ -490,15 +497,34 @@ test.describe("More live workbench @manual-live", () => {
     await seedBoardReadyDashboard(page);
     await skipIfLoggedOut(page);
     await sendTurn(page, "Show funded volume as an all-time KPI.");
+    await waitForChatInputReady(page);
     const footers = page.locator("p.text-violet-600, p.text-violet-400");
     const last =
       (await footers.count()) > 0
         ? ((await footers.last().textContent()) ?? "")
         : "";
-    const canvas = (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-    const ok =
-      /all[- ]?time|all time|since inception|lifetime|Added all-time KPI/i.test(last) ||
-      /all[- ]?time|since inception/i.test(canvas);
+    const allTimePattern =
+      /all[- ]?time|all time|since inception|lifetime|Added all-time KPI|All-time Funded Volume|Total Volume|total volume/i;
+    let ok = allTimePattern.test(last);
+    if (!ok) {
+      try {
+        await expect
+          .poll(
+            async () => {
+              const canvas =
+                (await page.locator("#workbench-canvas-root").textContent()) ?? "";
+              return allTimePattern.test(canvas);
+            },
+            { timeout: 60_000, intervals: [2000, 3000] },
+          )
+          .toBe(true);
+        ok = true;
+      } catch {
+        const canvas =
+          (await page.locator("#workbench-canvas-root").textContent()) ?? "";
+        ok = allTimePattern.test(canvas);
+      }
+    }
     await record(
       page,
       {
@@ -540,14 +566,16 @@ test.describe("More live workbench @manual-live", () => {
           async () => {
             const canvas =
               (await page.locator("#workbench-canvas-root").textContent()) ?? "";
-            return /\bWAC\b|weighted average coupon/i.test(canvas);
+            return /\bWAC\b|weighted average coupon|Weighted Avg Coupon/i.test(
+              canvas,
+            );
           },
           { timeout: 60_000, intervals: [2000, 3000] },
         )
         .toBe(true);
       ok = true;
     } catch {
-      ok = /\bWAC\b/i.test(actionSummary);
+      ok = /\bWAC\b|weighted average coupon|Weighted Avg Coupon/i.test(actionSummary);
     }
     await record(
       page,

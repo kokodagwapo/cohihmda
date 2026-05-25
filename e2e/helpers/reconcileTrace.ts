@@ -1,4 +1,4 @@
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 
 type TraceEntry = {
   ts: string;
@@ -15,15 +15,28 @@ type TraceEntry = {
 /**
  * Fetch last reconcile pipeline entries from the backend (requires WORKBENCH_RECONCILE_DEBUG=1).
  */
+function resolveTraceBaseURL(
+  request: APIRequestContext,
+  options?: { baseURL?: string; page?: Page },
+): string {
+  if (options?.baseURL) return options.baseURL.replace(/\/$/, "");
+  if (options?.page) {
+    try {
+      const fromContext = options.page.context().baseURL;
+      if (fromContext) return fromContext.replace(/\/$/, "");
+    } catch {
+      /* ignore */
+    }
+  }
+  return (process.env.E2E_BASE_URL ?? "http://localhost:5000").replace(/\/$/, "");
+}
+
 export async function captureReconcileTrace(
   request: APIRequestContext,
   prompt: string,
-  options?: { baseURL?: string; limit?: number },
+  options?: { baseURL?: string; page?: Page; limit?: number },
 ): Promise<string> {
-  const base = (options?.baseURL ?? process.env.E2E_BASE_URL ?? "http://localhost:5000").replace(
-    /\/$/,
-    "",
-  );
+  const base = resolveTraceBaseURL(request, options);
   const limit = options?.limit ?? 12;
   const needle = prompt.trim().slice(0, 40).toLowerCase();
   if (!needle) return "";
