@@ -49,6 +49,20 @@ export interface WorkbenchActiveContext {
 export interface SyncWorkbenchContextOptions {
   /** When false, bind scope only — do not load the latest thread (new canvas handoff). */
   loadLatestThread?: boolean;
+  /** When true, always load the latest thread even if scope metadata looks synced. */
+  forceReload?: boolean;
+}
+
+/** Scope keys used when listing workbench threads for a saved canvas (incl. legacy). */
+export function buildWorkbenchCanvasScopeQueries(
+  canvasId: string,
+): Array<{ scope_type: "canvas" | "draft"; scope_key: string }> {
+  return [
+    { scope_type: "canvas", scope_key: canvasId },
+    { scope_type: "draft", scope_key: `canvas-tab:${canvasId}` },
+    { scope_type: "draft", scope_key: `canvas:${canvasId}` },
+    { scope_type: "canvas", scope_key: `canvas:${canvasId}` },
+  ];
 }
 
 export interface WorkbenchChatScopeRef {

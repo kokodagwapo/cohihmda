@@ -1,18 +1,11 @@
 /**
- * Research Lab live stream proxy (COHI-402, Wave 3 locked decision #1).
+ * Research Lab unified chat stream (COHI-402).
  *
- * Wraps the legacy Research SSE pipeline so a client of
- * `POST /api/chat/v1/messages:stream` with `chat_type=research` gets a single
- * SSE connection emitting schema-valid `ChatStreamEvent`s — no second
- * `GET /api/research/sessions/:id/stream` is required.
- *
- * Mapping rules (intentionally narrow — we only emit shapes that already
- * validate against `chat-event-stream.schema.json`):
- *   - `phase` / `agent_*` / `plan` / `quick_result` → `block.delta` on the
- *     timeline text block (index 0).
- *   - `synthesis` → finalize text block; emit a closing artifacts block (index 1).
- *   - `complete` → flush remaining deltas, emit `turn.completed`.
- *   - `error` → emit a stream `error` event.
+ * `POST /api/chat/v1/messages:stream` with `chat_type=research` starts (or
+ * resumes) the legacy Research pipeline, returns a short SSE handshake
+ * (`researchSessionId` + starter text), then closes. The client loads findings
+ * via `GET /api/research/sessions/:id` polling — not by holding this HTTP
+ * connection for the full pipeline (avoids HTTP/2 SSE drops on long streams).
  */
 
 import type { Response } from "express";
@@ -25,21 +18,25 @@ import {
   runFollowUp,
   getSession,
   loadSession,
-  attachSessionEmitter,
-  detachSessionEmitter,
   isSessionRunning,
   type ResearchMode,
   type SSEEvent,
-  type SSEEmitter,
   type ResearchSession,
 } from "../research/orchestrator.js";
 import type { CarryOverContextPayload } from "./chatConversationFork.js";
+import { readModeHandoffContext } from "./modeHandoff.js";
+import {
+  applyResearchHandoffToSession,
+  resolveResearchStructuralHandoff,
+} from "./handoffResolver.js";
 import type { UnifiedBlock } from "./unifiedChatMappers.js";
 import { validateUnifiedStreamEvent } from "./unifiedChatSchemas.js";
 import { researchArtifactBlock } from "./unifiedResearchChat.js";
 import { assertSqlAllowedByPolicy } from "./sqlAndMetricsRouter.js";
 import type { PolicyDecision } from "./unifiedChatPolicy.js";
 import { RESEARCH_SHELL_EXPAND_METADATA } from "./researchShellMetadata.js";
+
+export const RESEARCH_POLL_MODE_METADATA_KEY = "researchPollMode";
 
 export interface UnifiedResearchStreamArgs {
   req: AuthRequest;
@@ -52,7 +49,8 @@ export interface UnifiedResearchStreamArgs {
   uploadIds?: string[];
   policy: PolicyDecision;
   carryOver?: CarryOverContextPayload | null;
-  /** Hard cap so we never hold a request forever (ms). */
+  modeHandoff?: ReturnType<typeof readModeHandoffContext>;
+  /** @deprecated Poll mode closes immediately; kept for tests. */
   maxWaitMs?: number;
 }
 
@@ -61,8 +59,6 @@ export interface UnifiedResearchStreamResult {
   metadata: Record<string, unknown>;
   legacyRef: string;
 }
-
-const DEFAULT_MAX_WAIT_MS = 10 * 60 * 1000;
 
 export async function runUnifiedResearchStream(
   args: UnifiedResearchStreamArgs,
@@ -83,6 +79,9 @@ export async function runUnifiedResearchStream(
 
   let sessionId = args.legacyRef ?? undefined;
   let session: ResearchSession | undefined = sessionId ? getSession(sessionId) : undefined;
+  let handoffManifest: Awaited<
+    ReturnType<typeof resolveResearchStructuralHandoff>
+  >["manifest"] = [];
   if (sessionId && !session) {
     session = await loadSession(sessionId, tenantPool);
   }
@@ -91,6 +90,11 @@ export async function runUnifiedResearchStream(
       Array.isArray(args.uploadIds) && args.uploadIds.length > 0
         ? args.uploadIds.filter((id) => typeof id === "string")
         : [];
+    const structural = await resolveResearchStructuralHandoff(
+      args.modeHandoff ?? null,
+      tenantPool,
+    );
+    handoffManifest = structural.manifest;
     session = await createSession(
       tenantId,
       userId,
@@ -100,25 +104,109 @@ export async function runUnifiedResearchStream(
       undefined,
       mode,
       uploadIds,
+      structural.widgetContext,
     );
     if (args.carryOver) {
       applyChatCarryOver(session, args.carryOver);
     }
+    applyResearchHandoffToSession(session, structural);
   }
   sessionId = session.id;
 
+  if (session.phase === "error") {
+    return emitResearchPollStream(args, session, sessionId, {
+      pipelineError: session.error ?? "Research session in error state",
+      handoffManifest,
+    });
+  }
+
+  kickResearchPipelineInBackground(args, session, sessionId, tenantPool);
+
+  return emitResearchPollStream(args, session, sessionId, { handoffManifest });
+}
+
+/** Start or resume pipeline work without blocking the unified SSE response. */
+export function kickResearchPipelineInBackground(
+  args: UnifiedResearchStreamArgs,
+  session: ResearchSession,
+  sessionId: string,
+  tenantPool: Awaited<ReturnType<typeof tenantDbManager.getTenantPool>>,
+): void {
+  if (
+    session.phase !== "complete" &&
+    session.phase !== "error" &&
+    !isSessionRunning(sessionId)
+  ) {
+    void runResearchPipeline(sessionId, tenantPool, {
+      userRole: args.req.userRole,
+      isSuperAdmin: args.req.isSuperAdmin,
+    }).catch((err) => {
+      console.error("[unifiedResearchStream] pipeline error:", err);
+    });
+    return;
+  }
+
+  if (session.phase === "complete" && !isSessionRunning(sessionId)) {
+    void runFollowUp(
+      sessionId,
+      args.message.trim(),
+      tenantPool,
+      {
+        userRole: args.req.userRole,
+        isSuperAdmin: args.req.isSuperAdmin,
+      },
+      { deepAnalysis: args.deepAnalysis ?? false },
+    ).catch((err) => {
+      console.error("[unifiedResearchStream] follow-up error:", err);
+    });
+  }
+}
+
+export function buildResearchPollModeMarkdown(
+  session: Pick<ResearchSession, "topic" | "phase">,
+  message: string,
+): string {
+  const topic = session.topic || message.trim();
+  if (session.phase === "complete") {
+    return `Continuing research on: **${topic}**. Open the Research workspace to view timeline, findings, and report as they update.`;
+  }
+  return `Research investigation started for: **${topic}**. Open the Research workspace to view timeline, findings, and report as they are ready.`;
+}
+
+function emitResearchPollStream(
+  args: UnifiedResearchStreamArgs,
+  session: ResearchSession,
+  sessionId: string,
+  options?: {
+    pipelineError?: string;
+    handoffManifest?: { tier: string; included: boolean; truncated: boolean }[];
+  },
+): UnifiedResearchStreamResult {
   setupSseHeaders(args.res);
   const emit = makeEmitter(args.res);
+
+  const markdown = buildResearchPollModeMarkdown(session, args.message);
+  const finalTextBlock: UnifiedBlock = { type: "text", markdown };
+  const artifactBlock = researchArtifactBlock(sessionId, session.phase);
+  const pollMetadata = {
+    chatType: "research",
+    researchSessionId: sessionId,
+    phase: session.phase,
+    [RESEARCH_POLL_MODE_METADATA_KEY]: true,
+    ...RESEARCH_SHELL_EXPAND_METADATA,
+    contextManifest: [
+      { tier: "identity", included: true, truncated: false },
+      { tier: "research_pipeline", included: true, truncated: false },
+      { tier: "retrieval", included: true, truncated: false },
+      ...(options?.handoffManifest ?? []),
+    ],
+  };
 
   emit({
     event: "turn.started",
     conversationId: args.conversationId,
     turnId: args.turnId,
-    metadata: {
-      chatType: "research",
-      researchSessionId: sessionId,
-      ...RESEARCH_SHELL_EXPAND_METADATA,
-    },
+    metadata: pollMetadata,
   });
   emit({
     event: "block.started",
@@ -127,84 +215,7 @@ export async function runUnifiedResearchStream(
     blockIndex: 0,
     blockType: "text",
   });
-
-  // Replay any prior events so reconnects see history (parity with legacy SSE).
-  const timelineLines: string[] = [
-    `Research investigation started for: **${session.topic || args.message.trim()}**.`,
-  ];
-  emitDelta(emit, args, timelineLines[0]);
-
-  for (const ev of session.events) {
-    const line = mapEventToLine(ev);
-    if (line) {
-      timelineLines.push(line);
-      emitDelta(emit, args, line);
-    }
-  }
-
-  const completionPromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
-    const onEvent: SSEEmitter = (ev: SSEEvent) => {
-      const line = mapEventToLine(ev);
-      if (line) {
-        timelineLines.push(line);
-        emitDelta(emit, args, line);
-      }
-      if (ev.type === "complete") {
-        resolve({ ok: true });
-      } else if (ev.type === "error") {
-        resolve({ ok: false, error: ev.data?.message ?? "Research pipeline error" });
-      }
-    };
-    attachSessionEmitter(sessionId!, onEvent);
-
-    // Kick the pipeline if not already running and not done.
-    if (
-      session!.phase !== "complete" &&
-      session!.phase !== "error" &&
-      !isSessionRunning(sessionId!)
-    ) {
-      void runResearchPipeline(sessionId!, tenantPool, {
-        userRole: args.req.userRole,
-        isSuperAdmin: args.req.isSuperAdmin,
-      }).catch((err) => {
-        console.error("[unifiedResearchStream] pipeline error:", err);
-      });
-    }
-
-    // Another message in the same chat thread — same pipeline rules as the first turn.
-    if (session!.phase === "complete" && !isSessionRunning(sessionId!)) {
-      void runFollowUp(sessionId!, args.message.trim(), tenantPool, {
-        userRole: args.req.userRole,
-        isSuperAdmin: args.req.isSuperAdmin,
-      }, { deepAnalysis: args.deepAnalysis ?? false }).catch((err) => {
-        console.error("[unifiedResearchStream] additional turn error:", err);
-      });
-    } else if (session!.phase === "error") {
-      resolve({
-        ok: false,
-        error: session!.error ?? "Research session in error state",
-      });
-    }
-
-    const maxWaitMs = args.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
-    const timeout = setTimeout(() => {
-      resolve({ ok: false, error: "research_stream_timeout" });
-    }, maxWaitMs);
-
-    args.req.on("close", () => {
-      clearTimeout(timeout);
-      detachSessionEmitter(sessionId!, onEvent);
-    });
-  });
-
-  const result = await completionPromise;
-
-  // Finalize blocks.
-  const summaryMarkdown = timelineLines.join("\n\n");
-  const finalTextBlock: UnifiedBlock = {
-    type: "text",
-    markdown: summaryMarkdown,
-  };
+  emitDelta(emit, args, markdown);
   emit({
     event: "block.completed",
     conversationId: args.conversationId,
@@ -213,9 +224,6 @@ export async function runUnifiedResearchStream(
     blockType: "text",
     block: finalTextBlock,
   });
-
-  const finalSession = getSession(sessionId!) ?? session!;
-  const artifactBlock = researchArtifactBlock(sessionId!, finalSession.phase);
   emit({
     event: "block.started",
     conversationId: args.conversationId,
@@ -232,14 +240,14 @@ export async function runUnifiedResearchStream(
     block: artifactBlock as Record<string, unknown>,
   });
 
-  if (!result.ok) {
+  if (options?.pipelineError) {
     emit({
       event: "error",
       conversationId: args.conversationId,
       turnId: args.turnId,
       error: {
         code: "research_pipeline_error",
-        message: result.error ?? "Research pipeline failed",
+        message: options.pipelineError,
         retryable: false,
       },
     });
@@ -249,17 +257,7 @@ export async function runUnifiedResearchStream(
     event: "turn.completed",
     conversationId: args.conversationId,
     turnId: args.turnId,
-    metadata: {
-      chatType: "research",
-      researchSessionId: sessionId,
-      phase: finalSession.phase,
-      ...RESEARCH_SHELL_EXPAND_METADATA,
-      contextManifest: [
-        { tier: "identity", included: true, truncated: false },
-        { tier: "research_pipeline", included: true, truncated: false },
-        { tier: "retrieval", included: true, truncated: false },
-      ],
-    },
+    metadata: pollMetadata,
   });
 
   return {
@@ -267,12 +265,11 @@ export async function runUnifiedResearchStream(
     metadata: {
       route: "research",
       researchSessionId: sessionId,
-      phase: finalSession.phase,
-      mode,
-      policyDecisionId: args.policy.decisionId,
+      phase: session.phase,
+      [RESEARCH_POLL_MODE_METADATA_KEY]: true,
       ...RESEARCH_SHELL_EXPAND_METADATA,
     },
-    legacyRef: sessionId!,
+    legacyRef: sessionId,
   };
 }
 
@@ -323,7 +320,7 @@ function emitDelta(
     turnId: args.turnId,
     blockIndex: 0,
     blockType: "text",
-    delta: `${text}\n\n`,
+    delta: text,
   });
 }
 

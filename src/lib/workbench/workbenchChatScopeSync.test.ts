@@ -3,6 +3,7 @@ import {
   activeContextToScopeRef,
   buildActiveContextFromTab,
   buildWorkbenchChatScopeAfterCanvasSave,
+  buildWorkbenchCanvasScopeQueries,
   detectGreenfieldWorkbenchPrompt,
   detectNewCanvasIntent,
   getWorkbenchScopeSyncTelemetryCounts,
@@ -193,6 +194,17 @@ describe("workbenchChatScopeSync", () => {
         title: "Board",
       }),
     ).toEqual({ type: "canvas", id: "id-1", label: "Board" });
+  });
+
+  it("buildWorkbenchCanvasScopeQueries includes canvas and legacy draft keys", () => {
+    const queries = buildWorkbenchCanvasScopeQueries("canvas-uuid");
+    expect(queries).toEqual(
+      expect.arrayContaining([
+        { scope_type: "canvas", scope_key: "canvas-uuid" },
+        { scope_type: "draft", scope_key: "canvas-tab:canvas-uuid" },
+        { scope_type: "draft", scope_key: "canvas:canvas-uuid" },
+      ]),
+    );
   });
 
   it("workbenchScopeMatchesActiveContext links greenfield draft to promoted tab", () => {

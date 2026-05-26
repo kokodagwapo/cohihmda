@@ -36,6 +36,8 @@ import {
   readCarryOverContext,
   prependCarryOverToHistory,
 } from "../services/chat/chatConversationFork.js";
+import { readModeHandoffContext } from "../services/chat/modeHandoff.js";
+import { resolveInsightBuilderStructuralHandoff } from "../services/chat/handoffResolver.js";
 import {
   listUnifiedChatFolders,
   createUnifiedChatFolder,
@@ -906,6 +908,16 @@ async function handleInsightBuilderStream(
 
   const conversationId = body.conversationId ?? randomUUID();
   const turnId = randomUUID();
+  const modeHandoff = readModeHandoffContext(body);
+  const ibStructural = resolveInsightBuilderStructuralHandoff(modeHandoff);
+  const baseHistory = body.history ?? [];
+  const history =
+    ibStructural.historyPrefix != null
+      ? [
+          { role: "assistant" as const, content: ibStructural.historyPrefix },
+          ...baseHistory,
+        ]
+      : baseHistory;
 
   let streamResult: Awaited<ReturnType<typeof runUnifiedInsightBuilderStream>>;
   try {
@@ -915,12 +927,13 @@ async function handleInsightBuilderStream(
       conversationId,
       turnId,
       message: body.message,
-      history: body.history,
+      history,
       policy,
       pendingDraft: body.context?.insightBuilderDraft ?? null,
       insightBuilderOptions: body.options?.insightBuilder,
       surface: body.location?.surface,
       scopeType: body.scope?.type,
+      handoffManifest: ibStructural.manifest,
     });
   } catch (err: any) {
     if (!res.headersSent) {
@@ -1019,6 +1032,7 @@ async function handleResearchStream(
       uploadIds: mergeDatasetUploadIds(body),
       policy,
       carryOver: readCarryOverContext(body),
+      modeHandoff: readModeHandoffContext(body),
     });
   } catch (err: any) {
     if (!res.headersSent) {

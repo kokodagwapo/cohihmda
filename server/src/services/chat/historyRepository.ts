@@ -9,6 +9,7 @@ import type { UnifiedConversationChatType } from "./unifiedConversationService.j
 import { listUnifiedConversations } from "./unifiedConversationService.js";
 import { listUnifiedChatFolders } from "./unifiedChatFolderService.js";
 import { listSharedResearchHistoryRows } from "./sharedResearchHistory.js";
+import { listLegacyWorkbenchHistoryRows } from "../ai/cohiConversationService.js";
 
 export interface CanonicalHistoryRow {
   conversation_id: string;
@@ -147,6 +148,38 @@ export async function listCanonicalHistory(
       return [] as CanonicalHistoryRow[];
     });
     merged = mergeHistoryRows(merged, legacyResearch);
+  }
+
+  if (
+    query.chatType === "workbench" &&
+    query.scopeType === "canvas" &&
+    query.scopeKey
+  ) {
+    const legacyWorkbench = await listLegacyWorkbenchHistoryRows({
+      tenantId: query.tenantId,
+      userId: query.userId,
+      canvasId: query.scopeKey,
+      limit: query.limit ?? 50,
+    }).catch((err: any) => {
+      console.warn(
+        "[historyRepository] legacy workbench load failed:",
+        err?.message ?? err,
+      );
+      return [];
+    });
+    const legacyRows: CanonicalHistoryRow[] = legacyWorkbench.map((r) => ({
+      conversation_id: r.conversation_id,
+      title: r.title,
+      chat_type: "workbench",
+      scope_type: "canvas",
+      scope_key: query.scopeKey!,
+      updated_at: r.updated_at,
+      created_at: r.created_at,
+      legacy_source: "cohi_workbench",
+      legacy_ref: r.conversation_id,
+      folder_id: null,
+    }));
+    merged = mergeHistoryRows(merged, legacyRows);
   }
 
   return merged;
