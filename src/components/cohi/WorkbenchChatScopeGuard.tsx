@@ -13,14 +13,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   activeContextToScopeRef,
   COHI_WORKBENCH_ACTIVE_CONTEXT_EVENT,
-  detectNewCanvasIntent,
+  consumeWorkbenchNewChatPendingFirstSend,
   getLatestWorkbenchActiveContext,
+  isWorkbenchCanvasPopulated,
   isWorkbenchChatScopeSyncEnabled,
+  shouldConfirmNewCanvasBeforeSend,
   readPersistedWorkbenchConversationScope,
   requestWorkbenchNewCanvasTab,
   scopeRefsEqual,
@@ -41,8 +42,11 @@ export interface UseWorkbenchChatScopeGuardArgs {
   scopeMismatchActions: WorkbenchScopeMismatchActionsDetail | null;
   acceptPendingWorkbenchScopeSwitch: () => Promise<void>;
   cancelPendingWorkbenchScopeSwitch: () => void;
+  syncChatToActiveCanvas: (ctx: WorkbenchActiveContext) => Promise<void>;
   resolveScopeMismatchActions: (mode: "active" | "conversation") => void;
   sendMessage: (message: string, options?: SendMessageOptions) => Promise<void>;
+  onNewCanvasPreflightDismiss?: (message: string) => void;
+  onOpenCanvasThreads?: () => void;
 }
 
 export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs) {
@@ -56,8 +60,10 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
     scopeMismatchActions,
     acceptPendingWorkbenchScopeSwitch,
     cancelPendingWorkbenchScopeSwitch,
+    syncChatToActiveCanvas,
     resolveScopeMismatchActions,
     sendMessage,
+    onNewCanvasPreflightDismiss,
   } = args;
 
   const enabled =
@@ -93,6 +99,28 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
     [resolveConversationScope, setPendingScopeSwitchTarget],
   );
 
+  const handleActiveCanvasContext = useCallback(
+    (ctx: WorkbenchActiveContext) => {
+      if (workbenchScopePinned) {
+        maybePromptScopeSwitch(ctx);
+        return;
+      }
+      const conversationScope = resolveConversationScope();
+      const nextScope = activeContextToScopeRef(ctx);
+      if (!conversationScope || scopeRefsEqual(conversationScope, nextScope)) {
+        void syncChatToActiveCanvas(ctx);
+        return;
+      }
+      maybePromptScopeSwitch(ctx);
+    },
+    [
+      workbenchScopePinned,
+      resolveConversationScope,
+      syncChatToActiveCanvas,
+      maybePromptScopeSwitch,
+    ],
+  );
+
   useEffect(() => {
     if (!enabled) return;
     const handler = (e: Event) => {
@@ -102,29 +130,20 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
       }
       const ctx = (e as CustomEvent<WorkbenchActiveContext>).detail;
       if (!ctx) return;
-      maybePromptScopeSwitch(ctx);
+      handleActiveCanvasContext(ctx);
     };
     window.addEventListener(COHI_WORKBENCH_ACTIVE_CONTEXT_EVENT, handler);
     return () =>
       window.removeEventListener(COHI_WORKBENCH_ACTIVE_CONTEXT_EVENT, handler);
-  }, [enabled, maybePromptScopeSwitch]);
+  }, [enabled, handleActiveCanvasContext]);
 
-  /** Re-check when workbench mode becomes active after navigation (provider remount). */
+  /** Reconcile when scope sync turns on after navigation (context event may have fired earlier). */
   useEffect(() => {
     if (!enabled) return;
-    const timer = window.setTimeout(() => {
-      const active = getLatestWorkbenchActiveContext();
-      if (active) maybePromptScopeSwitch(active);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [enabled, maybePromptScopeSwitch]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    const active = getLatestWorkbenchActiveContext();
-    if (!active) return;
-    maybePromptScopeSwitch(active);
-  }, [enabled, workbenchChatScope, maybePromptScopeSwitch]);
+    const ctx = getLatestWorkbenchActiveContext();
+    if (!ctx) return;
+    handleActiveCanvasContext(ctx);
+  }, [enabled, handleActiveCanvasContext]);
 
   useEffect(() => {
     if (scopeMismatchActions) {
@@ -138,7 +157,13 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
         await sendMessage(message, options);
         return true;
       }
-      if (detectNewCanvasIntent(message)) {
+      const firstTurnAfterNewChat = consumeWorkbenchNewChatPendingFirstSend();
+      if (
+        shouldConfirmNewCanvasBeforeSend(message, {
+          firstTurnAfterNewChat,
+          canvasHasContent: isWorkbenchCanvasPopulated(),
+        })
+      ) {
         trackWorkbenchScopeSyncEvent("new_canvas_intent_prompt_shown");
         pendingSendRef.current = { message, options };
         setNewCanvasOpen(true);
@@ -163,9 +188,9 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
   }, [cancelPendingWorkbenchScopeSwitch]);
 
   const confirmNewCanvas = useCallback(async () => {
-    setNewCanvasOpen(false);
     const pending = pendingSendRef.current;
     pendingSendRef.current = null;
+    setNewCanvasOpen(false);
     if (!pending) return;
     try {
       trackWorkbenchScopeSyncEvent("new_canvas_intent_confirmed");
@@ -180,36 +205,27 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
     }
   }, [sendMessage]);
 
-  const cancelNewCanvas = useCallback(async () => {
+  const dismissNewCanvas = useCallback(() => {
     setNewCanvasOpen(false);
+    trackWorkbenchScopeSyncEvent("new_canvas_intent_dismissed");
+    const pending = pendingSendRef.current;
+    pendingSendRef.current = null;
+    if (pending) {
+      onNewCanvasPreflightDismiss?.(pending.message);
+    }
+  }, [onNewCanvasPreflightDismiss]);
+
+  const useCurrentCanvasForNewCanvas = useCallback(async () => {
     trackWorkbenchScopeSyncEvent("new_canvas_intent_cancelled");
     const pending = pendingSendRef.current;
     pendingSendRef.current = null;
+    setNewCanvasOpen(false);
     if (!pending) return;
     await sendMessage(pending.message, pending.options);
   }, [sendMessage]);
 
   const activeTabTitle =
     getLatestWorkbenchActiveContext()?.tabTitle ?? "Active canvas";
-  const chatScopeLabel =
-    workbenchChatScope?.label ??
-    (workbenchChatScope?.type === "canvas"
-      ? "Saved canvas"
-      : workbenchChatScope
-        ? "Draft"
-        : null);
-
-  const scopeChip =
-    enabled && chatScopeLabel ? (
-      <Badge
-        variant="secondary"
-        className="text-[10px] font-normal shrink-0 max-w-[140px] truncate"
-        title={`Chat thread scope: ${chatScopeLabel}`}
-        data-testid="workbench-chat-scope-chip"
-      >
-        Chat · {chatScopeLabel}
-      </Badge>
-    ) : null;
 
   const pinnedBanner =
     enabled && workbenchScopePinned ? (
@@ -263,17 +279,37 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={newCanvasOpen} onOpenChange={setNewCanvasOpen}>
+      <AlertDialog
+        open={newCanvasOpen}
+        onOpenChange={(open) => {
+          if (!open && pendingSendRef.current) dismissNewCanvas();
+          else setNewCanvasOpen(open);
+        }}
+      >
         <AlertDialogContent data-testid="workbench-new-canvas-intent-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>Open a new canvas?</AlertDialogTitle>
             <AlertDialogDescription>
               Your message looks like you want a separate canvas. We can open a new
-              blank tab and start a new chat thread there.
+              blank tab and start a new chat thread there, or keep working on the
+              current canvas.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => void cancelNewCanvas()}>
+          <AlertDialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              data-testid="workbench-new-canvas-dismiss"
+              onClick={dismissNewCanvas}
+            >
+              Cancel
+            </Button>
+            <AlertDialogCancel
+              onClick={(e) => {
+                e.preventDefault();
+                void useCurrentCanvasForNewCanvas();
+              }}
+            >
               Use current canvas
             </AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmNewCanvas()}>
@@ -318,7 +354,6 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
   return {
     enabled,
     preflightWorkbenchSend,
-    scopeChip,
     pinnedBanner,
     dialogs,
   };

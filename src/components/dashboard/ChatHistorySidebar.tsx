@@ -39,6 +39,8 @@ interface ChatHistorySidebarProps {
   onDeleteSession: (sessionId: string) => Promise<void>;
   onRenameSession: (sessionId: string, title: string) => Promise<void>;
   onNewSession: () => void;
+  /** Workbench: clarifies list is scoped to the active canvas tab. */
+  scopeSubtitle?: string | null;
 }
 
 interface SessionGroup {
@@ -304,6 +306,7 @@ export function ChatHistorySidebar({
   onDeleteSession,
   onRenameSession,
   onNewSession,
+  scopeSubtitle,
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
@@ -379,16 +382,27 @@ export function ChatHistorySidebar({
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "-100%", opacity: 0 }}
             transition={{ type: "spring", damping: 28, stiffness: 340 }}
+            data-testid="chat-history-sidebar"
             className="absolute left-0 top-0 bottom-0 z-[11] w-[280px] max-w-[85%] flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 shadow-xl"
             onPointerDown={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-2 px-3 py-3 border-b border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-2 min-w-0">
-                <Clock className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">
-                  Chat History
-                </h3>
+              <div className="flex flex-col min-w-0 gap-0.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Clock className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">
+                    Chat History
+                  </h3>
+                </div>
+                {scopeSubtitle ? (
+                  <p
+                    className="text-[11px] text-slate-500 dark:text-slate-400 pl-6 truncate"
+                    data-testid="chat-history-scope-subtitle"
+                  >
+                    {scopeSubtitle}
+                  </p>
+                ) : null}
               </div>
               <Button
                 variant="ghost"

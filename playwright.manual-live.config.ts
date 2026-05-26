@@ -10,7 +10,7 @@ export default defineConfig({
   globalSetup: "./e2e/manual-auth-global-setup.ts",
   testDir: "./e2e/manual",
   testMatch:
-    /workbench-live-15-scenarios|human-fork-walkthrough|workbench-varied-live|workbench-responsive|workbench-responsive-controls|workbench-unique-live|workbench-more-live|workbench-more-responsive|workbench-edge-live/,
+    /workbench-live-15-scenarios|human-fork-walkthrough|workbench-varied-live|workbench-responsive|workbench-responsive-controls|workbench-unique-live|workbench-more-live|workbench-more-responsive|workbench-edge-live|workbench-regression-wave/,
   fullyParallel: false,
   workers: 1,
   timeout: 360_000,

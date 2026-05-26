@@ -29,6 +29,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report",
+    "test:workbench-regression": "playwright test e2e/manual/workbench-regression-wave1.spec.ts e2e/manual/workbench-regression-wave2.spec.ts e2e/manual/workbench-regression-wave3.spec.ts e2e/manual/workbench-regression-wave4.spec.ts --config=playwright.manual-live.config.ts",
     "e2e:check-env": "node scripts/e2e-check-env.mjs",
     "lint:qa:test-tags": "cd server && npx tsx scripts/qa/lib/lintTestTags.ts",
     "install:all": "npm install && cd server && npm install"
