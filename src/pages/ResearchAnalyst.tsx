@@ -8,7 +8,8 @@
  *   - Session-level feedback
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
@@ -47,6 +48,17 @@ import {
   X,
 } from "lucide-react";
 import { ExportMenu } from "@/components/common/ExportMenu";
+import { buildResearchReportExportData } from "@/lib/researchReportExport";
+import {
+  buildResearchReportPptModel,
+  collectImageCaptureKeys,
+  researchCaptureTimeoutMs,
+} from "@/lib/researchReportPptExport";
+import {
+  captureResearchExportImages,
+  waitForResearchCaptureReady,
+} from "@/lib/researchReportPptCapture";
+import { exportResearchReportAsPpt } from "@/utils/exportUtils";
 import { UserSharePicker } from "@/components/common/UserSharePicker";
 import {
   Dialog,
@@ -387,6 +399,7 @@ export default function ResearchAnalyst() {
   const steerInputRef = useRef<HTMLInputElement>(null);
   const lastReportRef = useRef<boolean>(false);
   const reportContainerRef = useRef<HTMLDivElement>(null);
+  const [exportPreparing, setExportPreparing] = useState(false);
   // Upload attachments for this session
   const {
     uploads: availableUploads,
@@ -402,6 +415,62 @@ export default function ResearchAnalyst() {
   const attachedUploads = availableUploads.filter((u) => attachedUploadIds.includes(u.id));
   const currentSessionTopic = sessionList.find((s) => s.id === sessionId)?.topic ?? null;
   const { toast } = useToast();
+  const reportExportTitle = currentSessionTopic
+    ? `Research Report - ${currentSessionTopic}`
+    : "Research Report";
+  const reportReady =
+    !!sessionId && (!!report || (findings.length >= 1 && phase === "complete"));
+  const primaryFinding = useMemo(() => {
+    if (findings.length === 0) return null;
+    return [...findings].sort((a, b) => a.questionId - b.questionId)[
+      findings.length - 1
+    ];
+  }, [findings]);
+
+  const handleStructuredResearchPpt = useCallback(async () => {
+    const slides = buildResearchReportPptModel({
+      title: reportExportTitle,
+      understory: currentSessionTopic ?? undefined,
+      report,
+      findings,
+      primaryFinding,
+    });
+    const keys = collectImageCaptureKeys(slides);
+    flushSync(() => {
+      setExportPreparing(true);
+      setActiveTab("report");
+    });
+    try {
+      await waitForResearchCaptureReady(
+        reportContainerRef.current,
+        keys,
+        researchCaptureTimeoutMs(keys),
+      );
+      const images = await captureResearchExportImages(
+        reportContainerRef.current,
+        keys,
+      );
+      await exportResearchReportAsPpt(slides, images, reportExportTitle);
+      toast({ title: "Downloaded", description: "PowerPoint saved." });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description:
+          error instanceof Error ? error.message : "Could not create PowerPoint.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportPreparing(false);
+    }
+  }, [
+    reportExportTitle,
+    currentSessionTopic,
+    report,
+    findings,
+    primaryFinding,
+    toast,
+  ]);
+
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareDialogVisibility, setShareDialogVisibility] = useState<"private" | "shared" | "global">("private");
   const [shareDialogSharedIds, setShareDialogSharedIds] = useState<string[]>([]);
@@ -951,37 +1020,18 @@ export default function ResearchAnalyst() {
                         Share
                       </Button>
                     )}
-                    {report && (
+                    {reportReady && (
                       <div data-tour="research-export">
                       <ExportMenu
-                        title={currentSessionTopic ? `Research Report - ${currentSessionTopic}` : "Research Report"}
+                        title={reportExportTitle}
                         targetRef={reportContainerRef}
-                        getExportData={() => ({
-                          title: currentSessionTopic ? `Research Report - ${currentSessionTopic}` : "Research Report",
-                          tables: report
-                            ? [
-                                {
-                                  name: "Executive Summary",
-                                  headers: ["Section", "Content"],
-                                  rows: [["Summary", report.executiveSummary || ""]],
-                                },
-                                ...(report.rankedInsights?.length
-                                  ? [
-                                      {
-                                        name: "Insights",
-                                        headers: ["Rank", "Headline", "Detail", "Impact"],
-                                        rows: report.rankedInsights.map((insight) => [
-                                          insight.rank,
-                                          insight.headline || "",
-                                          insight.detail || "",
-                                          insight.impact || "",
-                                        ]),
-                                      },
-                                    ]
-                                  : []),
-                              ]
-                            : [],
-                        })}
+                        getExportData={() =>
+                          report
+                            ? buildResearchReportExportData(report, reportExportTitle)
+                            : { title: reportExportTitle, tables: [] }
+                        }
+                        onExportPpt={handleStructuredResearchPpt}
+                        disabled={exportPreparing}
                       />
                       </div>
                     )}
@@ -1060,44 +1110,46 @@ export default function ResearchAnalyst() {
 
                 {/* Report Tab */}
                 <TabsContent value="report" className="flex-1 overflow-y-auto m-0 px-6 pb-4" data-tour="research-report">
-                  {report ? (
+                  {report || (findings.length >= 1 && phase === "complete") ? (
                     <div ref={reportContainerRef} className="space-y-4 py-2">
-                      <ResearchReport
-                        report={report}
-                        findings={findings}
-                        sessionId={sessionId}
-                        selectedTenantId={effectiveTenantId}
-                        onSubmitFeedback={submitFeedback}
-                        onDrillDown={(f) => {
-                          setDrillDownFinding(f);
-                          setActiveTab("findings");
-                        }}
-                        isTracked={isResearchInsightTracked}
-                        onToggleTrack={handleToggleTrackResearch}
-                        onRunFurtherInvestigation={(question) => {
-                          reset();
-                          setTopicInput(question);
-                          lastReportRef.current = false;
-                          startSession(question, undefined, "deep");
-                          setActiveTab("timeline");
-                        }}
-                      />
+                      {report ? (
+                        <ResearchReport
+                          report={report}
+                          findings={findings}
+                          sessionId={sessionId}
+                          selectedTenantId={effectiveTenantId}
+                          onSubmitFeedback={submitFeedback}
+                          onDrillDown={(f) => {
+                            setDrillDownFinding(f);
+                            setActiveTab("findings");
+                          }}
+                          isTracked={isResearchInsightTracked}
+                          onToggleTrack={handleToggleTrackResearch}
+                          onRunFurtherInvestigation={(question) => {
+                            reset();
+                            setTopicInput(question);
+                            lastReportRef.current = false;
+                            startSession(question, undefined, "deep");
+                            setActiveTab("timeline");
+                          }}
+                          forceEvidenceOpen={exportPreparing}
+                          onSaveToWorkbench={setWorkbenchPayload}
+                        />
+                      ) : (
+                        <QuickAnswerView
+                          finding={primaryFinding ?? findings[findings.length - 1]}
+                          onDrillDown={(f) => {
+                            setDrillDownFinding(f);
+                            setActiveTab("findings");
+                          }}
+                          onSaveToWorkbench={setWorkbenchPayload}
+                          sessionId={sessionId}
+                          forceEvidenceOpen={exportPreparing}
+                        />
+                      )}
                       {phase === "complete" && (
                         <SessionFeedback onSubmit={handleSessionFeedback} />
                       )}
-                    </div>
-                  ) : findings.length >= 1 && phase === "complete" ? (
-                    <div className="space-y-4 py-2">
-                      <QuickAnswerView
-                        finding={findings[findings.length - 1]}
-                        onDrillDown={(f) => {
-                          setDrillDownFinding(f);
-                          setActiveTab("findings");
-                        }}
-                        onSaveToWorkbench={setWorkbenchPayload}
-                        sessionId={sessionId}
-                      />
-                      <SessionFeedback onSubmit={handleSessionFeedback} />
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">

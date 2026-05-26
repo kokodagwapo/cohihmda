@@ -40,6 +40,7 @@ export interface ResearchReportTabContentProps {
   onRunFurtherInvestigation?: (question: string) => void;
   reportContainerRef?: React.RefObject<HTMLDivElement | null>;
   className?: string;
+  forceEvidenceOpen?: boolean;
 }
 
 type ResearchTurn = {
@@ -120,6 +121,7 @@ export function ResearchReportTabContent({
   onRunFurtherInvestigation,
   reportContainerRef,
   className,
+  forceEvidenceOpen = false,
 }: ResearchReportTabContentProps) {
   const reportSnapshotsRef = useRef<ResearchReportType[]>([]);
   const sortedFindings = useMemo(() => sortFindings(findings), [findings]);
@@ -160,10 +162,7 @@ export function ResearchReportTabContent({
 
     if (isLastTurn && report) {
       return (
-        <div
-          ref={reportContainerRef}
-          className="border-t border-slate-200/70 dark:border-slate-700/70 pt-4"
-        >
+        <div className="border-t border-slate-200/70 dark:border-slate-700/70 pt-4">
           <ResearchReport
             report={report}
             findings={findings}
@@ -177,6 +176,7 @@ export function ResearchReportTabContent({
             onRunFurtherInvestigation={
               sessionIsOwner ? onRunFurtherInvestigation : undefined
             }
+            forceEvidenceOpen={forceEvidenceOpen}
           />
         </div>
       );
@@ -193,6 +193,7 @@ export function ResearchReportTabContent({
             onSubmitFeedback={onSubmitFeedback}
             onSaveToWorkbench={onSaveToWorkbench}
             onDrillDown={onDrillDown}
+            forceEvidenceOpen={forceEvidenceOpen}
           />
         </div>
       );
@@ -214,6 +215,7 @@ export function ResearchReportTabContent({
             onSubmitFeedback={onSubmitFeedback}
             onSaveToWorkbench={onSaveToWorkbench}
             onDrillDown={onDrillDown}
+            forceEvidenceOpen={forceEvidenceOpen}
           />
         </div>
       );
@@ -227,6 +229,7 @@ export function ResearchReportTabContent({
             sessionId={researchSessionId}
             onSaveToWorkbench={onSaveToWorkbench}
             onDrillDown={onDrillDown}
+            forceEvidenceOpen={forceEvidenceOpen}
           />
         </div>
       );
@@ -245,7 +248,10 @@ export function ResearchReportTabContent({
   };
 
   return (
-    <div className={cn("space-y-6 min-w-0 py-2", className)}>
+    <div
+      ref={reportContainerRef}
+      className={cn("space-y-6 min-w-0 py-2", className)}
+    >
       {turns.map((turn, idx) => {
         const isLast = idx === turns.length - 1;
         return (
@@ -287,6 +293,7 @@ export function ResearchReportTabContent({
               onRunFurtherInvestigation={
                 sessionIsOwner ? onRunFurtherInvestigation : undefined
               }
+              forceEvidenceOpen={forceEvidenceOpen}
             />
           ) : (
             <QuickAnswerView
@@ -294,6 +301,7 @@ export function ResearchReportTabContent({
               sessionId={researchSessionId}
               onSaveToWorkbench={onSaveToWorkbench}
               onDrillDown={onDrillDown}
+              forceEvidenceOpen={forceEvidenceOpen}
             />
           )}
         </div>

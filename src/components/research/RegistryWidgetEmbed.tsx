@@ -153,18 +153,33 @@ export interface RegistryWidgetEmbedProps {
   /** Larger default dimensions when used as the primary visualization. */
   hero?: boolean;
   className?: string;
+  /** DOM key for full-report PPT widget capture. */
+  captureKey?: string;
 }
 
-export function RegistryWidgetEmbed({ evidence, hero, className }: RegistryWidgetEmbedProps) {
+export function RegistryWidgetEmbed({
+  evidence,
+  hero,
+  className,
+  captureKey,
+}: RegistryWidgetEmbedProps) {
   const definition = getWidgetDefinition(evidence.definitionId);
   const width = hero ? 560 : 480;
   const height = hero ? 380 : 300;
   const branch = evidence.filters?.branch;
   const loanOfficer = evidence.filters?.loanOfficer;
 
+  const captureProps = captureKey
+    ? { "data-research-export-key": captureKey }
+    : {};
+
   if (!definition) {
     return (
-      <div data-testid="research-registry-widget-embed" className={className}>
+      <div
+        data-testid="research-registry-widget-embed"
+        className={className}
+        {...captureProps}
+      >
         <DashboardFallbackCard
           evidence={evidence}
           message={`Widget “${evidence.definitionId}” is not in the registry for this build.`}
@@ -178,6 +193,7 @@ export function RegistryWidgetEmbed({ evidence, hero, className }: RegistryWidge
       <div
         data-testid="research-registry-widget-embed"
         className={cn("rounded-md border bg-card overflow-hidden", className)}
+        {...captureProps}
       >
         <div className="px-2 py-1.5 border-b bg-muted/40 flex items-center justify-between gap-2">
           <span className="text-xs font-medium truncate">{definition.name}</span>
@@ -207,6 +223,7 @@ export function RegistryWidgetEmbed({ evidence, hero, className }: RegistryWidge
     <div
       data-testid="research-registry-widget-embed"
       className={cn("rounded-md border bg-card overflow-hidden", className)}
+      {...captureProps}
     >
       <div className="px-2 py-1.5 border-b bg-muted/40 flex items-center justify-between gap-2">
         <span className="text-xs font-medium truncate">{definition.name}</span>

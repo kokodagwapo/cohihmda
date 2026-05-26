@@ -123,6 +123,7 @@ import {
 import { useCanvasDataStore } from "@/stores/canvasDataStore";
 import { ReportBuilder } from "@/components/workbench/report/ReportBuilder";
 import { serializeWidgetCatalog } from "@/utils/widgetCatalogSerializer";
+import { exportVisualizationAsPdf } from "@/utils/exportUtils";
 import type {
   WidgetAction,
   ModifyGroupAction,
@@ -3070,6 +3071,85 @@ export function WorkbenchCanvas({
     [items, toast],
   );
 
+  /** Per-widget PDF export: chat-style preview page + written data table (cohi_widget). */
+  const handleExportWidgetPdf = useCallback(
+    async (widgetId: string) => {
+      const entry = useCanvasDataStore.getState().widgets[widgetId];
+      if (!entry || !entry.data) {
+        toast({
+          title: "No data to export",
+          description: "This widget has no data loaded yet.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const widgetData = entry.data as {
+        vizType?: string;
+        data?: Record<string, unknown>[];
+      };
+      const rows = Array.isArray(widgetData.data) ? widgetData.data : [];
+      if (rows.length === 0) {
+        toast({
+          title: "No data to export",
+          description: "This widget returned no rows.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const node = document.querySelector<HTMLElement>(
+        `[data-item-id="${widgetId}"]`,
+      );
+      if (!node) {
+        toast({
+          title: "Export failed",
+          description: "Could not find widget on canvas.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const sourceItem = items.find((it) => it.i === widgetId);
+      const cohiPayload =
+        sourceItem?.type === "cohi_widget" &&
+        sourceItem.payload.type === "cohi_widget"
+          ? sourceItem.payload
+          : null;
+      const vizType =
+        widgetData.vizType || cohiPayload?.vizConfig?.type || "table";
+
+      try {
+        const { chartEmbedded, hasDataPage } = await exportVisualizationAsPdf({
+          visualization: {
+            type: vizType,
+            title: entry.widgetName,
+            data: rows,
+          },
+          title: entry.widgetName,
+          captureTarget: node,
+          fileName: entry.widgetName,
+        });
+        toast({
+          title: "Downloaded",
+          description: chartEmbedded
+            ? hasDataPage
+              ? `${entry.widgetName || "Widget"} exported as PDF with preview and data.`
+              : `${entry.widgetName || "Widget"} exported as PDF.`
+            : `${entry.widgetName || "Widget"} exported as PDF (data table).`,
+        });
+      } catch (err) {
+        toast({
+          title: "Export failed",
+          description:
+            err instanceof Error ? err.message : "Could not create PDF file",
+          variant: "destructive",
+        });
+      }
+    },
+    [items, toast],
+  );
+
   // ---- Report Builder mode toggle ----
   const [showReportBuilder, setShowReportBuilder] = useState(false);
   const autoOpenedReportBuilderRef = useRef<string | null>(null);
@@ -3703,6 +3783,7 @@ export function WorkbenchCanvas({
                   bringToFront={bringToFront}
                   sendToBack={sendToBack}
                   handleExportWidgetExcel={handleExportWidgetExcel}
+                  handleExportWidgetPdf={handleExportWidgetPdf}
                   defaultGroupWidth={defaultGroupWidth}
                   embeddedCohiHidden={embeddedCohiHidden}
                   setShowCohiPanel={setShowCohiPanel}

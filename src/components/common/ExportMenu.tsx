@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Download,
   FileSpreadsheet,
@@ -17,15 +17,19 @@ import { useToast } from "@/hooks/use-toast";
 import type { ExportData } from "@/utils/exportUtils";
 import {
   exportDataAsExcel,
+  exportDataToVisualization,
   exportElementAsImage,
   exportElementAsPdf,
   exportElementAsPpt,
+  exportVisualizationAsPdf,
 } from "@/utils/exportUtils";
 
 type ExportMenuProps = {
   title: string;
   targetRef: React.RefObject<HTMLElement> | HTMLElement;
   getExportData?: () => ExportData | Promise<ExportData>;
+  /** When set, PowerPoint uses this instead of screenshot export. */
+  onExportPpt?: () => Promise<void>;
   disabled?: boolean;
 };
 
@@ -33,9 +37,11 @@ export function ExportMenu({
   title,
   targetRef,
   getExportData,
+  onExportPpt,
   disabled,
 }: ExportMenuProps) {
   const { toast } = useToast();
+  const [exportingPpt, setExportingPpt] = useState(false);
 
   const safeTitle = useMemo(() => title || "export", [title]);
 
@@ -54,16 +60,39 @@ export function ExportMenu({
         }
         await exportDataAsExcel(data, safeTitle);
       } else if (type === "ppt") {
-        const data = await handleExportData();
-        await exportElementAsPpt(targetRef, safeTitle, data);
+        if (onExportPpt) {
+          setExportingPpt(true);
+          try {
+            await onExportPpt();
+          } finally {
+            setExportingPpt(false);
+          }
+        } else {
+          const data = await handleExportData();
+          await exportElementAsPpt(targetRef, safeTitle, data);
+        }
       } else if (type === "pdf") {
-        await exportElementAsPdf(targetRef, safeTitle);
+        const data = await handleExportData();
+        const target =
+          targetRef instanceof HTMLElement ? targetRef : targetRef?.current;
+        if (data?.tables?.length && target) {
+          await exportVisualizationAsPdf({
+            visualization: exportDataToVisualization(data),
+            title: safeTitle,
+            captureTarget: target,
+            fileName: safeTitle,
+          });
+        } else {
+          await exportElementAsPdf(targetRef, safeTitle);
+        }
       } else if (type === "png") {
         await exportElementAsImage(targetRef, "png", safeTitle);
       } else if (type === "jpeg") {
         await exportElementAsImage(targetRef, "jpeg", safeTitle);
       }
-      toast({ title: "Downloaded", description: `Exported ${type.toUpperCase()}.` });
+      if (!(type === "ppt" && onExportPpt)) {
+        toast({ title: "Downloaded", description: `Exported ${type.toUpperCase()}.` });
+      }
     } catch (error) {
       toast({
         title: "Export failed",
@@ -81,11 +110,11 @@ export function ExportMenu({
           variant="outline"
           size="sm"
           className="gap-2"
-          disabled={disabled}
+          disabled={disabled || exportingPpt}
           aria-label="Export"
         >
           <Download className="w-4 h-4" />
-          Export
+          {exportingPpt ? "Exporting…" : "Export"}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
