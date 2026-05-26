@@ -88,6 +88,7 @@ import {
   COHI_WORKBENCH_EDIT_WIDGET_EVENT,
   COHI_WORKBENCH_STOP_EDITING_EVENT,
   isMyDashboardCanvasPath,
+  getMyDashboardCanvasIdFromPath,
   bindWorkbenchEditDraftScope,
   navigateForWorkbenchChatSubmit,
   navigateForWorkbenchConversationResume,
@@ -98,6 +99,7 @@ import {
   shouldForceNewWorkbenchConversation,
   buildCarryOverContext,
   shouldForkOnChatTypeChange,
+  type CarryOverContext,
 } from "@/lib/workbench/workbenchChatHandoff";
 import {
   getLatestWorkbenchActiveContext,
@@ -545,6 +547,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     chatSessions,
     isLoadingSessions,
     isLoadingSession,
+    loadingSessionId = null,
     fetchSessions,
     fetchWorkbenchCanvasSessions = async () => {},
     loadSession,
@@ -562,6 +565,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     acceptPendingWorkbenchScopeSwitch = async () => {},
     cancelPendingWorkbenchScopeSwitch = () => {},
     syncWorkbenchChatToActiveContext = async () => {},
+    resetWorkbenchStreamUiForHandoff = () => {},
     resolveScopeMismatchActions = () => {},
   } = unifiedSession ?? legacyChat;
 
@@ -622,6 +626,30 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     setShowHistory(true);
   }, []);
 
+  const buildCarryOverForNewCanvas = useCallback(
+    (pendingUserMessage?: string): CarryOverContext | undefined => {
+      if (!currentSessionId) return undefined;
+      const snapshot = [...messages];
+      const pending = pendingUserMessage?.trim();
+      if (
+        pending &&
+        !snapshot.some((m) => m.role === "user" && m.content.trim() === pending)
+      ) {
+        snapshot.push({ role: "user", content: pending });
+      }
+      if (snapshot.length === 0) return undefined;
+      const summary = buildCarryOverContext(snapshot);
+      if (!summary.trim()) return undefined;
+      return {
+        fromConversationId: currentSessionId,
+        fromChatType: "workbench",
+        fromTitle: workbenchChatScope?.label ?? "Previous canvas",
+        summary,
+      };
+    },
+    [currentSessionId, messages, workbenchChatScope?.label],
+  );
+
   const workbenchScopeGuard = useWorkbenchChatScopeGuard({
     activeChatType,
     workbenchChatScope,
@@ -635,6 +663,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     syncChatToActiveCanvas: syncWorkbenchChatToActiveContext,
     resolveScopeMismatchActions,
     sendMessage,
+    buildCarryOverForNewCanvas,
+    prepareForNewCanvasHandoff: resetWorkbenchStreamUiForHandoff,
     onNewCanvasPreflightDismiss: (message) => setInput(message),
   });
 
@@ -741,10 +771,21 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [allowedChatTypes, activeChatType, setActiveChatType]);
 
+  /** Saved canvas on My Dashboard should use workbench chat (and auto-load its thread). */
+  useEffect(() => {
+    if (!isUnifiedChatClientEnabled()) return;
+    const canvasId = getMyDashboardCanvasIdFromPath(pathname);
+    if (!canvasId) return;
+    if (!allowedChatTypes.includes("workbench")) return;
+    if (activeChatType !== "workbench") {
+      setActiveChatType("workbench");
+    }
+  }, [pathname, allowedChatTypes, activeChatType, setActiveChatType]);
+
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<WorkbenchEditWidgetEventDetail>).detail;
-      if (!detail?.message?.trim()) return;
+      if (!detail?.widgetId || !detail.widgetTitle) return;
       setActiveChatType("workbench");
       if (isUnifiedChatClientEnabled()) {
         bindWorkbenchEditDraftScope(detail);
@@ -752,14 +793,17 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           setShellExpandMode("split");
         }
         navigateForWorkbenchWidgetEdit(navigate, detail);
-        if (detail.widgetId && detail.widgetTitle) {
-          setWorkbenchEditingWidget({
-            id: detail.widgetId,
-            title: detail.widgetTitle,
-          });
-        }
+        setWorkbenchEditingWidget({
+          id: detail.widgetId,
+          title: detail.widgetTitle,
+        });
       }
-      void sendMessage(detail.message.trim(), { forceNewConversation: false });
+      const autoMessage = detail.message?.trim();
+      if (autoMessage) {
+        void sendMessage(autoMessage, { forceNewConversation: false });
+      } else {
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
     };
     window.addEventListener(COHI_WORKBENCH_EDIT_WIDGET_EVENT, handler);
     return () =>
@@ -2403,9 +2447,14 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         (activeChatType === "workbench" ||
           isMyDashboardCanvasPath(pathname)) && (
         <div className="flex items-center justify-between gap-2 mb-2 px-2 py-1.5 rounded-lg bg-violet-50/90 dark:bg-indigo-950/40 border border-violet-100 dark:border-indigo-900/50">
-          <span className="text-xs font-medium text-indigo-800 dark:text-indigo-200 truncate">
-            Editing: {workbenchEditingWidget.title}
-          </span>
+          <div className="min-w-0">
+            <span className="text-xs font-medium text-indigo-800 dark:text-indigo-200 truncate block">
+              Editing: {workbenchEditingWidget.title}
+            </span>
+            <span className="text-[10px] text-indigo-600/90 dark:text-indigo-300/80">
+              Describe your changes in the message box below.
+            </span>
+          </div>
           <Button
             variant="ghost"
             size="sm"
@@ -2478,9 +2527,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           }}
           onKeyDown={handleInputKeyDown}
           placeholder={
-            attachedUploadIds.length > 0
-              ? "Ask about this dataset..."
-              : "What important info do I need to know today?"
+            workbenchEditingWidget
+              ? `Describe changes for "${workbenchEditingWidget.title}"…`
+              : attachedUploadIds.length > 0
+                ? "Ask about this dataset..."
+                : "What important info do I need to know today?"
           }
           disabled={
             isLoading ||
@@ -2773,7 +2824,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           sessions={chatSessions}
           activeSessionId={currentSessionId}
           isLoading={isLoadingSessions}
-          isLoadingSession={isLoadingSession}
+          loadingSessionId={loadingSessionId}
           onFetchSessions={fetchHistoryForCurrentView}
           onLoadSession={handleLoadSession}
           onDeleteSession={deleteSession}

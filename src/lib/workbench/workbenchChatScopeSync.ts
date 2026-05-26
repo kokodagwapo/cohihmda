@@ -6,7 +6,12 @@
 import type { WidgetAction } from "@/types/widgetActions";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
 import { getWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
-import { draftScopeIdForCanvasTab } from "@/lib/workbench/workbenchChatHandoff";
+import {
+  draftScopeIdForCanvasTab,
+  getConnectedWorkbenchCanvasId,
+  getOrCreateActiveWorkbenchDraftScope,
+} from "@/lib/workbench/workbenchChatHandoff";
+import { getWorkbenchCanvasIdForDraft } from "@/lib/workbench/workbenchCanvasBridge";
 
 const FLAG_ENV_KEY = "VITE_WORKBENCH_CHAT_SCOPE_SYNC";
 const CONVERSATION_SCOPE_STORAGE_KEY = "cohi_workbench_conversation_scope";
@@ -28,6 +33,11 @@ export interface WorkbenchActiveContext {
   draftScopeId: string;
   tabTitle: string;
   isSavedCanvas: boolean;
+}
+
+export interface SyncWorkbenchContextOptions {
+  /** When false, bind scope only — do not load the latest thread (new canvas handoff). */
+  loadLatestThread?: boolean;
 }
 
 export interface WorkbenchChatScopeRef {
@@ -53,6 +63,38 @@ export interface WorkbenchScopeMismatchActionsDetail {
 }
 
 let latestActiveContext: WorkbenchActiveContext | null = null;
+
+/** Suppress scope-switch prompts (e.g. Edit with Cohi on the active canvas). */
+let suppressScopePromptCount = 0;
+
+export function suppressNextWorkbenchScopePrompt(count = 1): void {
+  suppressScopePromptCount += Math.max(1, count);
+}
+
+export function consumeWorkbenchScopePromptSuppression(): boolean {
+  if (suppressScopePromptCount <= 0) return false;
+  suppressScopePromptCount -= 1;
+  return true;
+}
+
+/** While opening a greenfield canvas tab from chat, skip mismatch prompts and align scope. */
+let newCanvasHandoffActive = false;
+
+export function beginWorkbenchNewCanvasHandoff(): void {
+  newCanvasHandoffActive = true;
+}
+
+export function endWorkbenchNewCanvasHandoff(): void {
+  newCanvasHandoffActive = false;
+}
+
+export function isWorkbenchNewCanvasHandoffActive(): boolean {
+  return newCanvasHandoffActive;
+}
+
+export function scopeRefKey(scope: WorkbenchChatScopeRef): string {
+  return `${scope.type}:${scope.id}`;
+}
 
 export function isWorkbenchChatScopeSyncEnabled(): boolean {
   if (!isUnifiedChatClientEnabled()) {
@@ -128,6 +170,65 @@ export function scopeRefsEqual(
 ): boolean {
   if (!a || !b) return false;
   return a.type === b.type && a.id === b.id;
+}
+
+/**
+ * True when a persisted conversation scope belongs to the active canvas tab.
+ * Saved canvases may use either `canvas` or `canvas-tab:*` draft scope keys.
+ */
+/**
+ * Resolve API scope for the next workbench turn from the active tab (not a stale mounted canvas).
+ */
+export function resolveWorkbenchTurnScope(
+  workbenchSavedCanvasId: string | null,
+): {
+  draftScopeId: string;
+  scopeRef: WorkbenchChatScopeRef;
+} {
+  const activeCtx = getLatestWorkbenchActiveContext();
+  if (activeCtx) {
+    return {
+      draftScopeId: activeCtx.draftScopeId,
+      scopeRef: activeContextToScopeRef(activeCtx),
+    };
+  }
+
+  const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+  const bridge = getWorkbenchCanvasBridge();
+  const connectedCanvasId = getConnectedWorkbenchCanvasId();
+  const canvasId =
+    workbenchSavedCanvasId ??
+    connectedCanvasId ??
+    (bridge?.isActive ? bridge.canvasId : null) ??
+    getWorkbenchCanvasIdForDraft(draftScopeId);
+
+  if (canvasId) {
+    return {
+      draftScopeId: draftScopeIdForCanvasTab(canvasId),
+      scopeRef: { type: "canvas", id: canvasId },
+    };
+  }
+  return {
+    draftScopeId,
+    scopeRef: { type: "draft", id: draftScopeId },
+  };
+}
+
+/** Unsaved workbench tab (UI "+" new canvas) — chat should follow without a switch dialog. */
+export function isGreenfieldWorkbenchTab(ctx: WorkbenchActiveContext): boolean {
+  return !ctx.isSavedCanvas;
+}
+
+export function workbenchScopeMatchesActiveContext(
+  scope: WorkbenchChatScopeRef,
+  ctx: WorkbenchActiveContext,
+): boolean {
+  const active = activeContextToScopeRef(ctx);
+  if (scopeRefsEqual(scope, active)) return true;
+  if (!ctx.isSavedCanvas || !ctx.canvasId) return false;
+  if (scope.type === "canvas" && scope.id === ctx.canvasId) return true;
+  if (scope.type === "draft" && scope.id === ctx.draftScopeId) return true;
+  return false;
 }
 
 export function buildActiveContextFromTab(args: {
@@ -231,9 +332,9 @@ export function isWorkbenchScopeAlignedWithActiveTab(
   conversationScope: WorkbenchChatScopeRef | null | undefined,
 ): boolean {
   if (!conversationScope || !latestActiveContext) return true;
-  return scopeRefsEqual(
+  return workbenchScopeMatchesActiveContext(
     conversationScope,
-    activeContextToScopeRef(latestActiveContext),
+    latestActiveContext,
   );
 }
 

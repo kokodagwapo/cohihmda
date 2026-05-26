@@ -2187,15 +2187,16 @@ export function WorkbenchCanvas({
     // Wait for DOM reflow + ResizeObserver to update canvasWidth
     const timer = setTimeout(() => {
       const targetWidth = canvasWidthRef.current;
-      setItems((prev) => {
+      setItemsWithHistory((prev) => {
         if (prev.length === 0) return prev;
-        const maxRight = Math.max(0, ...prev.map((i) => i.x + i.w));
+        const merged = buildLayoutWithLatestGroupFilters(prev);
+        const maxRight = Math.max(0, ...merged.map((i) => i.x + i.w));
         // Skip if items already fit or there's nothing to scale
-        if (maxRight <= 0) return prev;
+        if (maxRight <= 0) return merged;
         const scale = targetWidth / maxRight;
         // Don't bother if the change is tiny (<5%)
-        if (Math.abs(1 - scale) < 0.05) return prev;
-        return prev.map((item) => ({
+        if (Math.abs(1 - scale) < 0.05) return merged;
+        return merged.map((item) => ({
           ...item,
           x: Math.max(0, Math.round(item.x * scale)),
           w: Math.max(200, Math.round(item.w * scale)),
@@ -2204,8 +2205,7 @@ export function WorkbenchCanvas({
     }, 350);
 
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showCohiPanel]);
+  }, [showCohiPanel, buildLayoutWithLatestGroupFilters, setItemsWithHistory]);
 
   const applyBestFitLayout = useCallback(() => {
     if (items.length === 0) return;

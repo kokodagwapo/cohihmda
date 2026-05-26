@@ -9,7 +9,10 @@ import {
   scopeRefsEqual,
   shouldConfirmNewCanvasBeforeSend,
   trackWorkbenchScopeSyncEvent,
+  workbenchScopeMatchesActiveContext,
+  isGreenfieldWorkbenchTab,
 } from "./workbenchChatScopeSync";
+import { draftScopeIdForCanvasTab } from "./workbenchChatHandoff";
 
 describe("workbenchChatScopeSync", () => {
   it("isWorkbenchChatScopeSyncEnabled follows unified chat", async () => {
@@ -57,6 +60,32 @@ describe("workbenchChatScopeSync", () => {
     ).toBe(false);
   });
 
+  it("workbenchScopeMatchesActiveContext treats canvas and canvas-tab draft as same tab", () => {
+    const ctx = buildActiveContextFromTab({
+      tabId: "canvas-uuid",
+      tabTitle: "Q1 Board",
+      tabDraftScopes: {},
+    });
+    expect(
+      workbenchScopeMatchesActiveContext(
+        { type: "draft", id: draftScopeIdForCanvasTab("canvas-uuid") },
+        ctx,
+      ),
+    ).toBe(true);
+    expect(
+      workbenchScopeMatchesActiveContext(
+        { type: "canvas", id: "canvas-uuid" },
+        ctx,
+      ),
+    ).toBe(true);
+    expect(
+      workbenchScopeMatchesActiveContext(
+        { type: "canvas", id: "other-canvas" },
+        ctx,
+      ),
+    ).toBe(false);
+  });
+
   it("scopeRefsEqual compares type and id", () => {
     expect(
       scopeRefsEqual(
@@ -68,6 +97,27 @@ describe("workbenchChatScopeSync", () => {
       scopeRefsEqual(
         { type: "canvas", id: "a" },
         { type: "draft", id: "a" },
+      ),
+    ).toBe(false);
+  });
+
+  it("isGreenfieldWorkbenchTab is true for unsaved new-* tabs only", () => {
+    expect(
+      isGreenfieldWorkbenchTab(
+        buildActiveContextFromTab({
+          tabId: "new-1",
+          tabTitle: "New Canvas",
+          tabDraftScopes: { "new-1": "draft-a" },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isGreenfieldWorkbenchTab(
+        buildActiveContextFromTab({
+          tabId: "canvas-uuid",
+          tabTitle: "Board",
+          tabDraftScopes: {},
+        }),
       ),
     ).toBe(false);
   });
