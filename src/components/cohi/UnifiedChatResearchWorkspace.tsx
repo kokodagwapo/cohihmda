@@ -144,7 +144,7 @@ export function UnifiedChatResearchWorkspace({
     void loadSession(researchSessionId);
   }, [researchSessionId, loadSession, reset]);
 
-  // Unified chat stream does not feed useResearchSession — poll until DB catches up.
+  // Research runs on the server after a short unified-chat handshake; poll session state.
   useEffect(() => {
     if (!researchSessionId) return;
 

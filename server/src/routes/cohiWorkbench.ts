@@ -32,6 +32,7 @@ import {
   rebindConversationScope,
   type ConversationMessage,
 } from "../services/ai/cohiConversationService.js";
+import { rebindUnifiedConversationsFromDraftScope } from "../services/chat/unifiedConversationService.js";
 import {
   executeQuery,
   formatDataRows,
@@ -2548,13 +2549,30 @@ router.post(
           .json({ error: "fromScopeId and toScopeId are required" });
       }
 
-      const moved = await rebindConversationScope(
+      const movedLegacy = await rebindConversationScope(
         tenantId,
         req.userId!,
         fromScopeId,
         toScopeId,
       );
-      res.json({ success: true, moved });
+
+      let movedUnified = 0;
+      const fromDraftMatch = /^draft:(.+)$/.exec(fromScopeId.trim());
+      const toCanvasMatch = /^canvas:(.+)$/.exec(toScopeId.trim());
+      if (fromDraftMatch && toCanvasMatch) {
+        movedUnified = await rebindUnifiedConversationsFromDraftScope({
+          tenantId,
+          userId: req.userId!,
+          draftScopeId: fromDraftMatch[1],
+          canvasId: toCanvasMatch[1],
+        });
+      }
+
+      res.json({
+        success: true,
+        moved: movedLegacy,
+        movedUnified,
+      });
     } catch (error: any) {
       console.error("[CohiWorkbench] Rebind scope error:", error);
       res.status(500).json({ error: error.message });

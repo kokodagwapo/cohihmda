@@ -305,6 +305,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const messageIdCounter = useRef(0);
   const viewingSessionRef = useRef<string | null>(null);
   const loadSessionGenerationRef = useRef(0);
+  /** Set from research stream metadata before poll-mode stream closes. */
+  const activeResearchSessionIdRef = useRef<string | null>(null);
   const pendingCarryOverRef = useRef<CarryOverContext | null>(null);
   const forkUndoRef = useRef<ChatTypeForkUndoState | null>(null);
   const workbenchSessionsInflightRef = useRef<Promise<void> | null>(null);
@@ -569,6 +571,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       if (chatType === "research" && ev.metadata) {
         const researchSessionId = ev.metadata.researchSessionId;
         if (typeof researchSessionId === "string" && researchSessionId) {
+          activeResearchSessionIdRef.current = researchSessionId;
           setLegacyRef(researchSessionId);
         }
       }
@@ -642,6 +645,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         timestamp: new Date(),
         isLoading: true,
       };
+
+      if (chatType === "research") {
+        activeResearchSessionIdRef.current = null;
+      }
 
       if (forceNew) {
         viewingSessionRef.current = null;
@@ -826,7 +833,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               ? registerNewUnifiedConversation({ type: "global_session" })
               : activeSessionId!;
             beginStreamRun(streamConversationId);
-            const { conversationId, parsed } = await sendUnifiedGlobalStream({
+            const { conversationId, parsed, researchPollMode } =
+              await sendUnifiedGlobalStream({
               client,
               message: effectiveQuestion,
               chatType,
@@ -852,6 +860,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                     : undefined,
               onStreamEvent: applyUnifiedStreamEvent,
               onStreamText: (text) => {
+                if (chatType === "research") return;
                 applyMessagesForStream(streamConversationId, (prev) =>
                   prev.map((m) =>
                     m.id === assistantMessageId
@@ -862,10 +871,16 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               },
             });
             setSessionId(conversationId);
+            const researchHandoffMessage =
+              researchPollMode && parsed.message
+                ? parsed.message
+                : researchPollMode
+                  ? "Research is running. View progress and findings in the Research workspace."
+                  : parsed.message;
             const assistantMessage: ChatMessage = {
               id: assistantMessageId,
               role: "assistant",
-              content: parsed.message,
+              content: researchHandoffMessage,
               visualization: parsed.visualization as VisualizationConfig | undefined,
               data: undefined,
               timestamp: new Date(),
@@ -932,31 +947,66 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           setIsLoading(false);
         }
       } catch (error: any) {
-        console.error("[CohiChat] Error sending message:", error);
+        const researchSessionId = activeResearchSessionIdRef.current;
+        const researchStreamHandoff =
+          chatType === "research" && !!researchSessionId;
 
-        const errorMessage: ChatMessage = {
-          id: assistantMessageId,
-          role: "assistant",
-          content: "I encountered an error processing your request. Please try again.",
-          timestamp: new Date(),
-          error: error.message,
-        };
-
-        if (streamConversationIdForRun) {
-          applyMessagesForStream(streamConversationIdForRun, (prev) =>
-            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+        if (researchStreamHandoff) {
+          console.warn(
+            "[CohiChat] Research stream connection ended; session polling continues:",
+            error?.message ?? error,
           );
-          useUnifiedChatRunStore.getState().endRun(streamConversationIdForRun);
-          setLoadingForStream(streamConversationIdForRun, false);
+          const handoffMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content:
+              "Research is running. View progress and findings in the Research workspace.",
+            timestamp: new Date(),
+          };
+          if (streamConversationIdForRun) {
+            applyMessagesForStream(streamConversationIdForRun, (prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? handoffMessage : m,
+              ),
+            );
+            useUnifiedChatRunStore.getState().endRun(streamConversationIdForRun);
+            setLoadingForStream(streamConversationIdForRun, false);
+          } else {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? handoffMessage : m,
+              ),
+            );
+            setIsLoading(false);
+          }
         } else {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
-          );
-          setIsLoading(false);
-        }
+          console.error("[CohiChat] Error sending message:", error);
 
-        if (onError) {
-          onError(error);
+          const errorMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content:
+              "I encountered an error processing your request. Please try again.",
+            timestamp: new Date(),
+            error: error.message,
+          };
+
+          if (streamConversationIdForRun) {
+            applyMessagesForStream(streamConversationIdForRun, (prev) =>
+              prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+            );
+            useUnifiedChatRunStore.getState().endRun(streamConversationIdForRun);
+            setLoadingForStream(streamConversationIdForRun, false);
+          } else {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+            );
+            setIsLoading(false);
+          }
+
+          if (onError) {
+            onError(error);
+          }
         }
       } finally {
         if (pendingHistoryRefresh) {
@@ -1083,6 +1133,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             content: m.content,
           }));
           const onStreamText = (text: string) => {
+            if (chatType === "research") return;
             const apply = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
               if (streamConversationId) {
                 applyMessagesForStream(streamConversationId, updater);
@@ -1171,7 +1222,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               options.researchUploadIds.length > 0
                 ? options.researchUploadIds
                 : undefined;
-            const { conversationId, parsed } = await sendUnifiedGlobalStream({
+            const { conversationId, parsed, researchPollMode } =
+              await sendUnifiedGlobalStream({
               client,
               message: composed,
               chatType,
@@ -1187,10 +1239,16 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               onStreamText,
             });
             setSessionId(conversationId);
+            const researchHandoffMessage =
+              researchPollMode && parsed.message
+                ? parsed.message
+                : researchPollMode
+                  ? "Research is running. View progress and findings in the Research workspace."
+                  : parsed.message;
             const assistantMessage: ChatMessage = {
               id: assistantMessageId,
               role: "assistant",
-              content: parsed.message,
+              content: researchHandoffMessage,
               visualization: parsed.visualization as VisualizationConfig | undefined,
               data: undefined,
               timestamp: new Date(),
@@ -1259,30 +1317,64 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           if (!streamConversationId) setIsLoading(false);
         }
       } catch (error: any) {
-        console.error("[CohiChat] Error refining query:", error);
+        const researchSessionId = activeResearchSessionIdRef.current;
+        const researchStreamHandoff =
+          chatType === "research" && !!researchSessionId;
 
-        const errorMessage: ChatMessage = {
-          id: assistantMessageId,
-          role: "assistant",
-          content: "I encountered an error refining your query. Please try again.",
-          timestamp: new Date(),
-          error: error.message,
-        };
-
-        if (streamConversationId) {
-          applyMessagesForStream(streamConversationId, (prev) =>
-            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+        if (researchStreamHandoff) {
+          console.warn(
+            "[CohiChat] Research refine stream ended; session polling continues:",
+            error?.message ?? error,
           );
-          endRefineRun(streamConversationId);
+          const handoffMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content:
+              "Research is running. View progress and findings in the Research workspace.",
+            timestamp: new Date(),
+          };
+          if (streamConversationId) {
+            applyMessagesForStream(streamConversationId, (prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? handoffMessage : m,
+              ),
+            );
+            endRefineRun(streamConversationId);
+          } else {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? handoffMessage : m,
+              ),
+            );
+            setIsLoading(false);
+          }
         } else {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
-          );
-          setIsLoading(false);
-        }
+          console.error("[CohiChat] Error refining query:", error);
 
-        if (onError) {
-          onError(error);
+          const errorMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content:
+              "I encountered an error refining your query. Please try again.",
+            timestamp: new Date(),
+            error: error.message,
+          };
+
+          if (streamConversationId) {
+            applyMessagesForStream(streamConversationId, (prev) =>
+              prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+            );
+            endRefineRun(streamConversationId);
+          } else {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantMessageId ? errorMessage : m)),
+            );
+            setIsLoading(false);
+          }
+
+          if (onError) {
+            onError(error);
+          }
         }
       }
     },

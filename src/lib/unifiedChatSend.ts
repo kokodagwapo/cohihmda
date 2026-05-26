@@ -49,6 +49,8 @@ export interface SendUnifiedGlobalParams {
 export interface SendUnifiedGlobalResult {
   conversationId: string;
   parsed: ParsedGlobalUnifiedFields;
+  /** Research Lab: stream ended after handshake; findings load via session polling. */
+  researchPollMode?: boolean;
 }
 
 function blocksToEnvelope(
@@ -137,7 +139,13 @@ export async function sendUnifiedGlobalStream(
     parsed.message = streamText;
   }
 
-  return { conversationId: result.conversationId, parsed };
+  const researchPollMode = result.metadata?.researchPollMode === true;
+
+  return {
+    conversationId: result.conversationId,
+    parsed,
+    researchPollMode,
+  };
 }
 
 export interface SendUnifiedWorkbenchParams {

@@ -435,6 +435,39 @@ export async function deleteUnifiedConversation(args: {
   return (r.rowCount ?? 0) > 0;
 }
 
+/**
+ * When a greenfield draft canvas is first saved, move workbench threads from
+ * `scope_type=draft` / `scope_key=<draftScopeId>` to `canvas` / `<canvasId>`.
+ */
+export async function rebindUnifiedConversationsFromDraftScope(args: {
+  tenantId: string;
+  userId: string;
+  draftScopeId: string;
+  canvasId: string;
+}): Promise<number> {
+  const ok = await ensureTable(args.tenantId);
+  if (!ok) return 0;
+  const draftKey = args.draftScopeId.trim();
+  const canvasKey = args.canvasId.trim();
+  if (!draftKey || !canvasKey || draftKey === canvasKey) return 0;
+
+  const pool = await tenantDbManager.getTenantPool(args.tenantId);
+  const r = await pool.query(
+    `
+    UPDATE public.unified_chat_conversations
+    SET scope_type = 'canvas',
+        scope_key = $3,
+        updated_at = NOW()
+    WHERE user_id = $1::uuid
+      AND chat_type = 'workbench'
+      AND scope_type = 'draft'
+      AND scope_key = $2
+    `,
+    [args.userId, draftKey, canvasKey],
+  );
+  return r.rowCount ?? 0;
+}
+
 export async function rebindUnifiedConversation(args: {
   tenantId: string;
   userId: string;

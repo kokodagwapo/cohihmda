@@ -296,6 +296,65 @@ export async function deleteConversation(
  * Rebind all conversations from one scope key to another for a user.
  * Used when an unsaved draft canvas (draft:*) gets its first real id (canvas:*).
  */
+/** Canvas scope ids used in legacy `cohi_conversations.canvas_id` for one saved board. */
+export function legacyWorkbenchCanvasScopeIds(canvasId: string): string[] {
+  const id = canvasId.trim();
+  if (!id) return [];
+  return [`canvas:${id}`, id];
+}
+
+/**
+ * List legacy workbench rows from `cohi_conversations` for canonical history merge.
+ */
+export async function listLegacyWorkbenchHistoryRows(args: {
+  tenantId: string;
+  userId: string;
+  canvasId: string;
+  limit?: number;
+}): Promise<
+  Array<{
+    conversation_id: string;
+    title: string;
+    updated_at: string;
+    created_at: string;
+    canvas_id: string | null;
+  }>
+> {
+  try {
+    const ready = await ensureTableExists(args.tenantId);
+    if (!ready) return [];
+    const scopeIds = legacyWorkbenchCanvasScopeIds(args.canvasId);
+    if (scopeIds.length === 0) return [];
+
+    const pool = await tenantDbManager.getTenantPool(args.tenantId);
+    const lim = Math.min(Math.max(args.limit ?? 50, 1), 100);
+    const result = await pool.query(
+      `
+      SELECT id, title, canvas_id, created_at, updated_at
+      FROM public.cohi_conversations
+      WHERE user_id = $1::uuid
+        AND canvas_id = ANY($2::text[])
+      ORDER BY updated_at DESC
+      LIMIT $3::int
+      `,
+      [args.userId, scopeIds, lim],
+    );
+    return result.rows.map((row: any) => ({
+      conversation_id: row.id as string,
+      title: (row.title as string) ?? "Workbench chat",
+      updated_at: new Date(row.updated_at).toISOString(),
+      created_at: new Date(row.created_at).toISOString(),
+      canvas_id: row.canvas_id as string | null,
+    }));
+  } catch (error: any) {
+    console.error(
+      "[CohiConversation] listLegacyWorkbenchHistoryRows:",
+      error.message,
+    );
+    return [];
+  }
+}
+
 export async function rebindConversationScope(
   tenantId: string,
   userId: string,
