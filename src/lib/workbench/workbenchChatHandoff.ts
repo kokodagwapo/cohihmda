@@ -195,55 +195,11 @@ export function shouldForceNewWorkbenchConversation(options: {
   );
 }
 
-export interface ChatMessageForCarryOver {
-  role: "user" | "assistant";
-  content: string;
-}
-
-export interface CarryOverContext {
-  fromConversationId: string;
-  fromChatType: UnifiedChatType;
-  fromTitle?: string;
-  summary: string;
-}
-
-const CARRY_OVER_MAX_CHARS = 1200;
-
-/**
- * Compact summary of the last user turns + latest assistant reply for a forked chat.
- */
-export function buildCarryOverContext(
-  messages: ChatMessageForCarryOver[],
-  options?: { maxChars?: number },
-): string {
-  const maxChars = options?.maxChars ?? CARRY_OVER_MAX_CHARS;
-  if (!messages.length) return "";
-
-  const userTurns = messages.filter((m) => m.role === "user" && m.content.trim());
-  const lastUsers = userTurns.slice(-2);
-  const lastAssistant = [...messages]
-    .reverse()
-    .find((m) => m.role === "assistant" && m.content.trim());
-
-  const parts: string[] = [];
-  if (lastUsers.length > 0) {
-    parts.push("Recent user messages:");
-    for (const u of lastUsers) {
-      parts.push(`- ${u.content.trim().replace(/\s+/g, " ")}`);
-    }
-  }
-  if (lastAssistant) {
-    const snippet = lastAssistant.content.trim().replace(/\s+/g, " ");
-    parts.push(
-      `Latest assistant reply: ${snippet.length > 400 ? `${snippet.slice(0, 397)}…` : snippet}`,
-    );
-  }
-
-  const combined = parts.join("\n").trim();
-  if (!combined) return "";
-  if (combined.length <= maxChars) return combined;
-  return `${combined.slice(0, maxChars - 1)}…`;
-}
+export type {
+  CarryOverContext,
+  ChatMessageForCarryOver,
+  BuildCarryOverOptions,
+} from "@/lib/carryOverContext";
 
 export function shouldForkOnChatTypeChange(options: {
   previousChatType: UnifiedChatType;

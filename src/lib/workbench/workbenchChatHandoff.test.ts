@@ -9,7 +9,6 @@ import {
   describeWorkbenchActionsApplied,
   formatWorkbenchSectionKey,
   shouldForceNewWorkbenchConversation,
-  buildCarryOverContext,
   shouldForkOnChatTypeChange,
   generateWorkbenchDraftScopeId,
   isMyDashboardCanvasPath,
@@ -21,6 +20,7 @@ import {
   getMyDashboardCanvasIdFromPath,
   resolveWorkbenchEditDraftScope,
 } from "./workbenchChatHandoff";
+import { buildCarryOverContext } from "@/lib/carryOverContext";
 import { registerWorkbenchCanvasBridge } from "./workbenchCanvasBridge";
 import type { WidgetAction } from "@/types/widgetActions";
 

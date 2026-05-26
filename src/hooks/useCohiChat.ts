@@ -134,10 +134,29 @@ export interface ChatTypeForkUndoState {
 }
 
 export interface ConversationForkLinks {
+  /** Explicit DB parent_conversation_id (not history list order). */
   parentConversationId?: string | null;
   parentTitle?: string | null;
+  /** Explicit DB forked_to_conversation_id on the parent row. */
   forkedToConversationId?: string | null;
   forkedToTitle?: string | null;
+}
+
+function forkLinksFromConversationRow(row: {
+  parent_conversation_id?: string | null;
+  forked_to_conversation_id?: string | null;
+  parent_conversation_title?: string | null;
+  forked_to_conversation_title?: string | null;
+}): ConversationForkLinks | null {
+  const parentConversationId = row.parent_conversation_id ?? null;
+  const forkedToConversationId = row.forked_to_conversation_id ?? null;
+  if (!parentConversationId && !forkedToConversationId) return null;
+  return {
+    parentConversationId,
+    parentTitle: row.parent_conversation_title ?? null,
+    forkedToConversationId,
+    forkedToTitle: row.forked_to_conversation_title ?? null,
+  };
 }
 
 // ============================================================================
@@ -342,11 +361,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   /** Set from research stream metadata before poll-mode stream closes. */
   const activeResearchSessionIdRef = useRef<string | null>(null);
   const pendingCarryOverRef = useRef<CarryOverContext | null>(null);
+  const dismissedForkCarryOverRef = useRef<CarryOverContext | null>(null);
   const forkUndoRef = useRef<ChatTypeForkUndoState | null>(null);
   const workbenchSessionsInflightRef = useRef<Promise<void> | null>(null);
   const workbenchSessionsLastAtRef = useRef(0);
   const [conversationForkLinks, setConversationForkLinks] =
     useState<ConversationForkLinks | null>(null);
+  /** True after chat-type fork until the first message is sent (carry-over not persisted). */
+  const [hasPendingForkCarryOver, setHasPendingForkCarryOver] = useState(false);
 
   const WORKBENCH_SESSIONS_MIN_INTERVAL_MS = 2_000;
 
@@ -563,6 +585,60 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     }
   }, [tenantId]);
 
+  // Resolve linked conversation titles when we only have fork UUIDs (e.g. mid-fork UI).
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined" || !isUnifiedChatClientEnabled()) {
+      return;
+    }
+    const links = conversationForkLinks;
+    if (!links) return;
+    const parentId = links.parentConversationId;
+    const childId = links.forkedToConversationId;
+    if (
+      (!parentId || links.parentTitle) &&
+      (!childId || links.forkedToTitle)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+        const [parentRow, childRow] = await Promise.all([
+          parentId && !links.parentTitle
+            ? client.getConversation(parentId).catch(() => null)
+            : null,
+          childId && !links.forkedToTitle
+            ? client.getConversation(childId).catch(() => null)
+            : null,
+        ]);
+        if (cancelled) return;
+        setConversationForkLinks((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            ...(parentRow?.title ? { parentTitle: parentRow.title } : {}),
+            ...(childRow?.title ? { forkedToTitle: childRow.title } : {}),
+          };
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    conversationForkLinks?.parentConversationId,
+    conversationForkLinks?.forkedToConversationId,
+    conversationForkLinks?.parentTitle,
+    conversationForkLinks?.forkedToTitle,
+    getEffectiveTenantId,
+    tenantId,
+  ]);
+
   // Initialize session when chat is active and tenant context is available.
   useEffect(() => {
     if (!enabled || sessionId) return;
@@ -628,6 +704,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           activeResearchSessionIdRef.current = row.legacy_ref;
           setLegacyRef(row.legacy_ref);
         }
+        const links = forkLinksFromConversationRow(row);
+        if (links) setConversationForkLinks(links);
       });
     },
     [],
@@ -662,6 +740,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         options?.carryOverContext ?? pendingCarryOverRef.current ?? undefined;
       if (carryOver) {
         pendingCarryOverRef.current = null;
+        dismissedForkCarryOverRef.current = null;
+        setHasPendingForkCarryOver(false);
       }
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
@@ -875,6 +955,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
+            void client.getConversation(conversationId).then((row) => {
+              const links = forkLinksFromConversationRow(row);
+              if (links) setConversationForkLinks(links);
+            });
             endStreamRun(streamConversationId);
           } else {
             const ibOpts = options?.insightBuilder;
@@ -965,6 +1049,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 conversationId,
                 researchSessionId,
               );
+            } else {
+              void client.getConversation(conversationId).then((row) => {
+                const links = forkLinksFromConversationRow(row);
+                if (links) setConversationForkLinks(links);
+              });
             }
             endStreamRun(streamConversationId);
           }
@@ -1473,10 +1562,32 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     setLegacyRef(null);
     setConversationForkLinks(null);
     pendingCarryOverRef.current = null;
+    dismissedForkCarryOverRef.current = null;
+    setHasPendingForkCarryOver(false);
     forkUndoRef.current = null;
     resetWorkbenchChatSession();
     setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
   }, [resetWorkbenchChatSession, chatType]);
+
+  const dismissPendingForkLink = useCallback(() => {
+    dismissedForkCarryOverRef.current = pendingCarryOverRef.current;
+    pendingCarryOverRef.current = null;
+    setConversationForkLinks(null);
+    setHasPendingForkCarryOver(false);
+  }, []);
+
+  const restoreDismissedForkLink = useCallback((): boolean => {
+    const carryOver = dismissedForkCarryOverRef.current;
+    if (!carryOver) return false;
+    dismissedForkCarryOverRef.current = null;
+    pendingCarryOverRef.current = carryOver;
+    setConversationForkLinks({
+      parentConversationId: carryOver.fromConversationId,
+      parentTitle: carryOver.fromTitle ?? "Previous chat",
+    });
+    setHasPendingForkCarryOver(true);
+    return true;
+  }, []);
 
   const beginChatTypeFork = useCallback(
     (carryOver: CarryOverContext, previousChatType: UnifiedChatType) => {
@@ -1497,6 +1608,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         parentConversationId: carryOver.fromConversationId,
         parentTitle: carryOver.fromTitle ?? "Previous chat",
       });
+      setHasPendingForkCarryOver(true);
+      dismissedForkCarryOverRef.current = null;
     },
     [sessionId, messages, legacyRef, conversationForkLinks],
   );
@@ -1506,6 +1619,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     if (!undo) return null;
     forkUndoRef.current = null;
     pendingCarryOverRef.current = null;
+    dismissedForkCarryOverRef.current = null;
+    setHasPendingForkCarryOver(false);
     setSessionId(undo.sessionId);
     viewingSessionRef.current = undo.sessionId;
     setMessages(undo.messages);
@@ -1707,10 +1822,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             return { datasetUploadIds: [] };
           }
           const loadedChatType = (row.chat_type ?? chatType) as UnifiedChatType;
-          setConversationForkLinks({
-            parentConversationId: row.parent_conversation_id ?? null,
-            forkedToConversationId: row.forked_to_conversation_id ?? null,
-          });
+          setConversationForkLinks(forkLinksFromConversationRow(row) ?? null);
+          setHasPendingForkCarryOver(false);
           const rowScope = row.scope;
 
           if (loadedChatType === "workbench" && rowScope?.id) {
@@ -2150,6 +2263,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     deleteSession,
     renameSession,
     conversationForkLinks,
+    hasPendingForkCarryOver,
+    dismissPendingForkLink,
+    restoreDismissedForkLink,
     beginChatTypeFork,
     undoChatTypeFork,
     clearConversationBinding,

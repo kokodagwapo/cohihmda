@@ -10,12 +10,14 @@
 import type { AuthRequest } from "../../middleware/auth.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import {
+  applyChatCarryOver,
   createSession,
   runResearchPipeline,
   getSession,
   loadSession,
   type ResearchMode,
 } from "../research/orchestrator.js";
+import type { CarryOverContextPayload } from "./chatConversationFork.js";
 import type { UnifiedBlock } from "./unifiedChatMappers.js";
 import { assertSqlAllowedByPolicy } from "./sqlAndMetricsRouter.js";
 import type { PolicyDecision } from "./unifiedChatPolicy.js";
@@ -46,6 +48,7 @@ export async function runUnifiedResearchTurn(args: {
   deepAnalysis?: boolean;
   uploadIds?: string[];
   policy: PolicyDecision;
+  carryOver?: CarryOverContextPayload | null;
 }): Promise<{
   blocks: UnifiedBlock[];
   metadata: Record<string, unknown>;
@@ -84,6 +87,9 @@ export async function runUnifiedResearchTurn(args: {
       mode,
       uploadIds,
     );
+    if (args.carryOver) {
+      applyChatCarryOver(session, args.carryOver);
+    }
     sessionId = session.id;
     void runResearchPipeline(session.id, tenantPool, {
       userRole: args.req.userRole,
