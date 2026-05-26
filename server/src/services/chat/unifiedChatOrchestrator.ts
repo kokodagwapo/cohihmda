@@ -30,6 +30,7 @@ import { createVisualizationArtifactId } from "./artifactService.js";
 import { runInsightBuilderTurn, type InsightBuilderDraft } from "./insightBuilderTurn.js";
 import { runUnifiedResearchTurn } from "./unifiedResearchChat.js";
 import { readCarryOverContext } from "./chatConversationFork.js";
+import type { ModeHandoffContextPayload } from "./modeHandoff.js";
 import {
   findUnifiedConversationByLegacyRef,
   getUnifiedConversation,
@@ -82,6 +83,8 @@ export interface UnifiedChatRequestBody {
       fromTitle?: string;
       summary: string;
     };
+    /** Structural cross-mode handoff (e.g. workbench canvas on mode switch). */
+    modeHandoffContext?: ModeHandoffContextPayload;
   };
   history?: { role: "user" | "assistant"; content: string }[];
   options?: {
