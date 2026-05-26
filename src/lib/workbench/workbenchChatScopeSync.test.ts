@@ -2,17 +2,22 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   activeContextToScopeRef,
   buildActiveContextFromTab,
+  buildWorkbenchChatScopeAfterCanvasSave,
   detectGreenfieldWorkbenchPrompt,
   detectNewCanvasIntent,
   getWorkbenchScopeSyncTelemetryCounts,
   isWorkbenchChatScopeSyncEnabled,
   scopeRefsEqual,
   shouldConfirmNewCanvasBeforeSend,
+  shouldPromoteWorkbenchChatScopeOnCanvasSave,
   trackWorkbenchScopeSyncEvent,
   workbenchScopeMatchesActiveContext,
   isGreenfieldWorkbenchTab,
 } from "./workbenchChatScopeSync";
-import { draftScopeIdForCanvasTab } from "./workbenchChatHandoff";
+import {
+  draftScopeIdForCanvasTab,
+  rememberWorkbenchDraftTab,
+} from "./workbenchChatHandoff";
 
 describe("workbenchChatScopeSync", () => {
   it("isWorkbenchChatScopeSyncEnabled follows unified chat", async () => {
@@ -159,5 +164,51 @@ describe("workbenchChatScopeSync", () => {
     trackWorkbenchScopeSyncEvent("scope_switch_prompt_shown");
     const counts = getWorkbenchScopeSyncTelemetryCounts();
     expect(counts.scope_switch_prompt_shown).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shouldPromoteWorkbenchChatScopeOnCanvasSave when conversation matches greenfield draft", () => {
+    const detail = {
+      canvasId: "saved-uuid",
+      title: "High Performers",
+      draftScopeId: "draft-green",
+    };
+    expect(
+      shouldPromoteWorkbenchChatScopeOnCanvasSave(detail, {
+        type: "draft",
+        id: "draft-green",
+      }),
+    ).toBe(true);
+    expect(
+      shouldPromoteWorkbenchChatScopeOnCanvasSave(detail, {
+        type: "canvas",
+        id: "other",
+      }),
+    ).toBe(false);
+  });
+
+  it("buildWorkbenchChatScopeAfterCanvasSave uses canvas scope", () => {
+    expect(
+      buildWorkbenchChatScopeAfterCanvasSave({
+        canvasId: "id-1",
+        title: "Board",
+      }),
+    ).toEqual({ type: "canvas", id: "id-1", label: "Board" });
+  });
+
+  it("workbenchScopeMatchesActiveContext links greenfield draft to promoted tab", () => {
+    rememberWorkbenchDraftTab("draft-green", "saved-uuid");
+    const ctx = buildActiveContextFromTab({
+      tabId: "saved-uuid",
+      tabTitle: "High Performers",
+      tabDraftScopes: {
+        "saved-uuid": draftScopeIdForCanvasTab("saved-uuid"),
+      },
+    });
+    expect(
+      workbenchScopeMatchesActiveContext(
+        { type: "draft", id: "draft-green" },
+        ctx,
+      ),
+    ).toBe(true);
   });
 });

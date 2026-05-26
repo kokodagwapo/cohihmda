@@ -10,6 +10,7 @@ import {
   draftScopeIdForCanvasTab,
   getConnectedWorkbenchCanvasId,
   getOrCreateActiveWorkbenchDraftScope,
+  lookupWorkbenchDraftTab,
 } from "@/lib/workbench/workbenchChatHandoff";
 import { getWorkbenchCanvasIdForDraft } from "@/lib/workbench/workbenchCanvasBridge";
 
@@ -26,6 +27,16 @@ export const COHI_WORKBENCH_NEW_TAB_READY_EVENT = "cohi-workbench-new-tab-ready"
 
 export const COHI_WORKBENCH_SCOPE_MISMATCH_ACTIONS_EVENT =
   "cohi-workbench-scope-mismatch-actions";
+
+/** Fired when a canvas is created or updated on the server (auto-save, manual save, research). */
+export const WORKBENCH_CANVAS_SAVED_EVENT = "workbench:canvas-saved";
+
+export type WorkbenchCanvasSavedDetail = {
+  canvasId: string;
+  title?: string;
+  /** Greenfield draft scope id before first save (used to promote chat scope). */
+  draftScopeId?: string;
+};
 
 export interface WorkbenchActiveContext {
   tabId: string;
@@ -228,7 +239,52 @@ export function workbenchScopeMatchesActiveContext(
   if (!ctx.isSavedCanvas || !ctx.canvasId) return false;
   if (scope.type === "canvas" && scope.id === ctx.canvasId) return true;
   if (scope.type === "draft" && scope.id === ctx.draftScopeId) return true;
+  // Conversation still on greenfield draft scope after tab promoted to saved canvas.
+  if (scope.type === "draft") {
+    const tabForDraft = lookupWorkbenchDraftTab(scope.id);
+    if (tabForDraft === ctx.tabId) return true;
+  }
   return false;
+}
+
+/** True when chat should follow the same thread after first save (draft → canvas rebind). */
+export function shouldPromoteWorkbenchChatScopeOnCanvasSave(
+  detail: WorkbenchCanvasSavedDetail,
+  conversationScope: WorkbenchChatScopeRef | null,
+): boolean {
+  if (!detail.canvasId || !detail.draftScopeId) return false;
+  const activeDraft = getOrCreateActiveWorkbenchDraftScope();
+  if (detail.draftScopeId === activeDraft) return true;
+  if (
+    conversationScope?.type === "draft" &&
+    conversationScope.id === detail.draftScopeId
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function buildWorkbenchChatScopeAfterCanvasSave(
+  detail: WorkbenchCanvasSavedDetail,
+): WorkbenchChatScopeRef {
+  return {
+    type: "canvas",
+    id: detail.canvasId,
+    label: detail.title,
+  };
+}
+
+export function dispatchWorkbenchCanvasSaved(
+  detail: WorkbenchCanvasSavedDetail,
+  options?: { suppressScopePrompt?: boolean },
+): void {
+  if (typeof window === "undefined") return;
+  if (options?.suppressScopePrompt !== false) {
+    suppressNextWorkbenchScopePrompt(8);
+  }
+  window.dispatchEvent(
+    new CustomEvent(WORKBENCH_CANVAS_SAVED_EVENT, { detail }),
+  );
 }
 
 export function buildActiveContextFromTab(args: {

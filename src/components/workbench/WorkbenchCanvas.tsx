@@ -183,6 +183,15 @@ import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
 import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardDialog";
 import { Camera } from "lucide-react";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
+import {
+  isDefaultWorkbenchCanvasTitle,
+  suggestCanvasTitleFromLayout,
+} from "@/lib/workbench/suggestCanvasTitle";
+import {
+  createWorkbenchCanvas,
+  rebindWorkbenchDraftConversationScope,
+} from "@/lib/workbench/workbenchCanvasPersist";
+import { dispatchWorkbenchCanvasSaved } from "@/lib/workbench/workbenchChatScopeSync";
 
 /** Hide legacy embedded panel when unified Cohi chat shell is active. */
 function isWorkbenchEmbeddedCohiHidden(): boolean {
@@ -1173,6 +1182,10 @@ export function WorkbenchCanvas({
   const lastSavedSnapshotRef = useRef<string>("");
   const manualSavingRef = useRef(false);
   const previousLoadCanvasIdRef = useRef<string | null>(loadCanvasId ?? null);
+  const autoPersistNewCanvasRef = useRef(false);
+  const autoPersistInFlightRef = useRef(false);
+  const itemsForAutoPersistRef = useRef(items);
+  itemsForAutoPersistRef.current = items;
 
   const {
     saveStatus,
@@ -1222,6 +1235,95 @@ export function WorkbenchCanvas({
     }
     previousLoadCanvasIdRef.current = nextLoadCanvasId;
   }, [canvasId, chatDraftScopeId, isDirty, isOwner, loadCanvasId, persistExistingCanvas]);
+
+  const persistNewCanvasIfNeeded = useCallback(async () => {
+    if (loadCanvasId || canvasId || !isOwner) return;
+    const layoutItems = itemsForAutoPersistRef.current;
+    if (layoutItems.length === 0) return;
+    if (autoPersistInFlightRef.current || autoPersistNewCanvasRef.current) return;
+
+    autoPersistInFlightRef.current = true;
+    manualSavingRef.current = true;
+    setSaveStatus("saving");
+    try {
+      const title = isDefaultWorkbenchCanvasTitle(saveTitle)
+        ? suggestCanvasTitleFromLayout(layoutItems)
+        : saveTitle.trim() || "Workbench canvas";
+      const persistedLayout = buildLayoutWithLatestGroupFilters(layoutItems);
+      const data = await createWorkbenchCanvas({
+        title,
+        layout: persistedLayout,
+        annotations,
+        background: canvasBackground,
+        uploads,
+        tenantId,
+      });
+      setCanvasId(data.id);
+      setSaveTitle(title);
+      setIsRecordOwner(true);
+      await rebindWorkbenchDraftConversationScope({
+        draftScopeId,
+        canvasId: data.id,
+        tenantId,
+      });
+      syncSavedSnapshot(
+        JSON.stringify({
+          items: persistedLayout,
+          annotations,
+          bg: canvasBackground,
+          uploads,
+          title,
+        }),
+      );
+      autoPersistNewCanvasRef.current = true;
+      setSaveStatus("saved");
+      dispatchWorkbenchCanvasSaved({
+        canvasId: data.id,
+        title,
+        draftScopeId,
+      });
+      onSaved?.(data.id, title);
+    } catch (err) {
+      setSaveStatus("unsaved");
+      autoPersistNewCanvasRef.current = false;
+      console.warn("[WorkbenchCanvas] Auto-save new canvas failed:", err);
+    } finally {
+      autoPersistInFlightRef.current = false;
+      manualSavingRef.current = false;
+    }
+  }, [
+    annotations,
+    buildLayoutWithLatestGroupFilters,
+    canvasBackground,
+    canvasId,
+    draftScopeId,
+    isOwner,
+    loadCanvasId,
+    onSaved,
+    saveTitle,
+    setSaveStatus,
+    syncSavedSnapshot,
+    tenantId,
+    uploads,
+  ]);
+
+  /** First widgets on a new (unsaved) tab → create canvas, name it, and promote the tab. */
+  useEffect(() => {
+    if (loadCanvasId || canvasId || !isOwner || items.length === 0) return;
+    if (autoPersistNewCanvasRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      void persistNewCanvasIfNeeded();
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    items,
+    loadCanvasId,
+    canvasId,
+    isOwner,
+    persistNewCanvasIfNeeded,
+  ]);
 
   useEffect(() => {
     if (chatDraftScopeId) setDraftScopeId(chatDraftScopeId);
@@ -1928,6 +2030,8 @@ export function WorkbenchCanvas({
       next === null || (prev !== null && prev !== next);
     if (shouldReset) {
       fetchedCanvasIdRef.current = null;
+      autoPersistNewCanvasRef.current = false;
+      autoPersistInFlightRef.current = false;
       clearCanvasData();
       setItems([]);
       setAnnotations([]);
@@ -3348,49 +3452,36 @@ export function WorkbenchCanvas({
         toast({ title: "Canvas saved", description: title });
       } else {
         const persistedLayout = buildLayoutWithLatestGroupFilters(items);
-        const data = await api.request<{ id: string }>(
-          `/api/workbench/canvases${tenantQs}`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              title,
-              layoutVersion: "freeform-v1",
-              layout: persistedLayout,
-              annotations,
-              background: canvasBackground,
-              uploadsMeta: uploads,
-            }),
-          },
-        );
+        const data = await createWorkbenchCanvas({
+          title,
+          layout: persistedLayout,
+          annotations,
+          background: canvasBackground,
+          uploads,
+          tenantId,
+        });
         setCanvasId(data.id);
         setIsRecordOwner(true);
-        try {
-          await api.request(
-            `/api/cohi-chat/workbench/conversations/rebind-scope${tenantQs}`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                fromScopeId: `draft:${draftScopeId}`,
-                toScopeId: `canvas:${data.id}`,
-              }),
-            },
-          );
-        } catch (err) {
-          console.warn("[WorkbenchCanvas] Could not rebind draft conversation scope:", err);
-        }
+        autoPersistNewCanvasRef.current = true;
+        await rebindWorkbenchDraftConversationScope({
+          draftScopeId,
+          canvasId: data.id,
+          tenantId,
+        });
         toast({ title: "Canvas saved", description: title });
         onSaved?.(data.id, title);
-      }
-      // Update snapshot so dirty-state resets
-      if (!canvasId) {
-        const persistedLayout = buildLayoutWithLatestGroupFilters(items);
+        dispatchWorkbenchCanvasSaved({
+          canvasId: data.id,
+          title,
+          draftScopeId,
+        });
         syncSavedSnapshot(
           JSON.stringify({
             items: persistedLayout,
             annotations,
             bg: canvasBackground,
             uploads,
-            title: saveTitle,
+            title,
           }),
         );
       }
