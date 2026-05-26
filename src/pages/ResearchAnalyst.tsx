@@ -68,6 +68,7 @@ import { useResearchUploads } from "@/hooks/useResearchUploads";
 import { DatasetAttachmentStrip } from "@/components/research/DatasetAttachmentBadge";
 import { UploadDropZone } from "@/components/research/UploadDropZone";
 import { FindingSummaryContent } from "@/components/research/FindingSummaryContent";
+import { RESEARCH_TOPIC_SUGGESTIONS } from "@/lib/unifiedChatSuggestedPrompts";
 // ============================================================================
 // Phase Badge
 // ============================================================================
@@ -92,14 +93,7 @@ function PhaseBadge({ phase }: { phase: string }) {
 // Topic Suggestions
 // ============================================================================
 
-const TOPIC_SUGGESTIONS = [
-  "Overall pipeline health and conversion performance",
-  "LO scorecard: compute TTS scores, tier distribution (Top/Second/Bottom), and identify performance outliers",
-  "Risk patterns and credit exposure: FICO, LTV, DTI distribution and high-risk concentrations",
-  "Turn time trends and operational efficiency by role (processor, underwriter, closer)",
-  "Product mix and channel analysis: loan type, purpose, and program breakdown",
-  "Revenue drivers: margin analysis, BPS by LO/channel, and revenue concentration",
-];
+const TOPIC_SUGGESTIONS = [...RESEARCH_TOPIC_SUGGESTIONS];
 
 // ============================================================================
 // Session Sidebar
