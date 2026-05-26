@@ -13,47 +13,82 @@ export const CHAT_TYPE_DESCRIPTIONS: Record<UnifiedChatType, string> = {
 };
 
 /**
- * Research Lab topic starters (legacy `/research` empty state — `ResearchAnalyst.tsx`).
+ * Data Chat starters — questions and lookups (not canvas or insight-authoring commands).
+ * Tenant-agnostic: no branch numbers or client-specific IDs.
  */
-export const RESEARCH_TOPIC_SUGGESTIONS = [
-  "Overall pipeline health and conversion performance",
-  "LO scorecard: compute TTS scores, tier distribution (Top/Second/Bottom), and identify performance outliers",
-  "Risk patterns and credit exposure: FICO, LTV, DTI distribution and high-risk concentrations",
-  "Turn time trends and operational efficiency by role (processor, underwriter, closer)",
-  "Product mix and channel analysis: loan type, purpose, and program breakdown",
-  "Revenue drivers: margin analysis, BPS by LO/channel, and revenue concentration",
+export const CHAT_TOPIC_SUGGESTIONS = [
+  "How has funded loan volume trended over the last 12 months?",
+  "How is pull-through performing compared to last quarter?",
+  "Which loan officers or branches lead funded volume this month?",
+  "What are the main drivers of fallout in our pipeline?",
 ] as const;
 
 /**
- * Insight builder empty-state starters — natural language a user would say to author
- * a My Insights custom prompt (title, prompt text, specifiers, batch vs on-demand).
+ * Research Lab investigation topics (empty state + legacy Research page).
+ * Phrased as subjects to investigate, not UI commands.
+ */
+export const RESEARCH_TOPIC_SUGGESTIONS = [
+  "Overall pipeline health and conversion performance",
+  "Loan officer scorecard: volume, tiers, and performance outliers",
+  "Credit risk: FICO, LTV, and DTI distributions and high-risk concentrations",
+  "Turn time trends and operational efficiency by role",
+  "Product mix and channel analysis by loan type and purpose",
+  "Revenue and margin drivers by loan officer and channel",
+] as const;
+
+/**
+ * Insight builder starters — natural language to author a My Insights prompt.
+ * Tenant-agnostic: no hardcoded branch numbers, LO names, or client-specific IDs.
  */
 export const INSIGHT_BUILDER_TOPIC_SUGGESTIONS = [
-  "Create a weekly batch insight for Branch 204: how is it performing this week compared to last month? Focus on pull-through and cycle time.",
-  "Create an insight about FHA denial patterns—top reasons, trends, and which loan officers have the highest denial rates on denied FHA loans.",
-  "Set up a recurring insight that compares my branch's production to similar-sized branches across the company.",
-  "Create an on-demand insight to check whether we're losing locks to competitors on conventional purchase loans—look at fallout and pricing patterns.",
-  "Create a batch insight for VA refinance loans: are fallout or extension rates rising vs last quarter, and which branches or LOs drive it?",
-  "Create an on-demand insight to triage suspended loans—longest aging, top suspend reasons, and LOs with the largest backlog.",
-  "Create an insight prompt that analyzes fallout for loans with FICO below 650, broken down by loan type",
+  "Create a weekly batch insight for a branch: week-over-week performance on pull-through and cycle time",
+  "Create an insight on denial patterns—top reasons, trends, and loan officers with the highest rates",
+  "Set up a recurring insight comparing my branch to similar-sized branches company-wide",
+  "Create an on-demand insight on lock fallout and pricing on purchase loans",
+  "Create a batch insight on refinance fallout and extensions vs last quarter, by branch and LO",
+  "Create an on-demand insight to triage suspended loans—aging, reasons, and backlog by LO",
+  "Create an insight on fallout for lower-credit loans, by loan type and channel",
 ] as const;
+
+/**
+ * Workbench starters for an empty canvas / new board — build and populate.
+ * Safe on blank chat, `/my-dashboard/new`, or before any widgets exist.
+ */
+export const WORKBENCH_EMPTY_CANVAS_TOPIC_SUGGESTIONS = [
+  "Prepare a board-ready overview of this month's performance",
+  "Build an executive dashboard with funded volume, pull-through, and cycle time KPIs",
+  "Create a pipeline review board with loans by stage and fallout risk",
+  "Add a monthly performance section with volume, margin, and pull-through KPIs",
+] as const;
+
+/**
+ * Workbench starters when the open canvas already has widgets — refine, period, export.
+ * Not shown on empty canvas / global chat empty state without a populated board.
+ */
+export const WORKBENCH_POPULATED_CANVAS_TOPIC_SUGGESTIONS = [
+  "Switch the whole dashboard to month-to-date",
+  "Add a chart of funded volume by branch or loan officer",
+  "Change the top KPI widgets to show year-to-date instead of month-to-date",
+  "Export this canvas as a slide deck for leadership",
+] as const;
+
+/** @deprecated Use resolveWorkbenchTopicSuggestions — defaults to empty-canvas list. */
+export const WORKBENCH_TOPIC_SUGGESTIONS = WORKBENCH_EMPTY_CANVAS_TOPIC_SUGGESTIONS;
+
+export function resolveWorkbenchTopicSuggestions(
+  canvasPopulated: boolean,
+): string[] {
+  return canvasPopulated
+    ? [...WORKBENCH_POPULATED_CANVAS_TOPIC_SUGGESTIONS]
+    : [...WORKBENCH_EMPTY_CANVAS_TOPIC_SUGGESTIONS];
+}
 
 /** Default starter prompts when the server has not returned suggestions yet. */
 export const CHAT_TYPE_DEFAULT_SUGGESTIONS: Record<UnifiedChatType, string[]> = {
-  chat: [
-    "What's important to know today?",
-    "Show me loan volume by month",
-    "What are the FHA requirements?",
-    "Top loan officers by revenue",
-  ],
+  chat: [...CHAT_TOPIC_SUGGESTIONS],
   research: [...RESEARCH_TOPIC_SUGGESTIONS],
   insight_builder: [...INSIGHT_BUILDER_TOPIC_SUGGESTIONS],
-  workbench: [
-    "Prepare a board-ready overview of this month's performance",
-    "Summarize pipeline health and pull-through trends",
-    "What needs my attention right now?",
-    "Build an executive dashboard with key KPIs",
-  ],
+  workbench: [...WORKBENCH_EMPTY_CANVAS_TOPIC_SUGGESTIONS],
 };
 
 export const DEFAULT_CHAT_SUGGESTIONS = CHAT_TYPE_DEFAULT_SUGGESTIONS.chat;

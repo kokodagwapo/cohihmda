@@ -167,6 +167,14 @@ import {
   resolveChatTypePromptCardsLayout,
 } from "@/components/cohi/ChatTypeSuggestedPromptCards";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
+import {
+  CHAT_TYPE_DEFAULT_SUGGESTIONS,
+  resolveWorkbenchTopicSuggestions,
+} from "@/lib/unifiedChatSuggestedPrompts";
+import {
+  isWorkbenchCanvasPopulated,
+  WORKBENCH_CANVAS_SAVED_EVENT,
+} from "@/lib/workbench/workbenchChatScopeSync";
 
 const CHAT_EXPORT_FORMAT_KEY = "cohi-chat-preferred-export-format";
 
@@ -1369,16 +1377,20 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   }, [input, resizeChatInput]);
 
   const dispatchSuggestion = useCallback(
-    (question: string, forceNewConversation: boolean) => {
+    async (question: string, forceNewConversation: boolean) => {
       expandShellIfCompact();
       navigateWorkbenchOnSubmit(forceNewConversation);
-      setInput(question);
       const opts = { forceNewConversation };
       if (activeChatType === "workbench") {
-        void workbenchScopeGuard.preflightWorkbenchSend(question, opts);
+        const sent = await workbenchScopeGuard.preflightWorkbenchSend(
+          question,
+          opts,
+        );
+        if (!sent) return;
       } else {
-        void sendMessage(question, opts);
+        await sendMessage(question, opts);
       }
+      setInput("");
     },
     [
       expandShellIfCompact,
@@ -1466,6 +1478,25 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     layout === "shell" &&
     shellExpandMode === "full" &&
     showEmptyPromptCards;
+
+  const [workbenchCanvasPopulated, setWorkbenchCanvasPopulated] = useState(
+    () => isWorkbenchCanvasPopulated(),
+  );
+  useEffect(() => {
+    const sync = () => setWorkbenchCanvasPopulated(isWorkbenchCanvasPopulated());
+    sync();
+    window.addEventListener(WORKBENCH_CANVAS_SAVED_EVENT, sync);
+    return () => window.removeEventListener(WORKBENCH_CANVAS_SAVED_EVENT, sync);
+  }, [pathname, isOpen, showEmptyPromptCards]);
+
+  const emptyStateSuggestionsByType = useMemo(
+    () => ({
+      ...CHAT_TYPE_DEFAULT_SUGGESTIONS,
+      workbench: resolveWorkbenchTopicSuggestions(workbenchCanvasPopulated),
+    }),
+    [workbenchCanvasPopulated],
+  );
+
   const shellBodyFillsPane =
     !isShellCompact && (isCenteredEmptyLanding || showStandardMessagesPane);
 
@@ -2989,8 +3020,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
         {showResearchWorkspace && (
           <AnimatePresence initial={false}>
-            {(!isShellCompact || legacyRef) && (
-              <motion.div
+            <motion.div
                 key="research-workspace"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -3015,7 +3045,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   }}
                 />
               </motion.div>
-            )}
           </AnimatePresence>
         )}
 
@@ -3042,6 +3071,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 activeChatType={activeChatType}
                 expandedChatType={expandedPromptCard}
                 onCardSelect={handlePromptCardSelect}
+                suggestionsByType={emptyStateSuggestionsByType}
                 maxPromptsPerCard={3}
                 onPromptClick={handleSuggestionClick}
               />
@@ -3100,6 +3130,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                     activeChatType={activeChatType}
                     expandedChatType={expandedPromptCard}
                     onCardSelect={handlePromptCardSelect}
+                    suggestionsByType={emptyStateSuggestionsByType}
                     maxPromptsPerCard={promptCardsLayout === "row" ? 3 : 6}
                     onPromptClick={handleSuggestionClick}
                     className={cn(

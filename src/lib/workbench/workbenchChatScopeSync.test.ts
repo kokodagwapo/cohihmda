@@ -60,7 +60,7 @@ describe("workbenchChatScopeSync", () => {
     ).toBe(true);
     expect(
       shouldConfirmNewCanvasBeforeSend(
-        "What needs my attention right now?",
+        "Summarize pipeline health and pull-through trends",
         { firstTurnAfterNewChat: true, canvasHasContent: true },
       ),
     ).toBe(false);

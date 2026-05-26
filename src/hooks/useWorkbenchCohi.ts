@@ -21,6 +21,7 @@ import type {
 import type { CanvasLayoutItem } from '@/components/workbench/canvas/types';
 import { buildCanvasStateSnapshot } from '@/lib/workbench/buildCanvasStateSnapshot';
 import { partitionWorkbenchActionsForAutoApply } from '@/lib/workbench/workbenchChatHandoff';
+import { resolveWorkbenchTopicSuggestions } from '@/lib/unifiedChatSuggestedPrompts';
 
 // ---------------------------------------------------------------------------
 // Tenant resolution helper – mirrors logic from useCohiChat
@@ -119,13 +120,8 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         'Compare this to prior year performance',
       ];
     }
-    return [
-      'Prepare a board-ready overview of this month\'s performance',
-      'Summarize pipeline health and pull-through trends',
-      'What needs my attention right now?',
-      'Build an executive dashboard with key KPIs',
-    ];
-  }, [sourceInsight?.headline]);
+    return resolveWorkbenchTopicSuggestions(canvasItems.length > 0);
+  }, [sourceInsight?.headline, canvasItems.length]);
 
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>(defaultSuggestions);
 

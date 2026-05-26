@@ -68,7 +68,16 @@ import {
 import {
   CHAT_TYPE_DEFAULT_SUGGESTIONS,
   DEFAULT_CHAT_SUGGESTIONS,
+  resolveWorkbenchTopicSuggestions,
 } from "@/lib/unifiedChatSuggestedPrompts";
+import { isWorkbenchCanvasPopulated } from "@/lib/workbench/workbenchChatScopeSync";
+
+function defaultSuggestionsForChatType(type: UnifiedChatType): string[] {
+  if (type === "workbench") {
+    return resolveWorkbenchTopicSuggestions(isWorkbenchCanvasPopulated());
+  }
+  return CHAT_TYPE_DEFAULT_SUGGESTIONS[type];
+}
 import {
   sendUnifiedGlobalStream,
   sendUnifiedWorkbenchStream,
@@ -555,7 +564,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   }, [chatType, setWorkbenchChatScopeRef]);
 
   useEffect(() => {
-    setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
+    setSuggestedQuestions(defaultSuggestionsForChatType(chatType));
   }, [chatType]);
 
   /** Resolve tenant for request */
@@ -693,7 +702,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   );
 
   const bindResearchSessionAfterStream = useCallback(
-    (
+    async (
       client: ReturnType<typeof createUnifiedChatClient>,
       conversationId: string,
       researchSessionId?: string | null,
@@ -704,14 +713,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         activeResearchSessionIdRef.current = bound;
         setLegacyRef(bound);
       }
-      void client.getConversation(conversationId).then((row) => {
+      try {
+        const row = await client.getConversation(conversationId);
         if (row.legacy_ref) {
           activeResearchSessionIdRef.current = row.legacy_ref;
           setLegacyRef(row.legacy_ref);
         }
         const links = forkLinksFromConversationRow(row);
         if (links) setConversationForkLinks(links);
-      });
+      } catch (err) {
+        console.warn("[CohiChat] Failed to bind research session:", err);
+      }
     },
     [],
   );
@@ -804,8 +816,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         isLoading: true,
       };
 
-      if (chatType === "research") {
+      if (chatType === "research" && isNewConversation) {
         activeResearchSessionIdRef.current = null;
+        setLegacyRef(null);
       }
 
       if (forceNew) {
@@ -1067,7 +1080,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
             if (chatType === "research") {
-              bindResearchSessionAfterStream(
+              await bindResearchSessionAfterStream(
                 client,
                 conversationId,
                 researchSessionId,
@@ -1424,7 +1437,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               onStreamText,
             });
             if (chatType === "research") {
-              bindResearchSessionAfterStream(
+              await bindResearchSessionAfterStream(
                 client,
                 conversationId,
                 researchSessionId,
@@ -1605,7 +1618,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     setHasPendingForkCarryOver(false);
     forkUndoRef.current = null;
     resetWorkbenchChatSession();
-    setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
+    setSuggestedQuestions(defaultSuggestionsForChatType(chatType));
   }, [resetWorkbenchChatSession, chatType]);
 
   const dismissPendingForkLink = useCallback(() => {
@@ -1977,7 +1990,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
         setMessages(loadedMessages);
         setSessionId(targetSessionId);
-        setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
+        setSuggestedQuestions(defaultSuggestionsForChatType(chatType));
         return { datasetUploadIds: [], chatType };
       } catch (error) {
         console.error("[CohiChat] Failed to load session:", error);
