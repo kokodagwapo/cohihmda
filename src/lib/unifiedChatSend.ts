@@ -51,6 +51,8 @@ export interface SendUnifiedGlobalResult {
   parsed: ParsedGlobalUnifiedFields;
   /** Research Lab: stream ended after handshake; findings load via session polling. */
   researchPollMode?: boolean;
+  /** Research Lab session id from stream metadata (poll mode). */
+  researchSessionId?: string;
 }
 
 function blocksToEnvelope(
@@ -140,11 +142,16 @@ export async function sendUnifiedGlobalStream(
   }
 
   const researchPollMode = result.metadata?.researchPollMode === true;
+  const researchSessionId =
+    typeof result.metadata?.researchSessionId === "string"
+      ? result.metadata.researchSessionId
+      : undefined;
 
   return {
     conversationId: result.conversationId,
     parsed,
     researchPollMode,
+    researchSessionId,
   };
 }
 

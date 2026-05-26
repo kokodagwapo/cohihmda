@@ -564,6 +564,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     conversationForkLinks,
     beginChatTypeFork,
     undoChatTypeFork,
+    clearConversationBinding,
     workbenchChatScope = null,
     workbenchScopePinned = false,
     workbenchPinnedScopeLabel = null,
@@ -1213,7 +1214,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             userTurnCount,
           })
         : isShellCompact;
-    expandShellIfCompact();
+    if (isResearchMode) {
+      setShellExpandMode("full");
+    } else {
+      expandShellIfCompact();
+    }
     if (forceNewConversation) {
       setResearchViewOnly(false);
     }
@@ -1524,6 +1529,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           duration: 8000,
         });
         forkUndoToastRef.current = { dismiss };
+      } else if (
+        prev === "workbench" &&
+        next === "research" &&
+        currentSessionId
+      ) {
+        clearConversationBinding();
       }
 
       setActiveChatType(next);
@@ -1532,6 +1543,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       activeChatType,
       beginChatTypeFork,
       chatSessions,
+      clearConversationBinding,
       currentSessionId,
       messages,
       setActiveChatType,
@@ -2855,7 +2867,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
         {showResearchWorkspace && (
           <AnimatePresence initial={false}>
-            {!isShellCompact && (
+            {(!isShellCompact || legacyRef) && (
               <motion.div
                 key="research-workspace"
                 initial={{ opacity: 0 }}

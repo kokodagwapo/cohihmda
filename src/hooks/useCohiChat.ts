@@ -602,16 +602,44 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       if (ev.conversationId) {
         setSessionId(ev.conversationId);
       }
-      if (chatType === "research" && ev.metadata) {
-        const researchSessionId = ev.metadata.researchSessionId;
-        if (typeof researchSessionId === "string" && researchSessionId) {
-          activeResearchSessionIdRef.current = researchSessionId;
-          setLegacyRef(researchSessionId);
-        }
+      const researchSessionId = ev.metadata?.researchSessionId;
+      if (typeof researchSessionId === "string" && researchSessionId) {
+        activeResearchSessionIdRef.current = researchSessionId;
+        setLegacyRef(researchSessionId);
       }
     },
-    [chatType],
+    [],
   );
+
+  const bindResearchSessionAfterStream = useCallback(
+    (
+      client: ReturnType<typeof createUnifiedChatClient>,
+      conversationId: string,
+      researchSessionId?: string | null,
+    ) => {
+      const bound =
+        researchSessionId ?? activeResearchSessionIdRef.current ?? null;
+      if (bound) {
+        activeResearchSessionIdRef.current = bound;
+        setLegacyRef(bound);
+      }
+      void client.getConversation(conversationId).then((row) => {
+        if (row.legacy_ref) {
+          activeResearchSessionIdRef.current = row.legacy_ref;
+          setLegacyRef(row.legacy_ref);
+        }
+      });
+    },
+    [],
+  );
+
+  /** Drop unified conversation binding when leaving workbench mode (e.g. switch to research on canvas). */
+  const clearConversationBinding = useCallback(() => {
+    viewingSessionRef.current = null;
+    setSessionId(null);
+    setLegacyRef(null);
+    activeResearchSessionIdRef.current = null;
+  }, []);
 
   /**
    * Send a question and get AI response
@@ -867,7 +895,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               ? registerNewUnifiedConversation({ type: "global_session" })
               : activeSessionId!;
             beginStreamRun(streamConversationId);
-            const { conversationId, parsed, researchPollMode } =
+            const { conversationId, parsed, researchPollMode, researchSessionId } =
               await sendUnifiedGlobalStream({
               client,
               message: effectiveQuestion,
@@ -932,9 +960,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
             if (chatType === "research") {
-              void client.getConversation(conversationId).then((row) => {
-                if (row.legacy_ref) setLegacyRef(row.legacy_ref);
-              });
+              bindResearchSessionAfterStream(
+                client,
+                conversationId,
+                researchSessionId,
+              );
             }
             endStreamRun(streamConversationId);
           }
@@ -1307,6 +1337,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             );
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
+            }
+            if (chatType === "research") {
+              bindResearchSessionAfterStream(
+                client,
+                conversationId,
+                researchSessionId,
+              );
             }
             if (streamConversationId) endRefineRun(streamConversationId);
           }
@@ -2115,6 +2152,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     conversationForkLinks,
     beginChatTypeFork,
     undoChatTypeFork,
+    clearConversationBinding,
     workbenchSavedCanvasId,
     workbenchChatScope,
     workbenchScopePinned,
