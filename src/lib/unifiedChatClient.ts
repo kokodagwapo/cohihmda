@@ -194,12 +194,11 @@ export class UnifiedChatClient {
       `${CHAT_V1_CONVERSATIONS_PATH}${qs ? `?${qs}` : ""}`,
       tid,
     );
-    const skipCache =
-      query?.shared_with_me ||
-      (query?.scope_type === "draft" || query?.scope_type === "canvas");
     const res = await api.request<{ conversations: UnifiedConversationSummary[] }>(
       path,
-      skipCache ? { headers: { "Cache-Control": "no-cache" } } : {},
+      query?.shared_with_me
+        ? { headers: { "Cache-Control": "no-cache" } }
+        : {},
     );
     return res.conversations ?? [];
   }

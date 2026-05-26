@@ -310,13 +310,15 @@ export function ChatHistorySidebar({
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
+  const onFetchSessionsRef = useRef(onFetchSessions);
+  onFetchSessionsRef.current = onFetchSessions;
 
+  // Fetch only when the panel opens — not on every parent re-render (avoids API storms).
   useEffect(() => {
-    if (isOpen) {
-      onFetchSessions();
-      setSearchQuery("");
-    }
-  }, [isOpen, onFetchSessions]);
+    if (!isOpen) return;
+    onFetchSessionsRef.current();
+    setSearchQuery("");
+  }, [isOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

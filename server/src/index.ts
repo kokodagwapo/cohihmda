@@ -183,6 +183,14 @@ app.use((req, res, next) => {
   if (req.path === "/health") {
     return next();
   }
+  // Public read-only config used on every login page load — must not share chat API budget
+  if (
+    req.method === "GET" &&
+    (req.path === "/api/auth/cognito/config" ||
+      req.originalUrl.split("?")[0] === "/api/auth/cognito/config")
+  ) {
+    return next();
+  }
   return apiLimiter(req, res, next);
 });
 
