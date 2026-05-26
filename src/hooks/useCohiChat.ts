@@ -127,10 +127,29 @@ export interface ChatTypeForkUndoState {
 }
 
 export interface ConversationForkLinks {
+  /** Explicit DB parent_conversation_id (not history list order). */
   parentConversationId?: string | null;
   parentTitle?: string | null;
+  /** Explicit DB forked_to_conversation_id on the parent row. */
   forkedToConversationId?: string | null;
   forkedToTitle?: string | null;
+}
+
+function forkLinksFromConversationRow(row: {
+  parent_conversation_id?: string | null;
+  forked_to_conversation_id?: string | null;
+  parent_conversation_title?: string | null;
+  forked_to_conversation_title?: string | null;
+}): ConversationForkLinks | null {
+  const parentConversationId = row.parent_conversation_id ?? null;
+  const forkedToConversationId = row.forked_to_conversation_id ?? null;
+  if (!parentConversationId && !forkedToConversationId) return null;
+  return {
+    parentConversationId,
+    parentTitle: row.parent_conversation_title ?? null,
+    forkedToConversationId,
+    forkedToTitle: row.forked_to_conversation_title ?? null,
+  };
 }
 
 // ============================================================================
@@ -487,6 +506,60 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     }
   }, [tenantId]);
 
+  // Resolve linked conversation titles when we only have fork UUIDs (e.g. mid-fork UI).
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined" || !isUnifiedChatClientEnabled()) {
+      return;
+    }
+    const links = conversationForkLinks;
+    if (!links) return;
+    const parentId = links.parentConversationId;
+    const childId = links.forkedToConversationId;
+    if (
+      (!parentId || links.parentTitle) &&
+      (!childId || links.forkedToTitle)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+        const [parentRow, childRow] = await Promise.all([
+          parentId && !links.parentTitle
+            ? client.getConversation(parentId).catch(() => null)
+            : null,
+          childId && !links.forkedToTitle
+            ? client.getConversation(childId).catch(() => null)
+            : null,
+        ]);
+        if (cancelled) return;
+        setConversationForkLinks((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            ...(parentRow?.title ? { parentTitle: parentRow.title } : {}),
+            ...(childRow?.title ? { forkedToTitle: childRow.title } : {}),
+          };
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    conversationForkLinks?.parentConversationId,
+    conversationForkLinks?.forkedToConversationId,
+    conversationForkLinks?.parentTitle,
+    conversationForkLinks?.forkedToTitle,
+    getEffectiveTenantId,
+    tenantId,
+  ]);
+
   // Initialize session when chat is active and tenant context is available.
   useEffect(() => {
     if (!enabled || sessionId) return;
@@ -762,6 +835,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
+            void client.getConversation(conversationId).then((row) => {
+              const links = forkLinksFromConversationRow(row);
+              if (links) setConversationForkLinks(links);
+            });
             endStreamRun(streamConversationId);
           } else {
             const ibOpts = options?.insightBuilder;
@@ -838,11 +915,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
-            if (chatType === "research") {
-              void client.getConversation(conversationId).then((row) => {
-                if (row.legacy_ref) setLegacyRef(row.legacy_ref);
-              });
-            }
+            void client.getConversation(conversationId).then((row) => {
+              if (row.legacy_ref) setLegacyRef(row.legacy_ref);
+              const links = forkLinksFromConversationRow(row);
+              if (links) setConversationForkLinks(links);
+            });
             endStreamRun(streamConversationId);
           }
         } else {
@@ -1502,10 +1579,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             return { datasetUploadIds: [] };
           }
           const loadedChatType = (row.chat_type ?? chatType) as UnifiedChatType;
-          setConversationForkLinks({
-            parentConversationId: row.parent_conversation_id ?? null,
-            forkedToConversationId: row.forked_to_conversation_id ?? null,
-          });
+          setConversationForkLinks(forkLinksFromConversationRow(row) ?? null);
           const rowScope = row.scope;
 
           if (loadedChatType === "workbench" && rowScope?.id) {

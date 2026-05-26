@@ -29,6 +29,7 @@ import { runSqlThroughRouter } from "./sqlAndMetricsRouter.js";
 import { createVisualizationArtifactId } from "./artifactService.js";
 import { runInsightBuilderTurn, type InsightBuilderDraft } from "./insightBuilderTurn.js";
 import { runUnifiedResearchTurn } from "./unifiedResearchChat.js";
+import { readCarryOverContext } from "./chatConversationFork.js";
 import {
   findUnifiedConversationByLegacyRef,
   getUnifiedConversation,
@@ -429,6 +430,7 @@ export async function processUnifiedChatMessage(
       deepAnalysis: body.options?.research?.deepAnalysis,
       uploadIds: resolvedUploadIds,
       policy,
+      carryOver: readCarryOverContext(body),
     });
     blocks = research.blocks;
       metadata = {

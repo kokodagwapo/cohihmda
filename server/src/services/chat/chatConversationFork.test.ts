@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatCarryOverPriorContext,
+  formatCarryOverSteeringDirective,
   prependCarryOverToHistory,
   readCarryOverContext,
 } from "./chatConversationFork.js";
@@ -29,5 +31,29 @@ describe("chatConversationFork", () => {
     prependCarryOverToHistory(body, carry!);
     expect(body.history?.[0]?.content).toContain("Context carried over");
     expect(body.history?.[0]?.content).toContain("MTD build");
+  });
+
+  it("formatCarryOverPriorContext includes summary and chat type", () => {
+    const carry = {
+      fromConversationId: "11111111-1111-4111-8111-111111111111",
+      fromChatType: "chat",
+      fromTitle: "Pipeline Q&A",
+      summary: "User asked about pull-through.",
+    };
+    const ctx = formatCarryOverPriorContext(carry);
+    expect(ctx).toContain("PRIOR CHAT CONTEXT");
+    expect(ctx).toContain("Pipeline Q&A");
+    expect(ctx).toContain("pull-through");
+  });
+
+  it("formatCarryOverSteeringDirective includes summary", () => {
+    const carry = {
+      fromConversationId: "11111111-1111-4111-8111-111111111111",
+      fromChatType: "workbench",
+      summary: "Built MTD widgets.",
+    };
+    const directive = formatCarryOverSteeringDirective(carry);
+    expect(directive).toContain("workbench");
+    expect(directive).toContain("MTD widgets");
   });
 });

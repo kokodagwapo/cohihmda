@@ -41,6 +41,10 @@ export interface UnifiedConversationListRow {
 
 export interface UnifiedConversationDetail extends UnifiedConversationListRow {
   messages: unknown[];
+  /** Title of {@link parent_conversation_id} row (fork link, not list order). */
+  parent_conversation_title?: string | null;
+  /** Title of {@link forked_to_conversation_id} row (fork link, not list order). */
+  forked_to_conversation_title?: string | null;
 }
 
 async function ensureTable(tenantId: string): Promise<boolean> {
@@ -328,11 +332,17 @@ export async function getUnifiedConversation(args: {
   const pool = await tenantDbManager.getTenantPool(args.tenantId);
   const r = await pool.query(
     `
-    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id,
-           parent_conversation_id, forked_to_conversation_id, conversation_origin,
-           messages, created_at, updated_at
-    FROM public.unified_chat_conversations
-    WHERE id = $1::uuid AND user_id = $2::uuid
+    SELECT c.id, c.title, c.scope_type, c.scope_key, c.chat_type, c.legacy_ref, c.legacy_source,
+           c.folder_id, c.parent_conversation_id, c.forked_to_conversation_id, c.conversation_origin,
+           c.messages, c.created_at, c.updated_at,
+           p.title AS parent_conversation_title,
+           f.title AS forked_to_conversation_title
+    FROM public.unified_chat_conversations c
+    LEFT JOIN public.unified_chat_conversations p
+      ON p.id = c.parent_conversation_id AND p.user_id = c.user_id
+    LEFT JOIN public.unified_chat_conversations f
+      ON f.id = c.forked_to_conversation_id AND f.user_id = c.user_id
+    WHERE c.id = $1::uuid AND c.user_id = $2::uuid
     LIMIT 1
     `,
     [args.conversationId, args.userId],
@@ -351,6 +361,8 @@ export async function getUnifiedConversation(args: {
     parent_conversation_id: row.parent_conversation_id ?? null,
     forked_to_conversation_id: row.forked_to_conversation_id ?? null,
     conversation_origin: row.conversation_origin ?? null,
+    parent_conversation_title: row.parent_conversation_title ?? null,
+    forked_to_conversation_title: row.forked_to_conversation_title ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     messages: Array.isArray(row.messages) ? row.messages : [],

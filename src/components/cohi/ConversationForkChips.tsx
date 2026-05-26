@@ -26,6 +26,11 @@ export function ConversationForkChips({
       ? conversationTitles?.[links.forkedToConversationId]
       : null);
 
+  const formatForkLabel = (title: string | null | undefined, fallback: string) => {
+    const trimmed = title?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : fallback;
+  };
+
   if (!links.parentConversationId && !links.forkedToConversationId) {
     return null;
   }
@@ -41,21 +46,27 @@ export function ConversationForkChips({
       {links.parentConversationId ? (
         <button
           type="button"
-          className="inline-flex items-center gap-0.5 rounded-full border border-violet-200/80 bg-violet-50/80 px-2 py-0.5 font-medium hover:bg-violet-100 dark:border-violet-800/60 dark:bg-violet-950/40 dark:hover:bg-violet-900/50"
+          title={formatForkLabel(parentTitle, "Previous chat")}
+          className="inline-flex max-w-[min(100%,20rem)] items-center gap-0.5 rounded-full border border-violet-200/80 bg-violet-50/80 px-2 py-0.5 font-medium hover:bg-violet-100 dark:border-violet-800/60 dark:bg-violet-950/40 dark:hover:bg-violet-900/50"
           onClick={() => onNavigate(links.parentConversationId!)}
         >
           <Link2 className="h-2.5 w-2.5 shrink-0" />
-          Continued from {parentTitle ?? "previous chat"}
+          <span className="truncate">
+            Continued from {formatForkLabel(parentTitle, "previous chat")}
+          </span>
         </button>
       ) : null}
       {links.forkedToConversationId ? (
         <button
           type="button"
-          className="inline-flex items-center gap-0.5 rounded-full border border-slate-200/80 bg-slate-50/80 px-2 py-0.5 font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-300 dark:hover:bg-slate-800/50"
+          title={formatForkLabel(childTitle, "New chat")}
+          className="inline-flex max-w-[min(100%,20rem)] items-center gap-0.5 rounded-full border border-slate-200/80 bg-slate-50/80 px-2 py-0.5 font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-300 dark:hover:bg-slate-800/50"
           onClick={() => onNavigate(links.forkedToConversationId!)}
         >
           <Link2 className="h-2.5 w-2.5 shrink-0" />
-          Continued in {childTitle ?? "new chat"}
+          <span className="truncate">
+            Continued in {formatForkLabel(childTitle, "new chat")}
+          </span>
         </button>
       ) : null}
     </div>

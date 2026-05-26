@@ -25,11 +25,39 @@ export function readCarryOverContext(
   };
 }
 
+function carryOverLabel(carryOver: CarryOverContextPayload): string {
+  return carryOver.fromChatType ?? "previous";
+}
+
+/** Planner / synthesis context block for Research Lab (deep mode). */
+export function formatCarryOverPriorContext(carryOver: CarryOverContextPayload): string {
+  const label = carryOverLabel(carryOver);
+  const titlePart = carryOver.fromTitle ? ` "${carryOver.fromTitle}"` : "";
+  return [
+    `PRIOR CHAT CONTEXT — User switched from ${label} conversation${titlePart}:`,
+    carryOver.summary,
+    "Build on this context. Continue the investigation from where the prior conversation left off.",
+  ].join("\n");
+}
+
+/** Analyst steering directive for Research Lab (quick + deep). */
+export function formatCarryOverSteeringDirective(
+  carryOver: CarryOverContextPayload,
+): string {
+  const label = carryOverLabel(carryOver);
+  const titlePart = carryOver.fromTitle ? ` "${carryOver.fromTitle}"` : "";
+  return [
+    `PRIOR CHAT CONTEXT — The user switched chat mode from a ${label} conversation${titlePart}:`,
+    carryOver.summary,
+    "Use this as background when answering the current research question. Go deeper where the prior thread left open questions.",
+  ].join("\n");
+}
+
 export function prependCarryOverToHistory(
   body: UnifiedChatRequestBody,
   carryOver: CarryOverContextPayload,
 ): void {
-  const label = carryOver.fromChatType ?? "previous";
+  const label = carryOverLabel(carryOver);
   const prefix = {
     role: "user" as const,
     content: `[Context carried over from ${label} conversation${carryOver.fromTitle ? ` "${carryOver.fromTitle}"` : ""}]\n${carryOver.summary}`,
