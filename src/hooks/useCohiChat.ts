@@ -294,8 +294,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const loadSessionGenerationRef = useRef(0);
   const pendingCarryOverRef = useRef<CarryOverContext | null>(null);
   const forkUndoRef = useRef<ChatTypeForkUndoState | null>(null);
+  const workbenchSessionsInflightRef = useRef<Promise<void> | null>(null);
+  const workbenchSessionsLastAtRef = useRef(0);
   const [conversationForkLinks, setConversationForkLinks] =
     useState<ConversationForkLinks | null>(null);
+
+  const WORKBENCH_SESSIONS_MIN_INTERVAL_MS = 2_000;
 
   useEffect(() => {
     viewingSessionRef.current = sessionId;
@@ -1319,58 +1323,82 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    * Fetch workbench sessions linked to the active canvas scope.
    */
   const fetchWorkbenchCanvasSessions = useCallback(async () => {
-    setIsLoadingSessions(true);
-    try {
-      const effectiveTenantId = await getEffectiveTenantId();
-      if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
-        const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
-        const draftScopeId = resolveWorkbenchDraftScopeId();
-        const bridge = getWorkbenchCanvasBridge();
-        const canvasId =
-          workbenchSavedCanvasId ??
-          getConnectedWorkbenchCanvasId() ??
-          (bridge?.isActive ? bridge.canvasId : null) ??
-          getWorkbenchCanvasIdForDraft(draftScopeId);
-        const lists = await Promise.all([
-          client.listConversations({
-            scope_type: "draft",
-            scope_key: draftScopeId,
-            chat_type: "workbench",
-            limit: 50,
-          }),
-          ...(canvasId
-            ? [
-                client.listConversations({
-                  scope_type: "canvas",
-                  scope_key: canvasId,
-                  chat_type: "workbench",
-                  limit: 50,
-                }),
-              ]
-            : []),
-        ]);
-        const byId = new Map<string, UnifiedConversationSummary>();
-        for (const r of lists.flat()) byId.set(r.id, r);
-        const rows = [...byId.values()].sort(
-          (a, b) =>
-            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-        );
-        setChatSessions(
-          rows.map((r) => ({
-            id: r.id,
-            title: r.title,
-            messageCount: 0,
-            lastMessageAt: r.updated_at,
-            createdAt: r.created_at ?? r.updated_at,
-          })),
-        );
-        return;
+    if (workbenchSessionsInflightRef.current) {
+      return workbenchSessionsInflightRef.current;
+    }
+    const now = Date.now();
+    if (
+      now - workbenchSessionsLastAtRef.current <
+      WORKBENCH_SESSIONS_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    const run = (async () => {
+      setIsLoadingSessions(true);
+      try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+          const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
+          const draftScopeId = resolveWorkbenchDraftScopeId();
+          const bridge = getWorkbenchCanvasBridge();
+          const canvasId =
+            workbenchSavedCanvasId ??
+            getConnectedWorkbenchCanvasId() ??
+            (bridge?.isActive ? bridge.canvasId : null) ??
+            getWorkbenchCanvasIdForDraft(draftScopeId);
+          const lists = await Promise.all([
+            client.listConversations({
+              scope_type: "draft",
+              scope_key: draftScopeId,
+              chat_type: "workbench",
+              limit: 50,
+            }),
+            ...(canvasId
+              ? [
+                  client.listConversations({
+                    scope_type: "canvas",
+                    scope_key: canvasId,
+                    chat_type: "workbench",
+                    limit: 50,
+                  }),
+                ]
+              : []),
+          ]);
+          const byId = new Map<string, UnifiedConversationSummary>();
+          for (const r of lists.flat()) byId.set(r.id, r);
+          const rows = [...byId.values()].sort(
+            (a, b) =>
+              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+          );
+          setChatSessions(
+            rows.map((r) => ({
+              id: r.id,
+              title: r.title,
+              messageCount: 0,
+              lastMessageAt: r.updated_at,
+              createdAt: r.created_at ?? r.updated_at,
+            })),
+          );
+          workbenchSessionsLastAtRef.current = Date.now();
+          return;
+        }
+        setChatSessions([]);
+        workbenchSessionsLastAtRef.current = Date.now();
+      } catch (error) {
+        console.error("[CohiChat] Failed to fetch workbench sessions:", error);
+      } finally {
+        setIsLoadingSessions(false);
       }
-      setChatSessions([]);
-    } catch (error) {
-      console.error("[CohiChat] Failed to fetch workbench sessions:", error);
+    })();
+
+    workbenchSessionsInflightRef.current = run;
+    try {
+      await run;
     } finally {
-      setIsLoadingSessions(false);
+      if (workbenchSessionsInflightRef.current === run) {
+        workbenchSessionsInflightRef.current = null;
+      }
     }
   }, [getEffectiveTenantId, tenantId, workbenchSavedCanvasId]);
 
