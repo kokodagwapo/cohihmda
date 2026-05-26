@@ -325,11 +325,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const viewingSessionRef = useRef<string | null>(null);
   const loadSessionGenerationRef = useRef(0);
   const pendingCarryOverRef = useRef<CarryOverContext | null>(null);
+  const dismissedForkCarryOverRef = useRef<CarryOverContext | null>(null);
   const forkUndoRef = useRef<ChatTypeForkUndoState | null>(null);
   const workbenchSessionsInflightRef = useRef<Promise<void> | null>(null);
   const workbenchSessionsLastAtRef = useRef(0);
   const [conversationForkLinks, setConversationForkLinks] =
     useState<ConversationForkLinks | null>(null);
+  /** True after chat-type fork until the first message is sent (carry-over not persisted). */
+  const [hasPendingForkCarryOver, setHasPendingForkCarryOver] = useState(false);
 
   const WORKBENCH_SESSIONS_MIN_INTERVAL_MS = 2_000;
 
@@ -670,6 +673,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         options?.carryOverContext ?? pendingCarryOverRef.current ?? undefined;
       if (carryOver) {
         pendingCarryOverRef.current = null;
+        dismissedForkCarryOverRef.current = null;
+        setHasPendingForkCarryOver(false);
       }
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
@@ -1387,10 +1392,32 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     setLegacyRef(null);
     setConversationForkLinks(null);
     pendingCarryOverRef.current = null;
+    dismissedForkCarryOverRef.current = null;
+    setHasPendingForkCarryOver(false);
     forkUndoRef.current = null;
     resetWorkbenchChatSession();
     setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
   }, [resetWorkbenchChatSession, chatType]);
+
+  const dismissPendingForkLink = useCallback(() => {
+    dismissedForkCarryOverRef.current = pendingCarryOverRef.current;
+    pendingCarryOverRef.current = null;
+    setConversationForkLinks(null);
+    setHasPendingForkCarryOver(false);
+  }, []);
+
+  const restoreDismissedForkLink = useCallback((): boolean => {
+    const carryOver = dismissedForkCarryOverRef.current;
+    if (!carryOver) return false;
+    dismissedForkCarryOverRef.current = null;
+    pendingCarryOverRef.current = carryOver;
+    setConversationForkLinks({
+      parentConversationId: carryOver.fromConversationId,
+      parentTitle: carryOver.fromTitle ?? "Previous chat",
+    });
+    setHasPendingForkCarryOver(true);
+    return true;
+  }, []);
 
   const beginChatTypeFork = useCallback(
     (carryOver: CarryOverContext, previousChatType: UnifiedChatType) => {
@@ -1411,6 +1438,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         parentConversationId: carryOver.fromConversationId,
         parentTitle: carryOver.fromTitle ?? "Previous chat",
       });
+      setHasPendingForkCarryOver(true);
+      dismissedForkCarryOverRef.current = null;
     },
     [sessionId, messages, legacyRef, conversationForkLinks],
   );
@@ -1420,6 +1449,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     if (!undo) return null;
     forkUndoRef.current = null;
     pendingCarryOverRef.current = null;
+    dismissedForkCarryOverRef.current = null;
+    setHasPendingForkCarryOver(false);
     setSessionId(undo.sessionId);
     viewingSessionRef.current = undo.sessionId;
     setMessages(undo.messages);
@@ -1628,6 +1659,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           }
           const loadedChatType = (row.chat_type ?? chatType) as UnifiedChatType;
           setConversationForkLinks(forkLinksFromConversationRow(row) ?? null);
+          setHasPendingForkCarryOver(false);
           const rowScope = row.scope;
 
           if (loadedChatType === "workbench" && rowScope?.id) {
@@ -2069,6 +2101,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     deleteSession,
     renameSession,
     conversationForkLinks,
+    hasPendingForkCarryOver,
+    dismissPendingForkLink,
+    restoreDismissedForkLink,
     beginChatTypeFork,
     undoChatTypeFork,
     workbenchSavedCanvasId,

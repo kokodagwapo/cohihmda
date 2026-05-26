@@ -561,6 +561,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     deleteSession,
     renameSession,
     conversationForkLinks,
+    hasPendingForkCarryOver,
+    dismissPendingForkLink,
+    restoreDismissedForkLink,
     beginChatTypeFork,
     undoChatTypeFork,
     workbenchChatScope = null,
@@ -1470,7 +1473,74 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [activeChatType, legacyRef]);
 
-  const forkUndoToastRef = useRef<{ dismiss: () => void } | null>(null);
+  const forkUndoToastRef = useRef<{
+    dismiss: () => void;
+    update: (props: Parameters<ReturnType<typeof toast>["update"]>[0]) => void;
+  } | null>(null);
+
+  const handleDismissPendingForkLink = useCallback(() => {
+    dismissPendingForkLink();
+
+    const carriedOverToastProps = {
+      title: `Started a new ${formatChatTypeLabel(activeChatType)} chat`,
+      description: "Context from your previous conversation was carried over.",
+      action: (
+        <ToastAction
+          altText="Undo chat type switch"
+          onClick={() => {
+            forkUndoToastRef.current?.dismiss();
+            forkUndoToastRef.current = null;
+            const restored = undoChatTypeFork?.();
+            if (restored) {
+              setActiveChatType(restored.chatType);
+            }
+          }}
+        >
+          Undo
+        </ToastAction>
+      ),
+      duration: 8000,
+      open: true,
+    };
+
+    const removalToastProps = {
+      title: `New ${formatChatTypeLabel(activeChatType)} chat`,
+      description:
+        "Context from your previous conversation was removed from this chat.",
+      action: (
+        <ToastAction
+          altText="Restore link to previous chat"
+          onClick={() => {
+            if (restoreDismissedForkLink()) {
+              forkUndoToastRef.current?.update(carriedOverToastProps);
+            }
+          }}
+        >
+          Undo
+        </ToastAction>
+      ),
+      duration: 8000,
+      open: true,
+    };
+
+    const existing = forkUndoToastRef.current;
+    if (existing?.update) {
+      existing.update(removalToastProps);
+      return;
+    }
+
+    existing?.dismiss?.();
+    window.setTimeout(() => {
+      forkUndoToastRef.current = toast(removalToastProps);
+    }, 0);
+  }, [
+    activeChatType,
+    dismissPendingForkLink,
+    restoreDismissedForkLink,
+    setActiveChatType,
+    toast,
+    undoChatTypeFork,
+  ]);
 
   const handleChatTypeChange = useCallback(
     (next: UnifiedChatType) => {
@@ -1517,14 +1587,15 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             prev,
           );
           forkUndoToastRef.current?.dismiss();
-          const { dismiss } = toast({
+          forkUndoToastRef.current = toast({
             title: `Started a new ${formatChatTypeLabel(next)} chat`,
             description: "Context from your previous conversation was carried over.",
             action: (
               <ToastAction
                 altText="Undo chat type switch"
                 onClick={() => {
-                  dismiss();
+                  forkUndoToastRef.current?.dismiss();
+                  forkUndoToastRef.current = null;
                   const restored = undoChatTypeFork?.();
                   if (restored) {
                     setActiveChatType(restored.chatType);
@@ -1536,7 +1607,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             ),
             duration: 8000,
           });
-          forkUndoToastRef.current = { dismiss };
         })();
       }
 
@@ -2506,6 +2576,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             chatSessions.map((s) => [s.id, s.title]),
           )}
           onNavigate={(id) => void handleLoadSession(id)}
+          onDismissPendingLink={
+            hasPendingForkCarryOver ? handleDismissPendingForkLink : undefined
+          }
           className="px-1 pb-1"
         />
       )}
