@@ -755,14 +755,8 @@ export function UnifiedChatSidebarSections({
   } = useUnifiedChatHistory(tenantId, { recentLimit: SIDEBAR_FETCH_LIMIT });
   const { toast } = useToast();
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
-    () => new Set([SHARED_WITH_ME_FOLDER_ID]),
+    () => new Set(),
   );
-
-  useEffect(() => {
-    if (sharedConversations.length > 0) {
-      setExpandedFolderIds((prev) => new Set(prev).add(SHARED_WITH_ME_FOLDER_ID));
-    }
-  }, [sharedConversations.length]);
   const [foldersExpanded, setFoldersExpanded] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(true);
 
