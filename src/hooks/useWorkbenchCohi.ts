@@ -20,6 +20,7 @@ import type {
 } from '@/types/widgetActions';
 import type { CanvasLayoutItem } from '@/components/workbench/canvas/types';
 import { buildCanvasStateSnapshot } from '@/lib/workbench/buildCanvasStateSnapshot';
+import { partitionWorkbenchActionsForAutoApply } from '@/lib/workbench/workbenchChatHandoff';
 
 // ---------------------------------------------------------------------------
 // Tenant resolution helper – mirrors logic from useCohiChat
@@ -298,17 +299,13 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
           prev.map((m) => (m.id === loadingId ? assistantMessage : m))
         );
 
-        // Auto-execute canvas-modifying actions so widgets appear immediately
+        // Auto-execute canvas-modifying actions (dashboard suggestions wait for user confirm)
         if (response.actions?.length && onAutoExecuteActions) {
-          const executableTypes = new Set([
-            'add_existing_widget', 'create_widget', 'create_canvas',
-            'suggest_dashboard', 'modify_widget', 'modify_group',
-            'modify_registry_widget', 'create_dashboard', 'convert_to_sql_widget',
-            'delete_widget',
-          ]);
-          const autoActions = response.actions.filter((a) => executableTypes.has(a.type));
-          if (autoActions.length > 0) {
-            onAutoExecuteActions(autoActions);
+          const { autoApply } = partitionWorkbenchActionsForAutoApply(
+            response.actions as WidgetAction[],
+          );
+          if (autoApply.length > 0) {
+            onAutoExecuteActions(autoApply);
           }
         }
 

@@ -96,6 +96,7 @@ import {
   type WorkbenchEditWidgetEventDetail,
   type WorkbenchEditingWidgetStateDetail,
   describeWorkbenchActionsApplied,
+  formatWorkbenchSectionKey,
   shouldForceNewWorkbenchConversation,
   buildCarryOverContext,
   shouldForkOnChatTypeChange,
@@ -107,6 +108,11 @@ import {
 } from "@/lib/workbench/workbenchChatScopeSync";
 import { ConversationForkChips } from "@/components/cohi/ConversationForkChips";
 import { useWorkbenchChatScopeGuard } from "@/components/cohi/WorkbenchChatScopeGuard";
+import {
+  WorkbenchDashboardSuggestionCard,
+  filterSuggestDashboardActions,
+} from "@/components/workbench/WorkbenchDashboardSuggestionCard";
+import type { SuggestDashboardAction } from "@/types/widgetActions";
 import { formatChatTypeLabel } from "@/lib/unifiedChatTypeStyles";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { PAGE_INSIGHTS_CARD } from "@/components/cohi/pageContentStyles";
@@ -567,6 +573,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     syncWorkbenchChatToActiveContext = async () => {},
     resetWorkbenchStreamUiForHandoff = () => {},
     resolveScopeMismatchActions = () => {},
+    applyWorkbenchDashboardSuggestion = () => {},
   } = unifiedSession ?? legacyChat;
 
   const activeChatType = unifiedSession?.chatType ?? chatType;
@@ -3028,6 +3035,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                     (message.insightBuilderPhase === "approved" ||
                       idx !== lastInsightBuilderDraftIdx)
                   }
+                  workbenchPendingActions={message.workbenchPendingActions}
+                  onApplyWorkbenchDashboardSuggestion={
+                    applyWorkbenchDashboardSuggestion
+                  }
                 />
               </motion.div>
             ))}
@@ -3395,6 +3406,10 @@ interface EnhancedChatMessageBubbleProps {
   chatTenantId?: string | null;
   isLoading?: boolean;
   insightBuilderReadOnly?: boolean;
+  workbenchPendingActions?: import("@/types/widgetActions").WidgetAction[];
+  onApplyWorkbenchDashboardSuggestion?: (
+    action: SuggestDashboardAction,
+  ) => void;
 }
 
 const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
@@ -3419,6 +3434,8 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   isLoading = false,
   chatTenantId,
   insightBuilderReadOnly = false,
+  workbenchPendingActions,
+  onApplyWorkbenchDashboardSuggestion,
 }) => {
   const isUser = message.role === "user";
   const styling = !isUser ? getMessageStyling(message.content) : null;
@@ -3522,6 +3539,24 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                   </p>
                 ) : null;
               })()}
+
+            {!isUser &&
+              filterSuggestDashboardActions(workbenchPendingActions).length >
+                0 && (
+                <WorkbenchDashboardSuggestionCard
+                  actions={filterSuggestDashboardActions(workbenchPendingActions)}
+                  disabled={isLoading}
+                  onAddSuggested={(action) =>
+                    onApplyWorkbenchDashboardSuggestion?.(action)
+                  }
+                  onBuildCustom={(action) => {
+                    const label = formatWorkbenchSectionKey(action.sectionKey);
+                    void sendMessage?.(
+                      `Build a custom dashboard instead of the ${label} section. ${action.explanation}`,
+                    );
+                  }}
+                />
+              )}
 
             {!isUser && message.insightBuilderDraft && (
               <InsightBuilderPreviewCard
