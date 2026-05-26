@@ -515,13 +515,10 @@ function validatePullThroughSqlGuardrails(
 }
 
 /** When the model suggests a dashboard, strip companion add actions so the client can prompt first. */
-function reconcileDashboardSuggestionActions(actions: unknown[]): unknown[] {
+function reconcileDashboardSuggestionActions(actions: any[]): any[] {
   if (!Array.isArray(actions)) return [];
   const suggests = actions.filter(
-    (a) =>
-      a != null &&
-      typeof a === "object" &&
-      (a as { type?: string }).type === "suggest_dashboard",
+    (a) => a?.type === "suggest_dashboard",
   );
   if (suggests.length === 0) return actions;
   const blocked = new Set([
@@ -533,12 +530,7 @@ function reconcileDashboardSuggestionActions(actions: unknown[]): unknown[] {
   ]);
   return [
     ...suggests,
-    ...actions.filter(
-      (a) =>
-        a != null &&
-        typeof a === "object" &&
-        !blocked.has(String((a as { type?: string }).type)),
-    ),
+    ...actions.filter((a) => a?.type && !blocked.has(String(a.type))),
   ];
 }
 
