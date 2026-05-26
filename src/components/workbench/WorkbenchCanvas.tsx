@@ -122,6 +122,8 @@ import {
 } from "@/hooks/useWorkbenchCohi";
 import { useCanvasDataStore } from "@/stores/canvasDataStore";
 import { ReportBuilder } from "@/components/workbench/report/ReportBuilder";
+import { consumeChatPptSeed } from "@/lib/workbench/workbenchChatHandoff";
+import type { ReportDefinition } from "@/types/reportTypes";
 import { serializeWidgetCatalog } from "@/utils/widgetCatalogSerializer";
 import { exportVisualizationAsPdf } from "@/utils/exportUtils";
 import type {
@@ -3153,6 +3155,30 @@ export function WorkbenchCanvas({
   // ---- Report Builder mode toggle ----
   const [showReportBuilder, setShowReportBuilder] = useState(false);
   const autoOpenedReportBuilderRef = useRef<string | null>(null);
+  const chatPptSeedAttemptedRef = useRef<string | null>(null);
+  const [chatPptInitialDefinition, setChatPptInitialDefinition] = useState<
+    ReportDefinition | undefined
+  >(undefined);
+
+  useEffect(() => {
+    if (!loadCanvasId) {
+      setChatPptInitialDefinition(undefined);
+      chatPptSeedAttemptedRef.current = null;
+      return;
+    }
+    if (chatPptSeedAttemptedRef.current === loadCanvasId) return;
+    if (!autoOpenReportBuilder) return;
+    if (canvasLoading || items.length === 0) return;
+
+    chatPptSeedAttemptedRef.current = loadCanvasId;
+    const seed = consumeChatPptSeed(loadCanvasId);
+    setChatPptInitialDefinition(seed ?? undefined);
+  }, [
+    loadCanvasId,
+    autoOpenReportBuilder,
+    canvasLoading,
+    items.length,
+  ]);
 
   useEffect(() => {
     if (!autoOpenReportBuilder) return;
@@ -3740,6 +3766,7 @@ export function WorkbenchCanvas({
               canvasWidgetData={reportBuilderWidgetData}
               canvasTitle={saveTitle || "Untitled Canvas"}
               tenantId={tenantId}
+              initialDefinition={chatPptInitialDefinition}
               inline
             />
           </div>

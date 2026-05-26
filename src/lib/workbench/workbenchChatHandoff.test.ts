@@ -19,7 +19,11 @@ import {
   draftScopeIdForCanvasTab,
   getMyDashboardCanvasIdFromPath,
   resolveWorkbenchEditDraftScope,
+  stashChatPptSeed,
+  consumeChatPptSeed,
 } from "./workbenchChatHandoff";
+import { buildChatVizExportContent } from "@/lib/chatVisualizationPptContent";
+import { buildChatVisualizationReportDefinition } from "@/lib/chatVisualizationPptSeed";
 import { buildCarryOverContext } from "@/lib/carryOverContext";
 import { registerWorkbenchCanvasBridge } from "./workbenchCanvasBridge";
 import type { WidgetAction } from "@/types/widgetActions";
@@ -329,5 +333,20 @@ describe("workbenchChatHandoff", () => {
     await Promise.resolve();
     expect(received).toEqual(["conv-123"]);
     window.removeEventListener("cohi-chat-resume", handler);
+  });
+
+  it("stashChatPptSeed is consumed once per canvas id", () => {
+    sessionStorage.clear();
+    const content = buildChatVizExportContent({
+      viz: {
+        type: "bar",
+        title: "Seeded Chart",
+        data: [{ a: 1 }],
+      },
+    });
+    const definition = buildChatVisualizationReportDefinition(content);
+    stashChatPptSeed("canvas-seed-1", definition);
+    expect(consumeChatPptSeed("canvas-seed-1")?.title).toBe("Seeded Chart");
+    expect(consumeChatPptSeed("canvas-seed-1")).toBeNull();
   });
 });

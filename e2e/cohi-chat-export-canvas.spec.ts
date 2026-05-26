@@ -595,6 +595,16 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
     };
     expect(Array.isArray(body.layout)).toBe(true);
     expect(body.layout.length).toBeGreaterThan(0);
+
+    // Report Builder should open with chat-seeded slides (chart + data), not empty defaults.
+    await expect(userPage.getByText(/Slides \(\d+\)/)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(userPage.getByText(/Slides \(2\)/)).toBeVisible();
+    await expect(
+      userPage.getByText(MOCK_VISUALIZATION.title, { exact: false }),
+    ).toBeVisible();
+    await expect(userPage.getByText(/Chart Type:/i)).toBeVisible();
   });
 
   test("@critical @COHI-337 Save all to Workbench exports every chart from the chat", async ({
