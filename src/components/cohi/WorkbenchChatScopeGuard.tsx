@@ -137,6 +137,14 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
       window.removeEventListener(COHI_WORKBENCH_ACTIVE_CONTEXT_EVENT, handler);
   }, [enabled, handleActiveCanvasContext]);
 
+  /** Reconcile when scope sync turns on after navigation (context event may have fired earlier). */
+  useEffect(() => {
+    if (!enabled) return;
+    const ctx = getLatestWorkbenchActiveContext();
+    if (!ctx) return;
+    handleActiveCanvasContext(ctx);
+  }, [enabled, handleActiveCanvasContext]);
+
   useEffect(() => {
     if (scopeMismatchActions) {
       setMismatchOpen(true);

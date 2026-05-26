@@ -52,7 +52,7 @@ export async function selectUnifiedChatType(
   await dismissBlockingOverlays(page);
   const selector = page.getByRole("combobox", { name: "Chat type" });
   await expect(selector).toBeVisible({ timeout: 15_000 });
-  await selector.click();
+  await selector.click({ force: true });
   const listbox = page.getByRole("listbox");
   await expect(listbox).toBeVisible({ timeout: 10_000 });
   const option = listbox.getByRole("option", { name: label, exact: true });
@@ -67,6 +67,30 @@ export const QA_AGENT_RUN_TAG = "wave6-e2e-unified-chat";
 
 /** Runs before any document load in this browser context (CI-safe vs page-only init). */
 /** Enable workbench chat ↔ canvas scope coupling (COHI-398). */
+/** Clear persisted workbench tabs/handoff between serial live tests. */
+export async function resetWorkbenchE2eBrowserState(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    try {
+      sessionStorage.removeItem("cohi_workbench_conversation_scope");
+      for (const key of Object.keys(sessionStorage)) {
+        if (/workbench|handoff/i.test(key)) {
+          sessionStorage.removeItem(key);
+        }
+      }
+      for (const key of Object.keys(localStorage)) {
+        if (
+          key.startsWith("cohi-workbench-tabs") ||
+          key.startsWith("cohi-workbench-active")
+        ) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 export async function forceWorkbenchChatScopeSync(page: Page): Promise<void> {
   await page.context().addInitScript(() => {
     try {
@@ -164,6 +188,94 @@ export async function submitWorkbenchHubAsk(
 }
 
 /** When chat is in full-page mode, dashboard widgets are in a hidden column — restore compact band. */
+export async function closeCanvasHistoryIfOpen(page: Page): Promise<void> {
+  const sidebar = page.getByTestId("chat-history-sidebar");
+  if (await sidebar.isVisible({ timeout: 500 }).catch(() => false)) {
+    await page.getByTestId("cohi-chat-history-toggle").click();
+    await expect(sidebar).toBeHidden({ timeout: 10_000 });
+  }
+}
+
+/** Dismiss scope-switch dialog if a prior tab left conversation scope misaligned. */
+export async function dismissWorkbenchScopeSwitchDialogIfOpen(
+  page: Page,
+  action: "switch" | "keep" = "switch",
+): Promise<void> {
+  const dialog = page.getByTestId("workbench-scope-switch-dialog");
+  if (!(await dialog.isVisible({ timeout: 500 }).catch(() => false))) return;
+  const label = action === "switch" ? "Switch chat" : "Keep current chat";
+  await dialog.getByRole("button", { name: label }).click();
+  await expect(dialog).toBeHidden({ timeout: 15_000 });
+}
+
+/** Clear pinned chat from a prior tab-switch (soak tests / serial runs). */
+export async function releaseWorkbenchChatPin(page: Page): Promise<void> {
+  const pinned = page.getByTestId("workbench-chat-scope-pinned-banner");
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await dismissBlockingOverlays(page);
+    await dismissWorkbenchScopeSwitchDialogIfOpen(page, "switch");
+    if (!(await pinned.isVisible({ timeout: 500 }).catch(() => false))) {
+      return;
+    }
+    const switchBtn = pinned.getByRole("button", { name: /Switch chat/i });
+    if (!(await switchBtn.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      break;
+    }
+    await switchBtn.click({ force: true });
+    const dialog = page.getByTestId("workbench-scope-switch-dialog");
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    await dialog.getByRole("button", { name: "Switch chat" }).click({ force: true });
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await expect(pinned).toBeHidden({ timeout: 15_000 }).catch(() => undefined);
+  }
+}
+
+/** Close unsaved "New Canvas" tabs that block workbench chat on saved boards. */
+export async function closeStrayNewCanvasTabs(page: Page): Promise<void> {
+  for (let i = 0; i < 4; i++) {
+    const newTabRow = page
+      .locator("div")
+      .filter({ hasText: /^New Canvas$/ })
+      .filter({ has: page.getByRole("button", { name: "Close tab" }) })
+      .first();
+    if (!(await newTabRow.isVisible({ timeout: 500 }).catch(() => false))) {
+      break;
+    }
+    await newTabRow.getByRole("button", { name: "Close tab" }).click();
+    await page.waitForTimeout(400);
+  }
+}
+
+/** Click an open dashboard tab by visible title (e.g. seeded board name). */
+export async function activateDashboardTab(
+  page: Page,
+  title: string | RegExp,
+): Promise<void> {
+  await closeStrayNewCanvasTabs(page);
+  const tab = page
+    .locator("div")
+    .filter({ has: page.getByRole("button", { name: "Close tab" }) })
+    .filter({ hasText: title })
+    .first();
+  await expect(tab).toBeVisible({ timeout: 20_000 });
+  await tab.click();
+}
+
+export async function ensureWorkbenchChatReady(page: Page): Promise<void> {
+  await dismissBlockingOverlays(page);
+  await closeStrayNewCanvasTabs(page);
+  await closeCanvasHistoryIfOpen(page);
+  await dismissWorkbenchScopeSwitchDialogIfOpen(page, "switch");
+  await selectUnifiedChatType(page, "Workbench");
+  await resetUnifiedChatShellToCompact(page);
+  const workbenchStarter = page.getByRole("button", {
+    name: /^Workbench\b/,
+  });
+  if (await workbenchStarter.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await workbenchStarter.click();
+  }
+}
+
 export async function resetUnifiedChatShellToCompact(page: Page): Promise<void> {
   const shell = page.getByTestId("unified-chat-shell");
   const shellVisible = await shell.isVisible({ timeout: 3_000 }).catch(() => false);

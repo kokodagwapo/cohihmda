@@ -2,6 +2,9 @@ import { expect, type Page } from "@playwright/test";
 import { e2eAuthHeaders } from "./e2eAuth";
 import {
   dismissBlockingOverlays,
+  activateDashboardTab,
+  closeStrayNewCanvasTabs,
+  ensureWorkbenchChatReady,
   gotoWithUnifiedChatShell,
   selectUnifiedChatType,
   unifiedChatMessageInput,
@@ -66,10 +69,29 @@ export async function waitForChatInputReady(
 export async function sendWorkbenchChatTurn(
   page: Page,
   message: string,
+  options?: { waitForReply?: boolean; waitForStream?: boolean },
 ): Promise<void> {
+  await ensureWorkbenchChatReady(page);
+  await waitForChatInputReady(page);
   const input = unifiedChatMessageInput(page);
   await input.fill(message);
+  const streamWait =
+    options?.waitForStream === true
+      ? page.waitForResponse(
+          (res) =>
+            /\/api\/chat\/v1\/messages:stream/.test(res.url()) &&
+            res.request().method() === "POST",
+          { timeout: 180_000 },
+        )
+      : null;
   await input.press("Enter");
+  if (streamWait) {
+    await streamWait;
+    return;
+  }
+  if (options?.waitForReply === false) {
+    return;
+  }
   await expect
     .poll(() => input.isEnabled().catch(() => false), {
       timeout: 240_000,
@@ -118,6 +140,10 @@ export async function seedDeterministicBoard(
     timeout: 60_000,
   });
   await waitForChatInputReady(page);
+  await closeStrayNewCanvasTabs(page);
+  await activateDashboardTab(page, /E2E Board Ready Min|Board Ready/i).catch(
+    () => undefined,
+  );
   return canvasId;
 }
 
@@ -142,8 +168,9 @@ export async function seedAdditionalDeterministicBoard(
     );
   }
   const { canvasId } = (await res.json()) as { canvasId: string };
-  await page.goto(`/my-dashboard/${canvasId}`, { waitUntil: "domcontentloaded" });
-  await dismissBlockingOverlays(page);
+  await gotoWithUnifiedChatShell(page, `/my-dashboard/${canvasId}`, {
+    timeout: 60_000,
+  });
   await expect(page.locator('[data-testid^="canvas-item-"]').first()).toBeVisible({
     timeout: 60_000,
   });

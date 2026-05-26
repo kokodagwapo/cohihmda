@@ -2629,7 +2629,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   "h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors",
                   showHistory && "bg-violet-100/80 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300"
                 )}
-                onClick={() => setShowHistory((prev) => !prev)}
+                onClick={() => {
+                  setShowHistory((prev) => {
+                    const next = !prev;
+                    if (next) fetchHistoryForCurrentView();
+                    return next;
+                  });
+                }}
                 title={
                   activeChatType === "workbench"
                     ? "Chat threads for this canvas"
