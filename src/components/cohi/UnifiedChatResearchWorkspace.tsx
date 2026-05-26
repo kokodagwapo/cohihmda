@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useResearchSession } from "@/hooks/useResearchSession";
 import { AgentTimeline } from "@/components/research/AgentTimeline";
@@ -30,6 +31,16 @@ import { HistoryMetaPill } from "@/components/cohi/UnifiedChatHistoryMeta";
 import { cn } from "@/lib/utils";
 import { useChatShell } from "@/contexts/ChatShellContext";
 import { buildResearchReportExportData } from "@/lib/researchReportExport";
+import {
+  buildResearchReportPptModel,
+  collectImageCaptureKeys,
+  researchCaptureTimeoutMs,
+} from "@/lib/researchReportPptExport";
+import {
+  captureResearchExportImages,
+  waitForResearchCaptureReady,
+} from "@/lib/researchReportPptCapture";
+import { exportResearchReportAsPpt } from "@/utils/exportUtils";
 import { useResearchInsightTracking } from "@/hooks/useResearchInsightTracking";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { RESEARCH_SHELL_EXPAND_EVENT } from "@/lib/unifiedChatEnvelope";
@@ -97,6 +108,7 @@ export function UnifiedChatResearchWorkspace({
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [workbenchPayload, setWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
   const reportContainerRef = useRef<HTMLDivElement>(null);
+  const [exportPreparing, setExportPreparing] = useState(false);
   const { isTracked, onToggleTrack } = useResearchInsightTracking(
     tenantId,
     researchSessionId,
@@ -205,6 +217,13 @@ export function UnifiedChatResearchWorkspace({
     !!researchSessionId &&
     (!!report || (findings.length >= 1 && phase === "complete"));
 
+  const primaryFinding = useMemo(() => {
+    if (findings.length === 0) return null;
+    return [...findings].sort((a, b) => a.questionId - b.questionId)[
+      findings.length - 1
+    ];
+  }, [findings]);
+
   const reportExportTitle = useMemo(() => {
     const topic = sessions.find((s) => s.id === researchSessionId)?.topic?.trim();
     if (topic) return `Research Report - ${topic}`;
@@ -215,6 +234,60 @@ export function UnifiedChatResearchWorkspace({
     }
     return "Research Report";
   }, [messages, researchSessionId, sessions]);
+
+  const reportUnderstory = useMemo(() => {
+    const topic = sessions.find((s) => s.id === researchSessionId)?.topic?.trim();
+    if (topic) return topic;
+    const firstUser = messages.find((m) => m.role === "user")?.content?.trim();
+    return firstUser || undefined;
+  }, [messages, researchSessionId, sessions]);
+
+  const handleStructuredResearchPpt = useCallback(async () => {
+    const slides = buildResearchReportPptModel({
+      title: reportExportTitle,
+      understory: reportUnderstory,
+      report,
+      findings,
+      primaryFinding,
+    });
+    const keys = collectImageCaptureKeys(slides);
+    flushSync(() => {
+      setExportPreparing(true);
+      setActiveTab("report");
+    });
+    try {
+      await waitForResearchCaptureReady(
+        reportContainerRef.current,
+        keys,
+        researchCaptureTimeoutMs(keys),
+      );
+      const images = await captureResearchExportImages(
+        reportContainerRef.current,
+        keys,
+      );
+      await exportResearchReportAsPpt(slides, images, reportExportTitle);
+      toast({
+        title: "Downloaded",
+        description: "PowerPoint saved.",
+      });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description:
+          error instanceof Error ? error.message : "Could not create PowerPoint.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportPreparing(false);
+    }
+  }, [
+    reportExportTitle,
+    reportUnderstory,
+    report,
+    findings,
+    primaryFinding,
+    toast,
+  ]);
 
   if (!researchSessionId) {
     return (
@@ -287,11 +360,17 @@ export function UnifiedChatResearchWorkspace({
             Share
           </Button>
         )}
-        {report && (
+        {reportReady && (
           <ExportMenu
             title={reportExportTitle}
             targetRef={reportContainerRef}
-            getExportData={() => buildResearchReportExportData(report, reportExportTitle)}
+            getExportData={() =>
+              report
+                ? buildResearchReportExportData(report, reportExportTitle)
+                : { title: reportExportTitle, tables: [] }
+            }
+            onExportPpt={handleStructuredResearchPpt}
+            disabled={exportPreparing}
           />
         )}
         {findings.length > 1 && activeTab !== "findings" && (
@@ -450,6 +529,7 @@ export function UnifiedChatResearchWorkspace({
               sessionIsOwner ? handleRunFurtherInvestigation : undefined
             }
             reportContainerRef={reportContainerRef}
+            forceEvidenceOpen={exportPreparing}
           />
         </TabsContent>
       </Tabs>

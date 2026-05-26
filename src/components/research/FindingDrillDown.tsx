@@ -46,6 +46,7 @@ import {
   Bookmark,
   MoreHorizontal,
   Maximize2,
+  Presentation,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,7 +77,13 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useDebugMode } from "@/contexts/DebugModeContext";
-import { exportDataAsExcel } from "@/utils/exportUtils";
+import {
+  exportDataAsExcel,
+  exportElementAsPpt,
+  exportVisualizationAsPdf,
+  type ExportData,
+} from "@/utils/exportUtils";
+import { useToast } from "@/hooks/use-toast";
 import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import {
   FIELD_REGISTRY,
@@ -91,6 +98,54 @@ import {
   shouldShowResearchSqlLineageLink,
 } from "@/lib/researchVisualizationLineage";
 import { ResearchSourceDashboardLink } from "@/components/research/ResearchSourceDashboardLink";
+import {
+  agentFormatToFieldFormat,
+  buildSqlEvidenceExportData,
+  formatValue,
+  humanizeKey,
+  inferFormat,
+  inferFormatFromValue,
+} from "@/lib/researchEvidenceExport";
+import { evidenceToChartConfig } from "@/lib/researchChartConfig";
+
+async function exportResearchElement(
+  action: "pdf" | "ppt",
+  target: HTMLElement | null,
+  title: string,
+  toast: ReturnType<typeof useToast>["toast"],
+  options?: { exportData?: ExportData; rows?: Record<string, unknown>[] },
+) {
+  if (!target) {
+    toast({
+      title: "Export failed",
+      description: "Export target not found.",
+      variant: "destructive",
+    });
+    return;
+  }
+  try {
+    if (action === "pdf") {
+      const rows = options?.rows ?? [];
+      await exportVisualizationAsPdf({
+        visualization: { type: "table", title, data: rows },
+        title,
+        captureTarget: target,
+      });
+    } else {
+      await exportElementAsPpt(target, title, options?.exportData);
+    }
+    toast({
+      title: "Downloaded",
+      description: `Exported ${action === "pdf" ? "PDF" : "PowerPoint"}.`,
+    });
+  } catch (error) {
+    toast({
+      title: "Export failed",
+      description: error instanceof Error ? error.message : "Export failed.",
+      variant: "destructive",
+    });
+  }
+}
 
 // ============================================================================
 // Types
@@ -109,155 +164,12 @@ interface SortState {
   direction: SortDirection;
 }
 
-// ============================================================================
-// Humanization + formatting utilities
-// ============================================================================
-
-/** Common mortgage/LO abbreviations to preserve when humanizing column names */
-const LABEL_ABBREVIATIONS: Record<string, string> = {
-  lo: "LO",
-  los: "LOS",
-  t12m: "T12m",
-  t6m: "T6m",
-  ytd: "YTD",
-  pt: "PT",
-  fico: "FICO",
-  ltv: "LTV",
-  dti: "DTI",
-  cltv: "CLTV",
-  hcltv: "HCLTV",
-  bps: "bps",
-  pni: "P&I",
-  ami: "AMI",
-};
-
-/**
- * Converts snake_case or camelCase keys into readable labels.
- * Looks up FIELD_REGISTRY and SUMMARY_REGISTRY first, falls back to
- * splitting on _ and camelCase boundaries. Preserves common mortgage abbreviations (LO, T12m, etc.).
- */
-function humanizeKey(key: string): string {
-  if (FIELD_REGISTRY[key]?.label) return FIELD_REGISTRY[key].label;
-  if (SUMMARY_REGISTRY[key]?.label) return SUMMARY_REGISTRY[key].label;
-
-  const withSpaces = key
-    .replace(/_/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2");
-  const words = withSpaces.split(/\s+/);
-  const result = words
-    .map((w) => {
-      const lower = w.toLowerCase();
-      return LABEL_ABBREVIATIONS[lower] ?? w.replace(/\b\w/g, (c) => c.toUpperCase());
-    })
-    .join(" ")
-    .trim();
-  return result || key;
-}
-
-/**
- * Maps an agent-provided format string to a FieldFormat.
- */
-const VALID_AGENT_FORMATS = new Set(["number", "currency", "percent", "days", "date", "text", "rate", "bps", "mono", "boolean", "badge"]);
-function agentFormatToFieldFormat(agentFmt: string | undefined): FieldFormat | null {
-  if (!agentFmt) return null;
-  const lower = agentFmt.toLowerCase().trim();
-  if (VALID_AGENT_FORMATS.has(lower)) return lower as FieldFormat;
-  return null;
-}
-
-/**
- * Looks up FIELD_REGISTRY for known DB column names (used by evidence tables).
- * Returns "text" for anything not in the registry — no heuristic guessing.
- */
-function inferFormat(key: string): FieldFormat {
-  if (FIELD_REGISTRY[key]?.format) return FIELD_REGISTRY[key].format;
-  if (SUMMARY_REGISTRY[key]?.format) return SUMMARY_REGISTRY[key].format as FieldFormat;
-  return "text";
-}
-
-/**
- * Resolves format for a KPI metric. Agent-provided format is the source of truth.
- * Falls back to value-based detection ($ prefix, % suffix) then registry lookup.
- */
-function inferFormatFromValue(key: string, value: string | number, agentFormat?: string): FieldFormat {
-  const fromAgent = agentFormatToFieldFormat(agentFormat);
-  if (fromAgent) return fromAgent;
-  const strVal = String(value);
-  if (strVal.startsWith("$")) return "currency";
-  if (strVal.endsWith("%")) return "percent";
-  return inferFormat(key);
-}
-
 const ID_COLUMN_PATTERN = /^(loan|id|number|account|borrower|servicer|pool|investor|branch|zip|fips|census|ssn|ein|fico|phone|fax)/i;
 const ID_COLUMN_SUFFIX_PATTERN = /(_id|_number|_num|_no|_code|_ln|_key|_ref)$/i;
 
 function isIdentifierColumn(columnName: string): boolean {
   const normalized = columnName.replace(/[\s-]+/g, "_");
   return ID_COLUMN_PATTERN.test(normalized) || ID_COLUMN_SUFFIX_PATTERN.test(normalized);
-}
-
-/**
- * Format a value using the field format type.
- */
-function formatValue(value: any, format: FieldFormat): string {
-  if (value == null || value === "") return "-";
-  if (typeof value === "object") return JSON.stringify(value);
-  const strVal = String(value);
-
-  switch (format) {
-    case "currency": {
-      const cleaned = strVal.replace(/[$,]/g, "");
-      const num = Number(cleaned);
-      if (isNaN(num)) return strVal;
-      if (Math.abs(num) >= 1_000_000_000) return `$${(num / 1_000_000_000).toFixed(2)}B`;
-      if (Math.abs(num) >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
-      if (Math.abs(num) >= 1_000) return `$${(num / 1_000).toFixed(1)}K`;
-      return `$${num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-    }
-    case "percent": {
-      const cleaned = strVal.replace(/%/g, "");
-      const num = Number(cleaned);
-      if (isNaN(num)) return strVal;
-      return `${num.toFixed(1)}%`;
-    }
-    case "rate": {
-      const num = Number(strVal);
-      if (isNaN(num)) return strVal;
-      return `${num.toFixed(3)}%`;
-    }
-    case "days": {
-      const num = Number(strVal);
-      if (isNaN(num)) return strVal;
-      return `${Math.round(num)}d`;
-    }
-    case "bps": {
-      const num = Number(strVal);
-      if (isNaN(num)) return strVal;
-      return `${num} bps`;
-    }
-    case "date": {
-      try {
-        return new Date(value).toLocaleDateString();
-      } catch {
-        return strVal;
-      }
-    }
-    case "number": {
-      const num = Number(strVal);
-      if (isNaN(num)) return strVal;
-      return num.toLocaleString();
-    }
-    case "mono":
-      return strVal;
-    case "boolean":
-      return value ? "Yes" : "No";
-    case "badge":
-    case "text":
-      return strVal;
-    default:
-      if (typeof value === "number") return value.toLocaleString();
-      return strVal;
-  }
 }
 
 // ============================================================================
@@ -323,11 +235,16 @@ interface EvidenceTableProps {
 
 function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkbench, lineageSlot }: EvidenceTableProps) {
   const { isDebugMode } = useDebugMode();
+  const { toast } = useToast();
   const [sort, setSort] = useState<SortState>({ column: "", direction: null });
   const [filter, setFilter] = useState("");
   const [sqlOpen, setSqlOpen] = useState(false);
   const [visibleRowCount, setVisibleRowCount] = useState(EVIDENCE_INITIAL_ROWS);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const exportCaptureRef = useRef<HTMLDivElement>(null);
+  const exportTitle =
+    [findingTitle, `Query ${index + 1}`].filter(Boolean).join(" — ") ||
+    `Evidence Query ${index + 1}`;
 
   const toggleSort = (column: string) => {
     setSort((prev) => {
@@ -443,19 +360,44 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
       }),
     );
     exportDataAsExcel(
-      {
-        title: `Evidence Query ${index + 1}`,
-        tables: [
-          {
-            name: `Query ${index + 1}`,
-            headers: evidence.fields.map(humanizeKey),
-            rows: tableRows,
-          },
-        ],
-      },
+      buildSqlEvidenceExportData(
+        evidence,
+        columnFormats,
+        `Evidence Query ${index + 1}`,
+        `Query ${index + 1}`,
+      ),
       `evidence-query-${index + 1}-${new Date().toISOString().split("T")[0]}`,
     );
   };
+
+  const evidenceExportData = useMemo(
+    () =>
+      buildSqlEvidenceExportData(
+        evidence,
+        columnFormats,
+        exportTitle,
+        `Query ${index + 1}`,
+      ),
+    [evidence, columnFormats, exportTitle, index],
+  );
+
+  const handleExportPdf = () =>
+    void exportResearchElement(
+      "pdf",
+      exportCaptureRef.current,
+      exportTitle,
+      toast,
+      { rows: evidence.rows as Record<string, unknown>[] },
+    );
+
+  const handleExportPpt = () =>
+    void exportResearchElement(
+      "ppt",
+      exportCaptureRef.current,
+      exportTitle,
+      toast,
+      { exportData: evidenceExportData },
+    );
 
   const totalFiltered = filteredAndSorted.length;
   const count = Math.min(visibleRowCount, totalFiltered);
@@ -505,6 +447,14 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
                 <FileSpreadsheet className="h-3.5 w-3.5" />
                 Export Excel
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportPdf} className="gap-2 text-xs cursor-pointer">
+                <FileText className="h-3.5 w-3.5" />
+                Export PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportPpt} className="gap-2 text-xs cursor-pointer">
+                <Presentation className="h-3.5 w-3.5" />
+                Export PowerPoint
+              </DropdownMenuItem>
               {onSaveToWorkbench && (
                 <DropdownMenuItem
                   className="gap-2 text-xs cursor-pointer"
@@ -546,7 +496,10 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
       )}
 
       {/* Data table: virtualized body with progressive "Show more" */}
-      <div className="border rounded-md overflow-hidden flex flex-col max-h-72">
+      <div
+        ref={exportCaptureRef}
+        className="border rounded-md overflow-hidden flex flex-col max-h-72 bg-white dark:bg-slate-950"
+      >
         <div
           ref={scrollContainerRef}
           className="flex-1 min-h-0 overflow-auto overflow-x-auto"
@@ -734,12 +687,15 @@ function EvidenceCell({
 }
 
 export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_ROWS, onSaveToWorkbench, saveTitle, sessionId }: EvidencePreviewTableProps) {
+  const { toast } = useToast();
   const [expanded, setExpanded] = useState(false);
-  if (!isSqlEvidence(evidence)) return null;
+  const exportCaptureRef = useRef<HTMLDivElement>(null);
+  const sqlEvidence = isSqlEvidence(evidence) ? evidence : null;
   const columnFormats = useMemo(() => {
+    if (!sqlEvidence) return {} as Record<string, FieldFormat>;
     const formats: Record<string, FieldFormat> = {};
-    const agentFmts = evidence.columnFormats || {};
-    for (const f of evidence.fields) {
+    const agentFmts = sqlEvidence.columnFormats || {};
+    for (const f of sqlEvidence.fields) {
       const fromAgent = agentFormatToFieldFormat(agentFmts[f]);
       if (fromAgent) {
         formats[f] = fromAgent;
@@ -750,7 +706,7 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
         formats[f] = registryFormat;
         continue;
       }
-      const sample = evidence.rows.find((r) => r[f] != null)?.[f];
+      const sample = sqlEvidence.rows.find((r) => r[f] != null)?.[f];
       if (sample != null) {
         if (typeof sample === "number" && !isIdentifierColumn(f)) formats[f] = "number";
         else if (typeof sample === "number" && isIdentifierColumn(f)) formats[f] = "text";
@@ -767,21 +723,40 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
       }
     }
     return formats;
-  }, [evidence.fields, evidence.rows, evidence.columnFormats]);
+  }, [sqlEvidence]);
+
+  const exportTitle = useMemo(
+    () =>
+      [saveTitle, sqlEvidence?.explanation].filter(Boolean).join(" — ").slice(0, 120) ||
+      "Evidence",
+    [saveTitle, sqlEvidence?.explanation],
+  );
+
+  const evidenceExportData = useMemo(
+    () =>
+      sqlEvidence
+        ? buildSqlEvidenceExportData(sqlEvidence, columnFormats, exportTitle)
+        : undefined,
+    [sqlEvidence, columnFormats, exportTitle],
+  );
 
   const isNumericFormat = (fmt: FieldFormat) =>
     ["currency", "number", "percent", "rate", "days", "bps"].includes(fmt);
 
-  const visibleRowCount = expanded ? Math.min(evidence.rows.length, maxRows) : EVIDENCE_PREVIEW_DEFAULT_ROWS;
-  const displayRows = evidence.rows.slice(0, visibleRowCount);
-  const totalRows = evidence.rows.length;
+  const visibleRowCount = sqlEvidence
+    ? expanded
+      ? Math.min(sqlEvidence.rows.length, maxRows)
+      : EVIDENCE_PREVIEW_DEFAULT_ROWS
+    : 0;
+  const displayRows = sqlEvidence ? sqlEvidence.rows.slice(0, visibleRowCount) : [];
+  const totalRows = sqlEvidence?.rows.length ?? 0;
   const hasMore = totalRows > visibleRowCount;
 
-  if (totalRows === 0) return null;
+  if (!sqlEvidence || totalRows === 0) return null;
 
   const handleExportCSV = () => {
-    const header = evidence.fields.map(humanizeKey).join(",");
-    const rows = evidence.rows.map((r) => evidence.fields.map((f) => {
+    const header = sqlEvidence.fields.map(humanizeKey).join(",");
+    const rows = sqlEvidence.rows.map((r) => sqlEvidence.fields.map((f) => {
       const v = r[f]; return v == null ? "" : typeof v === "string" && v.includes(",") ? `"${v}"` : String(v);
     }).join(","));
     const blob = new Blob([header + "\n" + rows.join("\n")], { type: "text/csv" });
@@ -791,11 +766,38 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
   };
 
   const handleExportExcel = () => {
-    exportDataAsExcel(evidence.rows, evidence.fields, saveTitle || "Evidence");
+    if (!evidenceExportData) return;
+    exportDataAsExcel(
+      evidenceExportData,
+      `${exportTitle.replace(/[^a-z0-9]/gi, "_")}-${new Date().toISOString().split("T")[0]}`,
+    );
   };
 
+  const handleExportPdf = () =>
+    void exportResearchElement(
+      "pdf",
+      exportCaptureRef.current,
+      exportTitle,
+      toast,
+      { rows: sqlEvidence.rows as Record<string, unknown>[] },
+    );
+
+  const handleExportPpt = () =>
+    void exportResearchElement(
+      "ppt",
+      exportCaptureRef.current,
+      exportTitle,
+      toast,
+      { exportData: evidenceExportData },
+    );
+
   return (
-    <div className="rounded-md border overflow-hidden" role="region" aria-label="Evidence preview table">
+    <div
+      ref={exportCaptureRef}
+      className="rounded-md border overflow-hidden bg-white dark:bg-slate-950"
+      role="region"
+      aria-label="Evidence preview table"
+    >
       <div className="flex items-center justify-between px-2 py-1 bg-muted/30 border-b">
         <span className="text-[10px] text-muted-foreground font-medium">
           {totalRows} row{totalRows !== 1 ? "s" : ""}
@@ -815,26 +817,34 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
               <FileSpreadsheet className="h-3.5 w-3.5" />
               Export Excel
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportPdf} className="gap-2 text-xs cursor-pointer">
+              <FileText className="h-3.5 w-3.5" />
+              Export PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportPpt} className="gap-2 text-xs cursor-pointer">
+              <Presentation className="h-3.5 w-3.5" />
+              Export PowerPoint
+            </DropdownMenuItem>
             {onSaveToWorkbench && (
               <DropdownMenuItem
                 className="gap-2 text-xs cursor-pointer"
                 onClick={() =>
                   onSaveToWorkbench({
-                    sql: evidence.sql,
-                    title: [saveTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 120) || "Research table",
+                    sql: sqlEvidence.sql,
+                    title: [saveTitle, sqlEvidence.explanation].filter(Boolean).join(" — ").slice(0, 120) || "Research table",
                     vizConfig: {
                       type: "table",
-                      title: [saveTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 80) || "Table",
+                      title: [saveTitle, sqlEvidence.explanation].filter(Boolean).join(" — ").slice(0, 80) || "Table",
                       data: [],
                       tableConfig: {
-                        columns: evidence.fields.map((f) => ({
+                        columns: sqlEvidence.fields.map((f) => ({
                           key: f,
                           label: humanizeKey(f),
                           format: columnFormats[f] || "text",
                         })),
                       },
                     },
-                    explanation: evidence.explanation,
+                    explanation: sqlEvidence.explanation,
                     sourceType: "research",
                     sourceSessionId: sessionId ?? undefined,
                   })
@@ -848,10 +858,10 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
         </DropdownMenu>
       </div>
       <div className="overflow-x-auto overflow-y-visible">
-        <table className="w-full border-collapse text-xs" style={{ minWidth: `${evidence.fields.length * 90}px` }}>
+        <table className="w-full border-collapse text-xs" style={{ minWidth: `${sqlEvidence.fields.length * 90}px` }}>
           <thead>
             <tr className="sticky top-0 z-10 border-b bg-muted/80">
-              {evidence.fields.map((f) => {
+              {sqlEvidence.fields.map((f) => {
                 const fmt = columnFormats[f] || "text";
                 return (
                   <th
@@ -870,7 +880,7 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
           <tbody>
             {displayRows.map((row, i) => (
               <tr key={i} className="hover:bg-muted/30">
-                {evidence.fields.map((f) => {
+                {sqlEvidence.fields.map((f) => {
                   const fmt = columnFormats[f] || "text";
                   return (
                     <EvidenceCell
@@ -906,448 +916,13 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
   );
 }
 
-// ============================================================================
-// Auto Chart
-// ============================================================================
+// ── AutoChart props / component ───────────────────────────────────────────────
 
-/**
- * Platform color palette — matches DynamicVisualization for cross-platform
- * visual consistency. MULTI_SERIES_COLORS are used when 2+ series are present
- * (each series gets a distinct color + a legend). SINGLE_SERIES_COLOR is used
- * for single-series bar charts where individual bar colors carry no meaning.
- */
 const MULTI_SERIES_COLORS = [
   "#6366f1", "#f59e0b", "#10b981", "#ef4444",
   "#8b5cf6", "#06b6d4", "#f97316", "#84cc16",
 ];
 const SINGLE_SERIES_COLOR = "#6366f1";
-
-// ── Internal resolved chart config ──────────────────────────────────────────
-
-interface ResolvedChartConfig {
-  chartType: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar';
-  xKey: string;
-  yKey: string;
-  yKeys?: string[];
-  isStacked: boolean;
-  isMultiSeries: boolean;
-  data: Record<string, any>[];
-  title: string;
-  xLabel?: string;
-  yLabel?: string;
-}
-
-// ── Helper: score candidate label fields ────────────────────────────────────
-
-/**
- * Strict numeric check. Uses Number() rather than parseFloat() so that
- * period/timeframe tokens like "90D", "30D", "YTD", "Q1 2025" are NOT
- * treated as numbers. parseFloat("90D") = 90 (wrong); Number("90D") = NaN.
- * Currency/percent suffixes are stripped first so "$1,234" and "45.2%" still
- * parse correctly.
- */
-function isStrictlyNumeric(value: unknown): boolean {
-  if (typeof value === "number") return !isNaN(value);
-  if (typeof value === "boolean") return false;
-  const cleaned = String(value).replace(/[$,%\s]/g, "").trim();
-  if (cleaned === "") return false;
-  return !isNaN(Number(cleaned));
-}
-
-function scoreLabelCandidates(
-  fields: string[],
-  rows: Record<string, any>[],
-): Array<{ field: string; uniqueCount: number; score: number }> {
-  const BOOL_VALS = new Set(["true", "false", "0", "1", "yes", "no", "t", "f"]);
-  return fields
-    .map((f) => {
-      const lower = f.toLowerCase();
-      if (/^(has_|is_|flag_|sort_)/.test(lower)) return null;
-      const values = rows.map((r) => r[f]).filter((v) => v != null);
-      if (values.length === 0) return null;
-      // A field qualifies as a label candidate if at least one value is a
-      // non-numeric string (strict check — "90D", "YTD" are non-numeric here).
-      const isText = values.some((v) => typeof v === "string" && !isStrictlyNumeric(v));
-      if (!isText) return null;
-      const unique = new Set(values.map((v) => String(v)));
-      if ([...unique].every((v) => BOOL_VALS.has(v.toLowerCase()))) return null;
-      if (unique.size < 2) return null;
-      const c = unique.size;
-      const score = c >= 3 && c <= 15 ? 100 : c === 2 ? 50 : c > 15 && c <= rows.length * 0.8 ? 30 : 10;
-      return { field: f, uniqueCount: c, score };
-    })
-    .filter(Boolean) as Array<{ field: string; uniqueCount: number; score: number }>;
-}
-
-// ── Helper: identify numeric fields ─────────────────────────────────────────
-
-function getNumericFields(fields: string[], rows: Record<string, any>[]): string[] {
-  return fields.filter((f) => {
-    const sample = rows.find((r) => r[f] != null);
-    if (!sample) return false;
-    const raw = sample[f];
-    // Use strict check so "90D", "YTD" etc. are not treated as numeric.
-    return isStrictlyNumeric(raw);
-  });
-}
-
-// ── Shared data-normalisation helpers ────────────────────────────────────────
-
-/**
- * Aggregate rows so there is exactly one entry per unique x-value.
- * All numeric value keys are summed within each group.
- * Rows are expected to already have rawLabel applied to xKey.
- */
-function aggregateByX(
-  rows: Record<string, any>[],
-  xKey: string,
-  valueKeys: string[],
-): Record<string, any>[] {
-  const agg = new Map<string, Record<string, any>>();
-  for (const row of rows) {
-    const x = String(row[xKey] ?? "");
-    if (!agg.has(x)) {
-      const entry: Record<string, any> = { [xKey]: x };
-      for (const k of valueKeys) entry[k] = 0;
-      agg.set(x, entry);
-    }
-    const entry = agg.get(x)!;
-    for (const k of valueKeys) {
-      entry[k] = (entry[k] ?? 0) + parseNumeric(row[k]);
-    }
-  }
-  return [...agg.values()];
-}
-
-/**
- * Pivot long-format rows to wide format.
- * Each unique xKey value becomes one row; each unique seriesKey value becomes a
- * column containing the parsed numeric value from valueKey.
- *
- * Returns null when the pivot produces fewer than 2 distinct x-categories or
- * when no series values are actually present in the data.
- */
-function pivotLongToWide(
-  rows: Record<string, any>[],
-  xKey: string,
-  seriesKey: string,
-  valueKey: string,
-): { data: Record<string, any>[]; seriesValues: string[] } | null {
-  const seriesValues = [...new Set(rows.map(r => String(r[seriesKey] ?? "")))].slice(0, 6);
-  if (seriesValues.length === 0) return null;
-  const categories = [...new Set(rows.map(r => String(r[xKey] ?? "")))];
-  if (categories.length < 2) return null;
-  const pivotMap: Record<string, Record<string, any>> = {};
-  for (const cat of categories) pivotMap[cat] = { [xKey]: rawLabel(cat) };
-  for (const row of rows) {
-    const cat = String(row[xKey] ?? "");
-    const ser = String(row[seriesKey] ?? "");
-    if (seriesValues.includes(ser)) {
-      pivotMap[cat][ser] = parseNumeric(row[valueKey]);
-    }
-  }
-  const data = Object.values(pivotMap);
-  // Require at least one series column with non-zero data across rows
-  const populated = seriesValues.filter(sv => data.some(d => d[sv] !== 0 && d[sv] !== undefined));
-  if (populated.length === 0) return null;
-  return { data, seriesValues: populated };
-}
-
-/**
- * Guarantee that data has at most one entry per x-value.
- * If duplicates are found, falls back to aggregateByX (summing all valueKeys).
- * This is the universal safety net applied at the output boundary of
- * evidenceToChartConfig so no path can produce duplicate x-labels.
- */
-function ensureUniqueX(
-  data: Record<string, any>[],
-  xKey: string,
-  valueKeys: string[],
-): Record<string, any>[] {
-  const seen = new Set<string>();
-  let hasDupes = false;
-  for (const d of data) {
-    const x = String(d[xKey] ?? "");
-    if (seen.has(x)) { hasDupes = true; break; }
-    seen.add(x);
-  }
-  if (!hasDupes) return data;
-  return aggregateByX(data, xKey, valueKeys);
-}
-
-// ── Core adapter: evidence → resolved config ─────────────────────────────────
-/**
- * _computeConfig — inner implementation (never call directly).
- *
- * Priority order:
- *  1. Agent-provided chartHint: uses explicit axis keys + chart type.
- *     When data has duplicate x-values and a categorical series candidate
- *     exists, pivots to grouped_bar first (richer chart). Duplicate removal
- *     is NOT done here — the outer evidenceToChartConfig wrapper handles it.
- *  2. Multi-series fallback: 2+ numeric fields → grouped_bar.
- *  3. Duplicate-label fallback: pivot via second categorical field.
- *  4. Single-series fallback: best label + best numeric value.
- */
-function _computeConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
-  if (!isSqlEvidence(evidence)) return null;
-  const { fields, rows, chartHint, columnFormats } = evidence;
-  if (rows.length < 2) return null;
-
-  const agentFmts = columnFormats || {};
-  const numericFields = getNumericFields(fields, rows);
-
-  // ── PATH 1: agent-provided chartHint ──────────────────────────────────────
-  if (chartHint) {
-    const hintType = chartHint.type ?? 'bar';
-    const xKey = chartHint.xKey ?? chartHint.nameKey ?? fields.find(f => !numericFields.includes(f)) ?? fields[0];
-    const yKey = chartHint.yKey ?? chartHint.valueKey ?? numericFields[0];
-    const yKeys = chartHint.yKeys?.filter(k => fields.includes(k) && numericFields.includes(k));
-    const isMulti = (yKeys?.length ?? 0) > 1;
-    const isStacked = hintType === 'stacked_bar';
-    const chartType = hintType === 'stacked_bar' ? 'stacked_bar'
-      : hintType === 'grouped_bar' ? 'grouped_bar'
-      : hintType === 'histogram' ? 'histogram'
-      : hintType === 'scatter' ? 'scatter'
-      : hintType;
-
-    // Pass-through for histogram and scatter (data is raw rows, not transformed)
-    if (chartType === 'histogram' || chartType === 'scatter') {
-      return {
-        chartType,
-        xKey: xKey ?? fields[0],
-        yKey: yKey ?? numericFields[0],
-        yKeys: undefined,
-        isStacked: false,
-        isMultiSeries: false,
-        data: rows.slice(0, 500),
-        title: `${humanizeKey(xKey ?? fields[0])} distribution`,
-        xLabel: chartHint.xLabel,
-        yLabel: chartHint.yLabel,
-      };
-    }
-
-    const titleYLabel = isMulti
-      ? (yKeys ?? []).map(k => humanizeKey(k)).join(", ")
-      : humanizeKey(yKey ?? numericFields[0]);
-    const titleXLabel = humanizeKey(xKey ?? fields[0]);
-
-    // ── Opportunistic pivot: long-format → grouped_bar ───────────────────────
-    // When raw data has more rows than unique x-values (any hint type), try to
-    // pivot using a categorical series dimension before falling back to the
-    // universal ensureUniqueX aggregator.  This gives a richer grouped chart
-    // instead of summing everything together.
-    const uniqueRawX = new Set(rows.slice(0, 30).map(r => String(r[xKey] ?? "")));
-    const totalRows = Math.min(rows.length, 30);
-    if (uniqueRawX.size < totalRows) {
-      const actualYKey = yKey ?? numericFields[0];
-      const seriesCandidates = fields.filter(f => {
-        if (f === xKey || numericFields.includes(f)) return false;
-        const vals = rows.map(r => r[f]).filter(v => v != null);
-        return vals.some(v => typeof v === "string" && !isStrictlyNumeric(v));
-      });
-      for (const seriesField of seriesCandidates) {
-        const result = pivotLongToWide(rows.slice(0, 30), xKey, seriesField, actualYKey);
-        if (result) {
-          const { data: pivotData, seriesValues } = result;
-          const avgLen = pivotData.reduce((s, d) => s + String(d[xKey]).length, 0) / pivotData.length;
-          return {
-            chartType: pivotData.length > 10 || avgLen > 18 ? 'horizontal_bar' : 'grouped_bar',
-            xKey,
-            yKey: seriesValues[0],
-            yKeys: seriesValues,
-            isStacked: false,
-            isMultiSeries: true,
-            data: pivotData,
-            title: `${humanizeKey(actualYKey)} by ${humanizeKey(xKey)} (by ${humanizeKey(seriesField)})`,
-            xLabel: chartHint.xLabel,
-            yLabel: chartHint.yLabel,
-          };
-        }
-      }
-      // No pivot field found → fall through; ensureUniqueX will aggregate
-    }
-
-    // Standard row mapping — ensureUniqueX deduplicates the result
-    const data = rows.slice(0, 30).map((row) => {
-      const entry: Record<string, any> = {};
-      entry[xKey] = rawLabel(row[xKey]);
-      if (isMulti && yKeys) {
-        for (const k of yKeys) entry[k] = parseNumeric(row[k]);
-      } else if (yKey) {
-        entry[yKey] = parseNumeric(row[yKey]);
-      }
-      for (const f of fields) {
-        if (!(f in entry)) entry[f] = row[f];
-      }
-      return entry;
-    });
-
-    const uniqueX = new Set(data.map(d => d[xKey]));
-    if (uniqueX.size < 2) return null;
-
-    return {
-      chartType,
-      xKey,
-      yKey: yKey ?? numericFields[0],
-      yKeys: isMulti ? yKeys : undefined,
-      isStacked,
-      isMultiSeries: isMulti,
-      data,
-      title: `${titleYLabel} by ${titleXLabel}`,
-      xLabel: chartHint.xLabel,
-      yLabel: chartHint.yLabel,
-    };
-  }
-
-  // ── PATH 2–4: auto-detection fallback ────────────────────────────────────
-
-  const labelCandidates = scoreLabelCandidates(fields, rows);
-  labelCandidates.sort((a, b) => b.score - a.score);
-  const labelField = labelCandidates[0]?.field;
-  if (!labelField || numericFields.length === 0) return null;
-
-  // PATH 2: multiple numeric fields → grouped_bar
-  if (numericFields.length >= 2) {
-    const preferredYKeys = numericFields.slice(0, 6);
-    const data = rows.slice(0, 30).map((row) => {
-      const entry: Record<string, any> = {};
-      entry[labelField] = rawLabel(row[labelField]);
-      for (const k of preferredYKeys) entry[k] = parseNumeric(row[k]);
-      return entry;
-    });
-
-    const uniqueLabels = new Set(data.map(d => d[labelField]));
-    if (uniqueLabels.size < 2) return null;
-
-    // ensureUniqueX handles dedup; avgLen computed after dedup for layout decision
-    const avgLen = data.reduce((s, d) => s + String(d[labelField]).length, 0) / data.length;
-    const isHoriz = data.length > 10 || avgLen > 18;
-
-    return {
-      chartType: isHoriz ? 'horizontal_bar' : 'grouped_bar',
-      xKey: labelField,
-      yKey: preferredYKeys[0],
-      yKeys: preferredYKeys,
-      isStacked: false,
-      isMultiSeries: true,
-      data,
-      title: `${preferredYKeys.map(k => humanizeKey(k)).join(", ")} by ${humanizeKey(labelField)}`,
-    };
-  }
-
-  // PATH 3: duplicate labels + second categorical → client-side pivot
-  const bestField = numericFields.find((f) =>
-    /rate|count|total|amount|revenue|avg|sum|percent|volume/i.test(f)
-  ) ?? numericFields[0];
-
-  const labelValues = rows.map(r => String(r[labelField] ?? ""));
-  const hasDuplicateLabels = labelValues.length !== new Set(labelValues).size;
-
-  if (hasDuplicateLabels) {
-    const otherCategoricals = labelCandidates.slice(1);
-    const seriesField = otherCategoricals[0]?.field;
-    if (seriesField) {
-      const seriesValues = [...new Set(rows.map(r => String(r[seriesField] ?? "")))].slice(0, 6);
-      const categories = [...new Set(rows.map(r => String(r[labelField] ?? "")))];
-      const pivot: Record<string, Record<string, any>> = {};
-      for (const cat of categories) pivot[cat] = { [labelField]: cat };
-      for (const row of rows) {
-        const cat = String(row[labelField] ?? "");
-        const ser = String(row[seriesField] ?? "");
-        if (seriesValues.includes(ser)) {
-          pivot[cat][ser] = parseNumeric(row[bestField]);
-        }
-      }
-      const pivotData = Object.values(pivot);
-      const uniqueLabelsAfterPivot = new Set(pivotData.map(d => d[labelField]));
-      if (uniqueLabelsAfterPivot.size >= 2) {
-        const avgLen = pivotData.reduce((s, d) => s + String(d[labelField]).length, 0) / pivotData.length;
-        const isHoriz = pivotData.length > 10 || avgLen > 18;
-        return {
-          chartType: isHoriz ? 'horizontal_bar' : 'grouped_bar',
-          xKey: labelField,
-          yKey: seriesValues[0],
-          yKeys: seriesValues,
-          isStacked: false,
-          isMultiSeries: true,
-          data: pivotData,
-          title: `${humanizeKey(bestField)} by ${humanizeKey(labelField)} (grouped by ${humanizeKey(seriesField)})`,
-        };
-      }
-    }
-  }
-
-  // PATH 4: single-series fallback
-  // ensureUniqueX will aggregate any surviving duplicates (e.g. PATH 3 fell
-  // through because there was no second categorical field).
-  const data = rows.slice(0, 30).map((row) => {
-    const entry: Record<string, any> = {};
-    entry[labelField] = rawLabel(row[labelField]);
-    entry[bestField] = parseNumeric(row[bestField]);
-    for (const f of fields) {
-      if (!(f in entry)) entry[f] = row[f];
-    }
-    return entry;
-  });
-
-  const uniqueLabels4 = new Set(data.map(d => d[labelField]));
-  if (uniqueLabels4.size < 2) return null;
-
-  const labelFieldLower = labelField.toLowerCase();
-  const sampleLabel = String(data[0]?.[labelField] ?? "");
-  const isTimeSeries =
-    /date|month|quarter|year|period/.test(labelFieldLower) || /^\d{4}-\d{2}/.test(sampleLabel);
-  const avgLabelLength = data.reduce((s, d) => s + String(d[labelField]).length, 0) / data.length;
-  const isHorizontal = data.length > 12 || avgLabelLength > 20;
-
-  const inferredType = isTimeSeries ? 'line' : isHorizontal ? 'horizontal_bar' : 'bar';
-
-  const bestFormat = agentFormatToFieldFormat(agentFmts[bestField]) || inferFormat(bestField);
-  void bestFormat;
-
-  return {
-    chartType: inferredType,
-    xKey: labelField,
-    yKey: bestField,
-    isStacked: false,
-    isMultiSeries: false,
-    data,
-    title: `${humanizeKey(bestField)} by ${humanizeKey(labelField)}`,
-  };
-}
-
-/**
- * evidenceToChartConfig — public entry point.
- *
- * Calls _computeConfig then applies ensureUniqueX as a universal output-boundary
- * guarantee: regardless of which path produced the data, the returned config will
- * always have exactly one data entry per x-value. No per-path dedup needed.
- */
-function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
-  const config = _computeConfig(evidence);
-  if (!config) return null;
-  const allValueKeys = config.yKeys ?? [config.yKey];
-  config.data = ensureUniqueX(config.data, config.xKey, allValueKeys);
-  if (config.data.length < 2) return null;
-  return config;
-}
-
-// ── Tiny helpers ─────────────────────────────────────────────────────────────
-
-function rawLabel(v: unknown): string {
-  if (v == null) return "N/A";
-  if (typeof v === "object") return JSON.stringify(v);
-  const s = String(v);
-  return s.length > 22 ? s.substring(0, 19) + "…" : s;
-}
-
-function parseNumeric(v: unknown): number {
-  if (v == null) return 0;
-  if (typeof v === "number") return v;
-  return parseFloat(String(v).replace(/[$,%]/g, "")) || 0;
-}
-
-// ── AutoChart props / component ───────────────────────────────────────────────
 
 export interface AutoChartProps {
   evidence: EvidenceItem;
@@ -1358,6 +933,8 @@ export interface AutoChartProps {
   saveTitle?: string;
   /** Research session ID, forwarded to the workbench payload. */
   sessionId?: string | null;
+  /** DOM key for full-report PPT chart capture. */
+  captureKey?: string;
 }
 
 // Minimum pixel width per category group to ensure every label is readable
@@ -1383,7 +960,14 @@ function calcMinWidthLine(numPoints: number): number | undefined {
   return computed > SCROLL_THRESHOLD_PX ? computed : undefined;
 }
 
-export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle, sessionId }: AutoChartProps) {
+export function AutoChart({
+  evidence,
+  hero = false,
+  onSaveToWorkbench,
+  saveTitle,
+  sessionId,
+  captureKey,
+}: AutoChartProps) {
   if (!isSqlEvidence(evidence)) return null;
   const config = evidenceToChartConfig(evidence);
   if (!config) return null;
@@ -1413,7 +997,7 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
       fill: MULTI_SERIES_COLORS[i % MULTI_SERIES_COLORS.length],
     }));
     return (
-      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle} captureKey={captureKey}>
         <PieChart>
           <Pie
             data={pieData}
@@ -1439,7 +1023,7 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
   if (chartType === 'area') {
     const minWidth = calcMinWidthLine(data.length);
     return (
-      <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+      <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle} captureKey={captureKey}>
         <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
           {grid}
           <XAxis dataKey={xKey} interval={0} tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
@@ -1469,7 +1053,7 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
   if (chartType === 'line') {
     const minWidth = calcMinWidthLine(data.length);
     return (
-      <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+      <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle} captureKey={captureKey}>
         <LineChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
           {grid}
           <XAxis dataKey={xKey} interval={0} tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
@@ -1508,7 +1092,7 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
       buckets.push({ range: lo.toFixed(1), count });
     }
     return (
-      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle} captureKey={captureKey}>
         <BarChart data={buckets} margin={{ top: 5, right: 10, bottom: 8, left: 5 }}>
           {grid}
           <XAxis dataKey="range" tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
@@ -1530,7 +1114,7 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
       .filter((p) => !isNaN(p.x) && !isNaN(p.y));
     if (scatterData.length === 0) return null;
     return (
-      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle} captureKey={captureKey}>
         <ScatterChart margin={{ top: 5, right: 10, bottom: 8, left: 5 }}>
           {grid}
           <XAxis dataKey="x" type="number" name={humanizeKey(xScatterKey)} tick={{ fontSize: tickFontSize }} axisLine={false} tickLine={false} />
@@ -1553,7 +1137,7 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
     const baseH = hero ? 256 : 192;
     const minHeight = computedH > baseH ? computedH : undefined;
     return (
-      <AutoChartShell title={title} hero={hero} minHeight={minHeight} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+      <AutoChartShell title={title} hero={hero} minHeight={minHeight} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle} captureKey={captureKey}>
         <BarChart layout="vertical" data={data} margin={{ top: 5, right: 20, bottom: 5, left: 5 }}>
           {grid}
           <XAxis type="number" tick={{ fontSize: tickFontSize }} axisLine={false} tickLine={false} />
@@ -1575,7 +1159,7 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
   // ── Vertical bar / grouped_bar / stacked_bar ──────────────────────────────
   const minWidth = calcMinWidth(data.length, seriesKeys.length, isMultiSeries);
   return (
-    <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+    <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle} captureKey={captureKey}>
       <BarChart data={data} margin={{ top: 5, right: 10, bottom: 8, left: 5 }}>
         {grid}
         <XAxis
@@ -1618,11 +1202,24 @@ interface AutoChartShellProps {
   evidence?: EvidenceItem;
   sessionId?: string | null;
   saveTitle?: string;
+  captureKey?: string;
 }
 
-function AutoChartShell({ title, hero = false, minWidth, minHeight, children, onSaveToWorkbench, evidence, sessionId, saveTitle }: AutoChartShellProps) {
+function AutoChartShell({ title, hero = false, minWidth, minHeight, children, onSaveToWorkbench, evidence, sessionId, saveTitle, captureKey }: AutoChartShellProps) {
+  const { toast } = useToast();
   const [maximized, setMaximized] = useState(false);
+  const exportCaptureRef = useRef<HTMLDivElement>(null);
   const baseHeight = hero ? 256 : 192;
+  const sqlEvidence = evidence && isSqlEvidence(evidence) ? evidence : null;
+  const exportTitle =
+    [saveTitle, title].filter(Boolean).join(" — ").slice(0, 120) || title || "Research chart";
+  const chartExportData = useMemo(
+    () =>
+      sqlEvidence
+        ? buildSqlEvidenceExportData(sqlEvidence, {}, exportTitle, title)
+        : undefined,
+    [sqlEvidence, exportTitle, title],
+  );
   // For horizontal bar: grow vertically up to 2× base, then scroll
   const effectiveHeight = minHeight ? Math.min(minHeight, baseHeight * 2) : baseHeight;
   const scrollsX = !!minWidth;
@@ -1648,6 +1245,28 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
     );
   };
 
+  const handleExportPdf = () =>
+    void exportResearchElement(
+      "pdf",
+      exportCaptureRef.current,
+      exportTitle,
+      toast,
+      {
+        rows: sqlEvidence
+          ? (sqlEvidence.rows as Record<string, unknown>[])
+          : [],
+      },
+    );
+
+  const handleExportPpt = () =>
+    void exportResearchElement(
+      "ppt",
+      exportCaptureRef.current,
+      exportTitle,
+      toast,
+      { exportData: chartExportData },
+    );
+
   return (
     <>
       <div className="space-y-1">
@@ -1657,29 +1276,44 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
             <span className="truncate">{title}</span>
           </p>
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            {onSaveToWorkbench && evidence && isSqlEvidence(evidence) && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                  >
-                    <MoreHorizontal className="h-3.5 w-3.5" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                  aria-label="Chart export options"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem
+                  onClick={handleExportPdf}
+                  className="gap-2 text-xs cursor-pointer"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Export PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleExportPpt}
+                  className="gap-2 text-xs cursor-pointer"
+                >
+                  <Presentation className="h-3.5 w-3.5" />
+                  Export PowerPoint
+                </DropdownMenuItem>
+                {onSaveToWorkbench && sqlEvidence && (
                   <DropdownMenuItem
                     className="gap-2 text-xs cursor-pointer"
                     onClick={() =>
                       onSaveToWorkbench({
-                        sql: evidence.sql,
+                        sql: sqlEvidence.sql,
                         title: [saveTitle, title].filter(Boolean).join(" — ").slice(0, 120) || "Research chart",
                         vizConfig: {
                           type: "table",
                           title: title || "Chart",
                           data: [],
                         },
-                        explanation: evidence.explanation,
+                        explanation: sqlEvidence.explanation,
                         sourceType: "research",
                         sourceSessionId: sessionId ?? undefined,
                       })
@@ -1688,9 +1322,9 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
                     <Bookmark className="h-3.5 w-3.5" />
                     Save to Workbench
                   </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <button
               type="button"
               onClick={() => setMaximized(true)}
@@ -1701,7 +1335,15 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
             </button>
           </div>
         </div>
-        {renderChart(false)}
+        <div
+          ref={exportCaptureRef}
+          className="rounded-md border border-transparent bg-white dark:bg-slate-950"
+          {...(captureKey
+            ? { "data-research-export-key": captureKey }
+            : {})}
+        >
+          {renderChart(false)}
+        </div>
       </div>
 
       <Dialog open={maximized} onOpenChange={setMaximized}>

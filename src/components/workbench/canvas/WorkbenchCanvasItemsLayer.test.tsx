@@ -39,6 +39,7 @@ const baseProps = {
   bringToFront: noop,
   sendToBack: noop,
   handleExportWidgetExcel: noop,
+  handleExportWidgetPdf: noop,
   defaultGroupWidth: 800,
   embeddedCohiHidden: false,
   setShowCohiPanel: noop,

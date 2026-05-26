@@ -88,6 +88,7 @@ export type WorkbenchCanvasItemsLayerProps = {
   bringToFront: (id: string) => void;
   sendToBack: (id: string) => void;
   handleExportWidgetExcel: (id: string) => void;
+  handleExportWidgetPdf: (id: string) => void;
   defaultGroupWidth: number;
   embeddedCohiHidden: boolean;
   setShowCohiPanel: (open: boolean) => void;
@@ -113,6 +114,7 @@ export function WorkbenchCanvasItemsLayer({
   bringToFront,
   sendToBack,
   handleExportWidgetExcel,
+  handleExportWidgetPdf,
   defaultGroupWidth,
   embeddedCohiHidden,
   setShowCohiPanel,
@@ -346,6 +348,11 @@ export function WorkbenchCanvasItemsLayer({
               onMoveToGroup={canEdit ? handleMoveToGroup : undefined}
               onWrapInGroup={canEdit ? handleWrapInGroup : undefined}
               onExportExcel={() => handleExportWidgetExcel(item.i)}
+              onExportPdf={
+                item.type === "cohi_widget"
+                  ? () => handleExportWidgetPdf(item.i)
+                  : undefined
+              }
               onEditWithCohi={
                 embeddedCohiHidden
                   ? () => {

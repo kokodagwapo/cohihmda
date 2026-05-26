@@ -58,6 +58,7 @@ import { renderMarkdownText } from "@/utils/renderMarkdown";
 import { InsightChat } from "@/components/dashboard/InsightChat";
 import { AutoChart, EvidencePreviewTable } from "@/components/research/FindingDrillDown";
 import { RegistryWidgetEmbed } from "@/components/research/RegistryWidgetEmbed";
+import { ResearchPptCaptureHost } from "@/components/research/ResearchPptCaptureHost";
 import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import type {
   ResearchReport as ResearchReportType,
@@ -67,6 +68,7 @@ import type {
 } from "@/hooks/useResearchSession";
 import { isSqlEvidence, isRegistryWidgetEvidence } from "@/hooks/useResearchSession";
 import { primarySqlEvidenceForRankedInsight } from "@/lib/researchTrackPayload";
+import { canExportChart } from "@/lib/researchChartConfig";
 
 // ============================================================================
 // Types
@@ -103,6 +105,9 @@ interface ResearchReportProps {
   onTrackInsight?: (headline: string, detail: string) => void;
   /** When user clicks "Run this investigation" on a further-investigation suggestion. */
   onRunFurtherInvestigation?: (question: string) => void;
+  /** Expand evidence and render all charts/widgets for PPT capture. */
+  forceEvidenceOpen?: boolean;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
 }
 
 type ViewMode = "brief" | "full";
@@ -208,12 +213,15 @@ export function QuickAnswerView({
   onDrillDown,
   onSaveToWorkbench,
   sessionId,
+  forceEvidenceOpen = false,
 }: {
   finding: Finding;
   onDrillDown?: (finding: Finding) => void;
   onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
   sessionId?: string | null;
+  forceEvidenceOpen?: boolean;
 }) {
+  const keyPrefix = `finding-${finding.questionId}`;
   return (
     <div className="space-y-4 py-2">
       <Card className="rounded-lg border bg-card overflow-hidden">
@@ -261,17 +269,37 @@ export function QuickAnswerView({
               </h4>
               <div className="space-y-4 overflow-x-auto min-w-0">
                 {finding.evidence.map((ev, idx) => (
-                  <div key={idx} className="space-y-1">
+                  <div key={idx} className="space-y-2">
                     {ev.explanation && (
                       <p className="text-xs text-muted-foreground mb-1">
                         {ev.explanation}
                       </p>
                     )}
                     {isRegistryWidgetEvidence(ev) ? (
-                      <RegistryWidgetEmbed evidence={ev} />
-                    ) : (
-                      <EvidencePreviewTable evidence={ev} maxRows={20} onSaveToWorkbench={onSaveToWorkbench} saveTitle={finding.title} sessionId={sessionId} />
-                    )}
+                      <RegistryWidgetEmbed
+                        evidence={ev}
+                        captureKey={`${keyPrefix}-widget-${ev.definitionId}`}
+                      />
+                    ) : isSqlEvidence(ev) && ev.rows?.length ? (
+                      <>
+                        <EvidencePreviewTable
+                          evidence={ev}
+                          maxRows={forceEvidenceOpen ? 500 : 20}
+                          onSaveToWorkbench={onSaveToWorkbench}
+                          saveTitle={finding.title}
+                          sessionId={sessionId}
+                        />
+                        {canExportChart(ev) && (
+                          <AutoChart
+                            evidence={ev}
+                            onSaveToWorkbench={onSaveToWorkbench}
+                            saveTitle={finding.title}
+                            sessionId={sessionId}
+                            captureKey={`${keyPrefix}-sql-${idx}`}
+                          />
+                        )}
+                      </>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -582,17 +610,20 @@ function ThemeAccordion({
 function CollapsibleEvidence({
   children,
   defaultOpen = false,
+  forceOpen = false,
 }: {
   children: React.ReactNode;
   defaultOpen?: boolean;
+  forceOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(defaultOpen || forceOpen);
+  const isOpen = forceOpen || open;
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={isOpen} onOpenChange={forceOpen ? undefined : setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
         <BarChart3 className="h-3.5 w-3.5" />
-        {open ? "Hide data" : "View data"}
-        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+        {isOpen ? "Hide data" : "View data"}
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-180")} />
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-2 overflow-x-auto min-w-0">{children}</CollapsibleContent>
     </Collapsible>
@@ -609,6 +640,7 @@ function InsightCard({
   onTrackInsight,
   selectedTenantId,
   defaultEvidenceOpen = false,
+  forceEvidenceOpen = false,
   onSaveToWorkbench,
   sessionId,
 }: {
@@ -625,6 +657,7 @@ function InsightCard({
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
   defaultEvidenceOpen?: boolean;
+  forceEvidenceOpen?: boolean;
   onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
   sessionId?: string | null;
 }) {
@@ -689,7 +722,12 @@ function InsightCard({
         : "border-l-4 border-l-border";
 
   return (
-    <div className={cn("rounded-lg border bg-card overflow-hidden", impactBorderClass)}>
+    <div
+      className={cn("rounded-lg border bg-card overflow-hidden", impactBorderClass)}
+      {...(forceEvidenceOpen
+        ? { "data-research-export-key": `insight-card-${insight.rank}` }
+        : {})}
+    >
       <div className="flex gap-3 p-4 hover:bg-accent/5 transition-colors">
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-sm font-bold">
           {insight.rank}
@@ -818,8 +856,8 @@ function InsightCard({
             </div>
           )}
 
-          {/* Evidence findings */}
-          {relatedFindings.length > 0 && (
+          {/* Evidence findings (hidden during PPT capture — full findings are on later slides) */}
+          {!forceEvidenceOpen && relatedFindings.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {relatedFindings.map((f) => (
                 <TooltipProvider key={f.questionId} delayDuration={200}>
@@ -863,23 +901,35 @@ function InsightCard({
             </div>
           )}
 
-          {/* Inline evidence: table + chart from first finding */}
+          {/* Inline evidence: table + chart from findings */}
           {(() => {
-            const registryEvs = relatedFindings
-              .flatMap((f) => f.evidence)
+            const allEvidence = relatedFindings.flatMap((f) => f.evidence ?? []);
+            const hasEvidence = allEvidence.some(
+              (e) =>
+                isRegistryWidgetEvidence(e) ||
+                (isSqlEvidence(e) && e.rows?.length > 0),
+            );
+            if (!hasEvidence) return null;
+
+            const registryEvs = allEvidence
               .filter(isRegistryWidgetEvidence)
               .slice(0, 3);
             const heroReg = registryEvs[0];
             const lazyRegs = registryEvs.slice(1);
-            const firstSql = relatedFindings
-              .flatMap((f) => f.evidence)
-              .find((e) => isSqlEvidence(e) && e.rows?.length);
+            const firstSql = allEvidence.find(
+              (e) => isSqlEvidence(e) && e.rows?.length,
+            );
             if (!heroReg && !firstSql?.rows?.length) return null;
+
+            // PPT export: open "View data" only (preview content), not every finding's evidence.
             return (
-              <CollapsibleEvidence defaultOpen={defaultEvidenceOpen}>
+              <CollapsibleEvidence
+                defaultOpen={defaultEvidenceOpen}
+                forceOpen={forceEvidenceOpen}
+              >
                 <div className="space-y-3 pt-1 min-w-0">
                   {heroReg && <RegistryWidgetEmbed evidence={heroReg} hero />}
-                  {lazyRegs.length > 0 && (
+                  {!forceEvidenceOpen && lazyRegs.length > 0 && (
                     <Collapsible>
                       <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                         <ChevronDown className="h-3 w-3" />
@@ -888,7 +938,10 @@ function InsightCard({
                       <CollapsibleContent>
                         <div className="grid gap-3 md:grid-cols-2 mt-2">
                           {lazyRegs.map((ev, j) => (
-                            <RegistryWidgetEmbed key={`${ev.definitionId}-${j}`} evidence={ev} />
+                            <RegistryWidgetEmbed
+                              key={`${ev.definitionId}-${j}`}
+                              evidence={ev}
+                            />
                           ))}
                         </div>
                       </CollapsibleContent>
@@ -896,8 +949,21 @@ function InsightCard({
                   )}
                   {firstSql && firstSql.rows.length > 0 && (
                     <>
-                      <EvidencePreviewTable evidence={firstSql} maxRows={defaultEvidenceOpen ? 20 : 12} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
-                      <AutoChart evidence={firstSql} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
+                      <EvidencePreviewTable
+                        evidence={firstSql}
+                        maxRows={forceEvidenceOpen || defaultEvidenceOpen ? 20 : 12}
+                        onSaveToWorkbench={onSaveToWorkbench}
+                        saveTitle={insight.headline}
+                        sessionId={sessionId}
+                      />
+                      {canExportChart(firstSql) && (
+                        <AutoChart
+                          evidence={firstSql}
+                          onSaveToWorkbench={onSaveToWorkbench}
+                          saveTitle={insight.headline}
+                          sessionId={sessionId}
+                        />
+                      )}
                     </>
                   )}
                 </div>
@@ -905,7 +971,7 @@ function InsightCard({
             );
           })()}
 
-          {/* Ask about this button */}
+          {!forceEvidenceOpen && (
           <button
             onClick={() => setChatOpen(!chatOpen)}
             className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors ${
@@ -917,11 +983,12 @@ function InsightCard({
             <MessageSquare className="h-3 w-3" />
             {chatOpen ? "Hide chat" : "Ask about this"}
           </button>
+          )}
         </div>
       </div>
 
       {/* Inline Q&A */}
-      {chatOpen && (
+      {chatOpen && !forceEvidenceOpen && (
         <div className="border-t px-4 pb-3">
           <InsightChat
             insightContext={chatContext}
@@ -1023,8 +1090,12 @@ export function ResearchReport({
   onToggleTrack,
   onTrackInsight,
   onRunFurtherInvestigation,
+  forceEvidenceOpen = false,
+  onSaveToWorkbench: onSaveToWorkbenchProp,
 }: ResearchReportProps) {
   const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
+  const handleSaveToWorkbench =
+    onSaveToWorkbenchProp ?? setSaveToWorkbenchPayload;
 
   const handleFindingFeedback = useCallback(
     (id: string, rating: -1 | 1, comment: string) => {
@@ -1145,7 +1216,8 @@ export function ResearchReport({
                 onTrackInsight={onTrackInsight}
                 selectedTenantId={selectedTenantId}
                 defaultEvidenceOpen={insight.rank <= 2}
-                onSaveToWorkbench={setSaveToWorkbenchPayload}
+                forceEvidenceOpen={forceEvidenceOpen}
+                onSaveToWorkbench={handleSaveToWorkbench}
                 sessionId={sessionId}
               />
             ))}
@@ -1167,6 +1239,10 @@ export function ResearchReport({
         <p className="text-xs text-muted-foreground text-right">
           Report generated {new Date(report.generatedAt).toLocaleString()}
         </p>
+      )}
+
+      {forceEvidenceOpen && findings.length > 0 && (
+        <ResearchPptCaptureHost findings={findings} sessionId={sessionId} />
       )}
 
       <SaveToWorkbenchModal

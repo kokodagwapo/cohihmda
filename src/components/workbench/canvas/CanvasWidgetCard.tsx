@@ -14,7 +14,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles, FileSpreadsheet, MessageSquare } from 'lucide-react';
+import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles, FileSpreadsheet, FileText, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /** Optional: for dashboard_section widgets, allow hiding sub-sections (e.g. Executive summary). */
@@ -59,6 +59,8 @@ interface CanvasWidgetCardProps {
   onEditWithCohi?: () => void;
   /** Called when the user wants to export this widget's data to Excel */
   onExportExcel?: () => void;
+  /** Called when the user wants a chat-style PDF (preview + data table) */
+  onExportPdf?: () => void;
   /** When true, show editing ring and badge (widget is being edited via Cohi) */
   editing?: boolean;
 }
@@ -83,6 +85,7 @@ export function CanvasWidgetCard({
   onWrapInGroup,
   onEditWithCohi,
   onExportExcel,
+  onExportPdf,
   editing = false,
 }: CanvasWidgetCardProps) {
   const hasHideableSections = hideableSections.length > 0 && typeof onToggleSection === 'function';
@@ -96,6 +99,7 @@ export function CanvasWidgetCard({
     hasGroupActions ||
     typeof onEditWithCohi === 'function' ||
     typeof onExportExcel === 'function' ||
+    typeof onExportPdf === 'function' ||
     typeof onDuplicate === 'function' ||
     typeof onDelete === 'function';
   return (
@@ -274,6 +278,15 @@ export function CanvasWidgetCard({
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onExportExcel(); }} className="gap-2">
                   <FileSpreadsheet className="h-4 w-4" />
                   Export to Excel
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {onExportPdf && (
+              <>
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onExportPdf(); }} className="gap-2">
+                  <FileText className="h-4 w-4" />
+                  Export to PDF
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
