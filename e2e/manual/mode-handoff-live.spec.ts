@@ -65,7 +65,7 @@ test.describe("Cross-mode handoff @manual-live", () => {
     await listbox.getByRole("option", { name: label, exact: true }).click();
   }
 
-  test("H01 Workbench → Research sends canvas handoff + workbench_canvas scope", async ({
+  test("@COHI-386 H01 Workbench → Research sends canvas handoff + workbench_canvas scope", async ({
     page,
   }) => {
     await seedDeterministicBoard(page);
@@ -97,7 +97,7 @@ test.describe("Cross-mode handoff @manual-live", () => {
     ).toBeVisible({ timeout: 60_000 });
   });
 
-  test("H02 Workbench → Insight Builder sends handoff on first IB message", async ({
+  test("@COHI-386 H02 Workbench → Insight Builder sends handoff on first IB message", async ({
     page,
   }) => {
     await seedDeterministicBoard(page);
@@ -125,7 +125,7 @@ test.describe("Cross-mode handoff @manual-live", () => {
     ).toBeVisible({ timeout: 90_000 });
   });
 
-  test("H03 Fork WB → Research includes carry-over and handoff on first send", async ({
+  test("@COHI-386 H03 Fork WB → Research includes carry-over and handoff on first send", async ({
     page,
   }) => {
     await seedDeterministicBoard(page);
