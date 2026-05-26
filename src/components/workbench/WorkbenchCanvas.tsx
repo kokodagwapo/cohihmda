@@ -150,6 +150,8 @@ import {
   applyCreateWidget,
   applyCreateCanvas,
   applyModifyWidget,
+  applySuggestDashboard,
+  applyAddExistingWidget,
   type WidgetGroupPayloadShape,
   type WidgetActionReducerOutcome,
 } from "@/lib/workbench/canvas/handlers/widgetActionDispatch";
@@ -217,18 +219,19 @@ type WorkbenchToastFn = (props: {
 }) => void;
 
 function commitWidgetActionReducerOutcome(
-  outcome: WidgetActionReducerOutcome,
+  apply: (prev: CanvasLayoutItem[]) => WidgetActionReducerOutcome,
   setItemsWithHistory: (
     items: CanvasLayoutItem[] | ((prev: CanvasLayoutItem[]) => CanvasLayoutItem[]),
   ) => void,
   toast: WorkbenchToastFn,
 ) {
-  if (outcome.result === "ok") {
-    setItemsWithHistory(outcome.items);
-  }
-  if (outcome.toast) {
-    toast(outcome.toast);
-  }
+  setItemsWithHistory((prev) => {
+    const outcome = apply(prev);
+    if (outcome.toast) {
+      toast(outcome.toast);
+    }
+    return outcome.result === "ok" ? outcome.items : prev;
+  });
 }
 
 /**
@@ -1392,95 +1395,28 @@ export function WorkbenchCanvas({
     (action: WidgetAction) => {
       switch (action.type) {
         case "add_existing_widget": {
-          const def = getWidgetDefinition(action.widgetId);
-          if (!def) {
-            toast({
-              title: "Widget not found",
-              description: `Unknown widget: ${action.widgetId}`,
-              variant: "destructive",
-            });
-            return;
-          }
-          // Find the correct section type from SECTION_TO_WIDGETS
-          let sectionType: SectionType = "company-scorecard";
-          for (const [, cfg] of Object.entries(SECTION_TO_WIDGETS)) {
-            if (cfg.widgetIds.includes(action.widgetId)) {
-              sectionType = cfg.sectionType as SectionType;
-              break;
-            }
-          }
-          const groupId = `cohi-group-${Date.now()}`;
-          const newItem = createLayoutItem(
-            `canvas-${Date.now()}`,
-            "widget_group",
-            {
-              type: "widget_group",
-              groupId,
-              title: def.group,
-              sectionType,
-              widgetIds: [action.widgetId],
-            },
-            { x: 0, y: 20, w: defaultGroupWidth, h: 400 },
+          commitWidgetActionReducerOutcome(
+            (prev) =>
+              applyAddExistingWidget(prev, action, {
+                defaultGroupWidth,
+                sectionToWidgets: SECTION_TO_WIDGETS,
+              }),
+            setItemsWithHistory,
+            toast,
           );
-          setItemsWithHistory([...items, newItem]);
-          toast({
-            title: "Widget added",
-            description: `Added "${def.name}" to canvas`,
-          });
           break;
         }
         case "suggest_dashboard": {
-          const sectionKey = action.sectionKey as string;
-          const sectionTitle = sectionKey
-            .replace(/([A-Z])/g, " $1")
-            .replace(/^./, (s) => s.toUpperCase())
-            .trim();
-
-          // Check standalone widgets first
-          const sw = STANDALONE_WIDGETS[sectionKey];
-          if (sw) {
-            const swItem = createLayoutItem(
-              `canvas-${Date.now()}`,
-              "registry_widget",
-              { type: "registry_widget", definitionId: sw.defId },
-              { x: 20, y: 20, w: sw.w, h: sw.h },
-            );
-            setItemsWithHistory([...items, swItem]);
-            toast({
-              title: "Widget added",
-              description: `Added "${sectionTitle}" to canvas`,
-            });
-            break;
-          }
-
-          // Full dashboard sections
-          const section = SECTION_TO_WIDGETS[sectionKey];
-          if (!section) {
-            toast({
-              title: "Dashboard not found",
-              description: `Unknown section: ${sectionKey}`,
-              variant: "destructive",
-            });
-            return;
-          }
-          const gId = `cohi-dash-${Date.now()}`;
-          const dashItem = createLayoutItem(
-            `canvas-${Date.now()}`,
-            "widget_group",
-            {
-              type: "widget_group",
-              groupId: gId,
-              title: sectionTitle,
-              sectionType: section.sectionType as SectionType,
-              widgetIds: section.widgetIds,
-            },
-            { x: 0, y: 20, w: defaultGroupWidth, h: 800 },
+          commitWidgetActionReducerOutcome(
+            (prev) =>
+              applySuggestDashboard(prev, action, {
+                defaultGroupWidth,
+                sectionToWidgets: SECTION_TO_WIDGETS,
+                standaloneWidgets: STANDALONE_WIDGETS,
+              }),
+            setItemsWithHistory,
+            toast,
           );
-          setItemsWithHistory([...items, dashItem]);
-          toast({
-            title: "Dashboard added",
-            description: `Added ${section.widgetIds.length} widgets to canvas`,
-          });
           break;
         }
         case "modify_group": {
@@ -1573,7 +1509,7 @@ export function WorkbenchCanvas({
           }
           if (action.type !== "modify_widget") break;
           commitWidgetActionReducerOutcome(
-            applyModifyWidget(items, action, { editingWidgetId }),
+            (prev) => applyModifyWidget(prev, action, { editingWidgetId }),
             setItemsWithHistory,
             toast,
           );
@@ -1581,7 +1517,7 @@ export function WorkbenchCanvas({
         }
         case "convert_to_sql_widget": {
           commitWidgetActionReducerOutcome(
-            applyConvertToSqlWidget(items, action),
+            (prev) => applyConvertToSqlWidget(prev, action),
             setItemsWithHistory,
             toast,
           );
@@ -1589,7 +1525,7 @@ export function WorkbenchCanvas({
         }
         case "create_dashboard": {
           commitWidgetActionReducerOutcome(
-            applyCreateDashboard(items, action),
+            (prev) => applyCreateDashboard(prev, action),
             setItemsWithHistory,
             toast,
           );
@@ -1597,37 +1533,40 @@ export function WorkbenchCanvas({
         }
         case "create_widget": {
           commitWidgetActionReducerOutcome(
-            applyCreateWidget(items, action, { canvasWidth: width }),
+            (prev) => applyCreateWidget(prev, action, { canvasWidth: width }),
             setItemsWithHistory,
             toast,
           );
           break;
         }
         case "delete_widget": {
-          const { items: nextItems, removed } = applyDeleteWidgetFromItems(
-            items,
-            action.instanceId,
-          );
-          if (removed) {
-            setItemsWithHistory(nextItems);
-            toast({ title: "Widget removed" });
-          } else {
+          setItemsWithHistory((prev) => {
+            const { items: nextItems, removed } = applyDeleteWidgetFromItems(
+              prev,
+              action.instanceId,
+            );
+            if (removed) {
+              toast({ title: "Widget removed" });
+              return nextItems;
+            }
             toast({
               title: "Widget not found",
               description: `No widget matching "${action.instanceId}"`,
               variant: "destructive",
             });
-          }
+            return prev;
+          });
           break;
         }
         case "create_canvas": {
           if (action.title) setSaveTitle(action.title);
           commitWidgetActionReducerOutcome(
-            applyCreateCanvas(items, action, {
-              canvasWidth: width,
-              sectionToWidgets: SECTION_TO_WIDGETS,
-              standaloneWidgets: STANDALONE_WIDGETS,
-            }),
+            (prev) =>
+              applyCreateCanvas(prev, action, {
+                canvasWidth: width,
+                sectionToWidgets: SECTION_TO_WIDGETS,
+                standaloneWidgets: STANDALONE_WIDGETS,
+              }),
             setItemsWithHistory,
             toast,
           );

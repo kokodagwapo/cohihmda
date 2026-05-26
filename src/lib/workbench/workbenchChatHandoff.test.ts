@@ -4,8 +4,10 @@ import {
   deliverWorkbenchWidgetActions,
   EXECUTABLE_WORKBENCH_ACTION_TYPES,
   filterExecutableWorkbenchActions,
+  partitionWorkbenchActionsForAutoApply,
   gateWorkbenchActionsForUserQuestion,
   describeWorkbenchActionsApplied,
+  formatWorkbenchSectionKey,
   shouldForceNewWorkbenchConversation,
   buildCarryOverContext,
   shouldForkOnChatTypeChange,
@@ -110,6 +112,75 @@ describe("workbenchChatHandoff", () => {
         },
       ] as WidgetAction[]),
     ).toBe("Applied 1 widget to canvas");
+  });
+
+  it("partitionWorkbenchActionsForAutoApply holds suggest_dashboard for confirmation", () => {
+    const actions = [
+      {
+        type: "suggest_dashboard",
+        sectionKey: "salesScorecard",
+        explanation: "Official TTS table",
+      },
+      {
+        type: "create_widget",
+        sql: "SELECT 1",
+        title: "Wrong",
+        config: { type: "table", title: "Wrong", data: [] },
+      },
+    ] as WidgetAction[];
+    const { autoApply, pendingConfirmation } =
+      partitionWorkbenchActionsForAutoApply(actions);
+    expect(pendingConfirmation).toHaveLength(1);
+    expect(pendingConfirmation[0].type).toBe("suggest_dashboard");
+    expect(autoApply).toHaveLength(0);
+  });
+
+  it("partitionWorkbenchActionsForAutoApply blocks add_existing_widget with suggest_dashboard", () => {
+    const actions = [
+      {
+        type: "suggest_dashboard",
+        sectionKey: "salesScorecard",
+        explanation: "Official TTS table",
+      },
+      {
+        type: "add_existing_widget",
+        widgetId: "sales-scorecard-tabbed-table",
+        explanation: "Should wait for confirm",
+      },
+    ] as WidgetAction[];
+    const { autoApply, pendingConfirmation } =
+      partitionWorkbenchActionsForAutoApply(actions);
+    expect(pendingConfirmation).toHaveLength(1);
+    expect(autoApply).toHaveLength(0);
+  });
+
+  it("deliverWorkbenchWidgetActions does not apply suggest_dashboard without allow flag", () => {
+    registerWorkbenchCanvasBridge(null);
+    const draftScopeId = "draft-no-suggest-auto";
+    const dispatched: WidgetAction[][] = [];
+    const handler = (e: Event) => {
+      dispatched.push((e as CustomEvent<{ actions: WidgetAction[] }>).detail.actions);
+    };
+    window.addEventListener("workbench:apply-cohi-actions", handler);
+    deliverWorkbenchWidgetActions(draftScopeId, [
+      {
+        type: "suggest_dashboard",
+        sectionKey: "salesScorecard",
+        explanation: "wait",
+      },
+      {
+        type: "add_existing_widget",
+        widgetId: "sales-scorecard-tabbed-table",
+        explanation: "wait",
+      },
+    ] as WidgetAction[]);
+    expect(dispatched).toHaveLength(0);
+    expect(consumePendingWorkbenchActions(draftScopeId)).toHaveLength(0);
+    window.removeEventListener("workbench:apply-cohi-actions", handler);
+  });
+
+  it("formatWorkbenchSectionKey humanizes camelCase keys", () => {
+    expect(formatWorkbenchSectionKey("salesScorecard")).toBe("Sales Scorecard");
   });
 
   it("filterExecutableWorkbenchActions keeps known types only", () => {

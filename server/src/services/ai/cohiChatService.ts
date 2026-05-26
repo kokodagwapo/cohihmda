@@ -26,7 +26,7 @@ import {
   getSchemaForTenant,
   getFallbackSchemaContext,
 } from "./schemaContextService.js";
-import { OPS_TTS_WEIGHTS, SALES_TTS_WEIGHTS } from "../../utils/scorecard-utils.js";
+import { buildPlatformBusinessContext } from "./platformBusinessContext.js";
 import { sanitizeNavigationHints } from "../chat/unifiedChatPolicy.js";
 import {
   buildGuidanceResponse,
@@ -1351,7 +1351,7 @@ interface GatheredContext {
   };
   ragContext: RAGContext;
   insightMetrics?: Record<string, any>;
-  topTieringWeightsContext?: string;
+  platformBusinessContext?: string;
 }
 
 function enforceCatalogBackedNavigationCopy(
@@ -1481,92 +1481,6 @@ function buildRecommendedNavigationHints(
   return capped;
 }
 
-function isTopTieringQuestion(question: string): boolean {
-  return /(top[\s-]?tiering|top[\s-]?tier(?:ing)?\s*score|\btts\b|team score|scorecard weights?)/i.test(
-    question
-  );
-}
-
-async function getTopTieringWeightsContext(
-  tenantId: string
-): Promise<string | undefined> {
-  try {
-    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
-    const result = await tenantPool.query<{
-      scorecard_type: "sales" | "operations";
-      metric_name: string;
-      weight: string | number;
-    }>(
-      `SELECT scorecard_type, metric_name, weight
-       FROM public.scoring_weights
-       WHERE is_active = true
-         AND persona_id IS NULL
-         AND scorecard_type IN ('sales', 'operations')`
-    );
-
-    const sales: {
-      volume: number;
-      margin: number;
-      unit: number;
-      pullThrough: number;
-      turnTime: number;
-      concession: number;
-    } = { ...SALES_TTS_WEIGHTS };
-    const operations: {
-      units: number;
-      turnTime: number;
-      complexity: number;
-    } = { ...OPS_TTS_WEIGHTS };
-    let foundDbWeights = false;
-
-    for (const row of result.rows) {
-      const w = Number(row.weight);
-      if (!Number.isFinite(w)) continue;
-      foundDbWeights = true;
-
-      if (row.scorecard_type === "sales") {
-        const metricMap: Record<string, keyof typeof sales> = {
-          volume: "volume",
-          margin: "margin",
-          unit: "unit",
-          pull_through: "pullThrough",
-          turn_time: "turnTime",
-          concession: "concession",
-        };
-        const key = metricMap[row.metric_name];
-        if (key) sales[key] = w;
-      } else if (row.scorecard_type === "operations") {
-        const metricMap: Record<string, keyof typeof operations> = {
-          units: "units",
-          turn_time: "turnTime",
-          complexity: "complexity",
-        };
-        const key = metricMap[row.metric_name];
-        if (key) operations[key] = w;
-      }
-    }
-
-    return [
-      "## Top Tiering Score Configuration",
-      "Use the term Top Tiering Score (TTS alias in code), not Total Team Score.",
-      foundDbWeights
-        ? "These weights were loaded from this tenant's Admin Scoring & Weights configuration."
-        : "No tenant-specific rows were found in scoring_weights; defaults are shown.",
-      `Sales weights: volume=${sales.volume}, margin=${sales.margin}, unit=${sales.unit}, pullThrough=${sales.pullThrough}, turnTime=${sales.turnTime}, concession=${sales.concession}`,
-      `Operations weights: units=${operations.units}, turnTime=${operations.turnTime}, complexity=${operations.complexity}`,
-      "If a user asks where to change this, direct them to Admin > Scoring & Weights.",
-    ].join("\n");
-  } catch (error: any) {
-    console.warn("[CohiChat] Failed to load Top Tiering weights:", error.message);
-    return [
-      "## Top Tiering Score Configuration",
-      "Use the term Top Tiering Score (TTS alias in code), not Total Team Score.",
-      "Could not load tenant-specific weights from scoring_weights.",
-      "Direct the user to Admin > Scoring & Weights to view/update current weights.",
-    ].join("\n");
-  }
-}
-
 function mapComposerToGenerated(
   _spec: MetricSpec,
   composed: ComposerResult,
@@ -1639,8 +1553,7 @@ async function gatherAllContext(
 
   const includeRag =
     opts?.includeRag !== false && !context.uploadOnlyMode;
-  const includeTopTieringContext =
-    !context.uploadOnlyMode && isTopTieringQuestion(question);
+  const includePlatformBusinessContext = !context.uploadOnlyMode;
 
   let composerQuery: GeneratedQuery | null = null;
   if (!context.uploadOnlyMode && (await isMetricComposerEnabledForSurface("chat"))) {
@@ -1667,7 +1580,7 @@ async function gatherAllContext(
     totalChunks: 0,
   };
 
-  const [ragContext, legacyQueryConfig, topTieringWeightsContext] =
+  const [ragContext, legacyQueryConfig, platformBusinessContext] =
     await Promise.all([
       includeRag
         ? retrieveRAGContextForTenant(context.tenantId, question, 5, 0.3)
@@ -1675,8 +1588,8 @@ async function gatherAllContext(
       composerQuery
         ? Promise.resolve(null as GeneratedQuery | null)
         : generateQuery(question, context, conversationHistory),
-      includeTopTieringContext
-        ? getTopTieringWeightsContext(context.tenantId)
+      includePlatformBusinessContext
+        ? buildPlatformBusinessContext(context.tenantId)
         : Promise.resolve(undefined),
     ]);
 
@@ -1814,7 +1727,7 @@ async function gatherAllContext(
     dataQueryResult,
     ragContext,
     insightMetrics,
-    topTieringWeightsContext,
+    platformBusinessContext,
   };
 }
 
@@ -1930,8 +1843,8 @@ async function generateUnifiedResponse(
     }
   }
 
-  if (gathered.topTieringWeightsContext) {
-    contextParts.push(`\n${gathered.topTieringWeightsContext}`);
+  if (gathered.platformBusinessContext) {
+    contextParts.push(`\n${gathered.platformBusinessContext}`);
   }
 
   const hasAnyContext = contextParts.length > 0;
