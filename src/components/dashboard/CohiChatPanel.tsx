@@ -502,6 +502,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     chatType: UnifiedChatType;
     forceNewConversation: boolean;
   } | null>(null);
+  /** Canvas id we last auto-selected workbench for (navigation only, not manual mode changes). */
+  const lastAutoWorkbenchCanvasIdRef = useRef<string | null>(null);
   const CHAT_INPUT_MAX_HEIGHT_PX = 128;
 
   const resizeChatInput = useCallback(() => {
@@ -778,16 +780,19 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [allowedChatTypes, activeChatType, setActiveChatType]);
 
-  /** Saved canvas on My Dashboard should use workbench chat (and auto-load its thread). */
+  /** Default to workbench chat when navigating to a saved canvas, not on every mode change. */
   useEffect(() => {
     if (!isUnifiedChatClientEnabled()) return;
     const canvasId = getMyDashboardCanvasIdFromPath(pathname);
-    if (!canvasId) return;
-    if (!allowedChatTypes.includes("workbench")) return;
-    if (activeChatType !== "workbench") {
-      setActiveChatType("workbench");
+    if (!canvasId) {
+      lastAutoWorkbenchCanvasIdRef.current = null;
+      return;
     }
-  }, [pathname, allowedChatTypes, activeChatType, setActiveChatType]);
+    if (!allowedChatTypes.includes("workbench")) return;
+    if (lastAutoWorkbenchCanvasIdRef.current === canvasId) return;
+    lastAutoWorkbenchCanvasIdRef.current = canvasId;
+    setActiveChatType("workbench");
+  }, [pathname, allowedChatTypes, setActiveChatType]);
 
   useEffect(() => {
     const handler = (e: Event) => {
