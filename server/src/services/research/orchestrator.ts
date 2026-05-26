@@ -16,6 +16,11 @@
 
 import pg from "pg";
 import crypto from "crypto";
+import type { CarryOverContextPayload } from "../chat/chatConversationFork.js";
+import {
+  formatCarryOverPriorContext,
+  formatCarryOverSteeringDirective,
+} from "../chat/chatConversationFork.js";
 import { getOpenAIKey, getSchemaContext, getMetricDefinitions, getKnowledgeContext, getDerivedMetricContext, getTrackedInsightContext } from "./tools.js";
 import { runPlannerAgent, type ResearchPlan, type InvestigationQuestion } from "./agents/plannerAgent.js";
 import {
@@ -105,6 +110,8 @@ export interface ResearchSession {
   uploadIds?: string[];
   /** Client-snapshotted widget catalog for the analyst (COHI-366). */
   widgetContext?: ResearchWidgetContext;
+  /** Unified chat fork carry-over (in-memory; used by deep planner). */
+  priorChatCarryOver?: string;
 }
 
 export interface ResearchAccessPrincipal {
@@ -686,6 +693,17 @@ export function addSteeringDirective(sessionId: string, message: string): boolea
   return true;
 }
 
+/** Apply unified chat fork carry-over to a newly created research session. */
+export function applyChatCarryOver(
+  session: ResearchSession,
+  carryOver: CarryOverContextPayload,
+): void {
+  session.priorChatCarryOver = formatCarryOverPriorContext(carryOver);
+  if (session.phase !== "complete" && session.phase !== "error") {
+    session.steeringDirectives.push(formatCarryOverSteeringDirective(carryOver));
+  }
+}
+
 export function attachSessionEmitter(sessionId: string, emitter: SSEEmitter): boolean {
   const session = sessions.get(sessionId);
   if (!session) return false;
@@ -931,6 +949,11 @@ export async function runResearchPipeline(
         }
       }
       priorInvestigationContext = ctx;
+    }
+    if (session.priorChatCarryOver) {
+      priorInvestigationContext = priorInvestigationContext
+        ? `${priorInvestigationContext}\n\n${session.priorChatCarryOver}`
+        : session.priorChatCarryOver;
     }
 
     const plan = await runPlannerAgent(combinedSchemaContext, metricDefs, apiKey, {

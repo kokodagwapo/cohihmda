@@ -19,6 +19,7 @@ import type { Response } from "express";
 import type { AuthRequest } from "../../middleware/auth.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import {
+  applyChatCarryOver,
   createSession,
   runResearchPipeline,
   runFollowUp,
@@ -32,6 +33,7 @@ import {
   type SSEEmitter,
   type ResearchSession,
 } from "../research/orchestrator.js";
+import type { CarryOverContextPayload } from "./chatConversationFork.js";
 import type { UnifiedBlock } from "./unifiedChatMappers.js";
 import { validateUnifiedStreamEvent } from "./unifiedChatSchemas.js";
 import { researchArtifactBlock } from "./unifiedResearchChat.js";
@@ -49,6 +51,7 @@ export interface UnifiedResearchStreamArgs {
   deepAnalysis?: boolean;
   uploadIds?: string[];
   policy: PolicyDecision;
+  carryOver?: CarryOverContextPayload | null;
   /** Hard cap so we never hold a request forever (ms). */
   maxWaitMs?: number;
 }
@@ -98,6 +101,9 @@ export async function runUnifiedResearchStream(
       mode,
       uploadIds,
     );
+    if (args.carryOver) {
+      applyChatCarryOver(session, args.carryOver);
+    }
   }
   sessionId = session.id;
 

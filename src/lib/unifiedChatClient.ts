@@ -212,6 +212,8 @@ export class UnifiedChatClient {
     legacy_ref?: string | null;
     parent_conversation_id?: string | null;
     forked_to_conversation_id?: string | null;
+    parent_conversation_title?: string | null;
+    forked_to_conversation_title?: string | null;
     conversation_origin?: string | null;
     dataset_upload_ids?: string[];
     datasets?: {

@@ -455,6 +455,8 @@ router.get(
         folder_id: row.folder_id,
         parent_conversation_id: row.parent_conversation_id ?? null,
         forked_to_conversation_id: row.forked_to_conversation_id ?? null,
+        parent_conversation_title: row.parent_conversation_title ?? null,
+        forked_to_conversation_title: row.forked_to_conversation_title ?? null,
         conversation_origin: row.conversation_origin ?? null,
         messages: row.messages,
         created_at: row.created_at,
@@ -1016,6 +1018,7 @@ async function handleResearchStream(
       deepAnalysis: body.options?.research?.deepAnalysis,
       uploadIds: mergeDatasetUploadIds(body),
       policy,
+      carryOver: readCarryOverContext(body),
     });
   } catch (err: any) {
     if (!res.headersSent) {

@@ -98,10 +98,11 @@ import {
   describeWorkbenchActionsApplied,
   formatWorkbenchSectionKey,
   shouldForceNewWorkbenchConversation,
-  buildCarryOverContext,
   shouldForkOnChatTypeChange,
   type CarryOverContext,
 } from "@/lib/workbench/workbenchChatHandoff";
+import { buildCarryOverContext } from "@/lib/carryOverContext";
+import { resolveCarryOverSummary } from "@/lib/carryOverContext.resolve";
 import {
   getLatestWorkbenchActiveContext,
   markWorkbenchNewChatPendingFirstSend,
@@ -560,6 +561,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     deleteSession,
     renameSession,
     conversationForkLinks,
+    hasPendingForkCarryOver,
+    dismissPendingForkLink,
+    restoreDismissedForkLink,
     beginChatTypeFork,
     undoChatTypeFork,
     workbenchChatScope = null,
@@ -645,7 +649,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         snapshot.push({ role: "user", content: pending });
       }
       if (snapshot.length === 0) return undefined;
-      const summary = buildCarryOverContext(snapshot);
+      const summary = buildCarryOverContext(snapshot, { fromChatType: "workbench" });
       if (!summary.trim()) return undefined;
       return {
         fromConversationId: currentSessionId,
@@ -1264,6 +1268,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const handleLoadSession = useCallback(
     async (sessionId: string) => {
       const result = await loadSession(sessionId);
+      // Sync UI mode to the loaded conversation (fork chips, history sidebar, etc.).
+      // Without this, resuming a parent "chat" thread while still on "research" hides
+      // messages behind the empty research workspace (no legacyRef).
+      if (result.chatType) {
+        setActiveChatType(result.chatType);
+      }
       setAttachedUploadIds(result.datasetUploadIds);
       void listAvailableUploads();
       if (result.chatType === "workbench" && isUnifiedChatClientEnabled()) {
@@ -1289,6 +1299,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     },
     [
       loadSession,
+      setActiveChatType,
       listAvailableUploads,
       layout,
       isMobile,
@@ -1462,7 +1473,74 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [activeChatType, legacyRef]);
 
-  const forkUndoToastRef = useRef<{ dismiss: () => void } | null>(null);
+  const forkUndoToastRef = useRef<{
+    dismiss: () => void;
+    update: (props: Parameters<ReturnType<typeof toast>["update"]>[0]) => void;
+  } | null>(null);
+
+  const handleDismissPendingForkLink = useCallback(() => {
+    dismissPendingForkLink();
+
+    const carriedOverToastProps = {
+      title: `Started a new ${formatChatTypeLabel(activeChatType)} chat`,
+      description: "Context from your previous conversation was carried over.",
+      action: (
+        <ToastAction
+          altText="Undo chat type switch"
+          onClick={() => {
+            forkUndoToastRef.current?.dismiss();
+            forkUndoToastRef.current = null;
+            const restored = undoChatTypeFork?.();
+            if (restored) {
+              setActiveChatType(restored.chatType);
+            }
+          }}
+        >
+          Undo
+        </ToastAction>
+      ),
+      duration: 8000,
+      open: true,
+    };
+
+    const removalToastProps = {
+      title: `New ${formatChatTypeLabel(activeChatType)} chat`,
+      description:
+        "Context from your previous conversation was removed from this chat.",
+      action: (
+        <ToastAction
+          altText="Restore link to previous chat"
+          onClick={() => {
+            if (restoreDismissedForkLink()) {
+              forkUndoToastRef.current?.update(carriedOverToastProps);
+            }
+          }}
+        >
+          Undo
+        </ToastAction>
+      ),
+      duration: 8000,
+      open: true,
+    };
+
+    const existing = forkUndoToastRef.current;
+    if (existing?.update) {
+      existing.update(removalToastProps);
+      return;
+    }
+
+    existing?.dismiss?.();
+    window.setTimeout(() => {
+      forkUndoToastRef.current = toast(removalToastProps);
+    }, 0);
+  }, [
+    activeChatType,
+    dismissPendingForkLink,
+    restoreDismissedForkLink,
+    setActiveChatType,
+    toast,
+    undoChatTypeFork,
+  ]);
 
   const handleChatTypeChange = useCallback(
     (next: UnifiedChatType) => {
@@ -1475,7 +1553,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       }
 
       const prev = activeChatType;
-      if (
+      const shouldFork =
         isUnifiedChatClientEnabled() &&
         beginChatTypeFork &&
         shouldForkOnChatTypeChange({
@@ -1483,42 +1561,53 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           nextChatType: next,
           currentSessionId,
           messageCount: messages.length,
-        })
-      ) {
+        });
+
+      if (shouldFork) {
         const fromTitle =
           chatSessions.find((s) => s.id === currentSessionId)?.title ??
-          "Previous chat";
-        const summary = buildCarryOverContext(messages);
-        beginChatTypeFork(
-          {
-            fromConversationId: currentSessionId!,
+          (messages.find((m) => m.role === "user")?.content.trim().slice(0, 80) ||
+            "Previous chat");
+        const forkConversationId = currentSessionId!;
+        void (async () => {
+          const summary = await resolveCarryOverSummary({
+            messages,
             fromChatType: prev,
-            fromTitle,
-            summary,
-          },
-          prev,
-        );
-        forkUndoToastRef.current?.dismiss();
-        const { dismiss } = toast({
-          title: `Started a new ${formatChatTypeLabel(next)} chat`,
-          description: "Context from your previous conversation was carried over.",
-          action: (
-            <ToastAction
-              altText="Undo chat type switch"
-              onClick={() => {
-                dismiss();
-                const restored = undoChatTypeFork?.();
-                if (restored) {
-                  setActiveChatType(restored.chatType);
-                }
-              }}
-            >
-              Undo
-            </ToastAction>
-          ),
-          duration: 8000,
-        });
-        forkUndoToastRef.current = { dismiss };
+            legacyRef: prev === "research" ? legacyRef : null,
+            tenantId,
+          });
+          if (!summary.trim()) return;
+          beginChatTypeFork(
+            {
+              fromConversationId: forkConversationId,
+              fromChatType: prev,
+              fromTitle,
+              summary,
+            },
+            prev,
+          );
+          forkUndoToastRef.current?.dismiss();
+          forkUndoToastRef.current = toast({
+            title: `Started a new ${formatChatTypeLabel(next)} chat`,
+            description: "Context from your previous conversation was carried over.",
+            action: (
+              <ToastAction
+                altText="Undo chat type switch"
+                onClick={() => {
+                  forkUndoToastRef.current?.dismiss();
+                  forkUndoToastRef.current = null;
+                  const restored = undoChatTypeFork?.();
+                  if (restored) {
+                    setActiveChatType(restored.chatType);
+                  }
+                }}
+              >
+                Undo
+              </ToastAction>
+            ),
+            duration: 8000,
+          });
+        })();
       }
 
       setActiveChatType(next);
@@ -1528,8 +1617,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       beginChatTypeFork,
       chatSessions,
       currentSessionId,
+      legacyRef,
       messages,
       setActiveChatType,
+      tenantId,
       toast,
       undoChatTypeFork,
     ],
@@ -2485,6 +2576,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             chatSessions.map((s) => [s.id, s.title]),
           )}
           onNavigate={(id) => void handleLoadSession(id)}
+          onDismissPendingLink={
+            hasPendingForkCarryOver ? handleDismissPendingForkLink : undefined
+          }
           className="px-1 pb-1"
         />
       )}
