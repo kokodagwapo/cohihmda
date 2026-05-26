@@ -19,6 +19,7 @@
  */
 
 import { VIZ_STANDARDS_LIGHT, VIZ_STANDARDS_FULL } from "./visualizationStandards.js";
+import { METRIC_LANGUAGE_RULES } from "../services/chat/metricLexicon.js";
 
 export interface PromptConfig {
   id: string;
@@ -209,7 +210,9 @@ Notes:
 - pivotConfig: include ONLY for pivot type
 - nameKey/valueKey: include for pie, donut, and treemap types
 
-Always include **isDataQuery** (boolean). Never omit it.`,
+Always include **isDataQuery** (boolean). Never omit it.
+
+${METRIC_LANGUAGE_RULES}`,
     model: "gpt-5.4",
     temperature: 0.2,
     max_tokens: 1500,
