@@ -73,6 +73,10 @@ import {
   sendUnifiedGlobalStream,
   sendUnifiedWorkbenchStream,
 } from "@/lib/unifiedChatSend";
+import {
+  resolveGlobalStreamRouting,
+  type ModeHandoffContext,
+} from "@/lib/chat/modeHandoff";
 import { insightBuilderApproveClientMessageId } from "@/lib/insightBuilderApproveIdempotency";
 import {
   notifyOptimisticUnifiedChatConversation,
@@ -361,6 +365,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   /** Set from research stream metadata before poll-mode stream closes. */
   const activeResearchSessionIdRef = useRef<string | null>(null);
   const pendingCarryOverRef = useRef<CarryOverContext | null>(null);
+  const pendingModeHandoffRef = useRef<ModeHandoffContext | null>(null);
   const dismissedForkCarryOverRef = useRef<CarryOverContext | null>(null);
   const forkUndoRef = useRef<ChatTypeForkUndoState | null>(null);
   const workbenchSessionsInflightRef = useRef<Promise<void> | null>(null);
@@ -719,6 +724,16 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     activeResearchSessionIdRef.current = null;
   }, []);
 
+  const stageModeHandoff = useCallback((handoff: ModeHandoffContext | null) => {
+    pendingModeHandoffRef.current = handoff;
+  }, []);
+
+  const consumeModeHandoff = useCallback((): ModeHandoffContext | null => {
+    const handoff = pendingModeHandoffRef.current;
+    pendingModeHandoffRef.current = null;
+    return handoff;
+  }, []);
+
   /**
    * Send a question and get AI response
    */
@@ -743,6 +758,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         dismissedForkCarryOverRef.current = null;
         setHasPendingForkCarryOver(false);
       }
+      const modeHandoff = consumeModeHandoff();
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
 
@@ -979,6 +995,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               ? registerNewUnifiedConversation({ type: "global_session" })
               : activeSessionId!;
             beginStreamRun(streamConversationId);
+            const streamRouting = resolveGlobalStreamRouting({
+              chatType,
+              workbenchCanvasId: workbenchSavedCanvasId,
+            });
             const { conversationId, parsed, researchPollMode, researchSessionId } =
               await sendUnifiedGlobalStream({
               client,
@@ -990,6 +1010,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               deepAnalysis: researchDeepAnalysis,
               uploadIds: researchUploadIds,
               datasetUploadIds: datasetUploadIdsForSend,
+              location: streamRouting.location,
+              scope: streamRouting.scope,
               context: {
                 ...(chatType === "research" && priorLegacyRef
                   ? { legacyResearchSessionId: priorLegacyRef }
@@ -997,6 +1019,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                     ? { insightBuilderDraft: ibDraft }
                     : {}),
                 ...(carryOver ? { carryOverContext: carryOver } : {}),
+                ...(modeHandoff ? { modeHandoffContext: modeHandoff } : {}),
               },
               insightBuilder:
                 chatType === "insight_builder" && ibOpts?.action
@@ -1375,7 +1398,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               options.researchUploadIds.length > 0
                 ? options.researchUploadIds
                 : undefined;
-            const { conversationId, parsed, researchPollMode } =
+            const refineRouting = resolveGlobalStreamRouting({
+              chatType,
+              workbenchCanvasId: workbenchSavedCanvasId,
+            });
+            const refineHandoff = consumeModeHandoff();
+            const { conversationId, parsed, researchPollMode, researchSessionId } =
               await sendUnifiedGlobalStream({
               client,
               message: composed,
@@ -1384,13 +1412,24 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               history,
               deepAnalysis: researchDeepAnalysis,
               uploadIds: composedUploadIds,
-              context:
-                chatType === "research" && legacyRef
+              location: refineRouting.location,
+              scope: refineRouting.scope,
+              context: {
+                ...(chatType === "research" && legacyRef
                   ? { legacyResearchSessionId: legacyRef }
-                  : undefined,
+                  : {}),
+                ...(refineHandoff ? { modeHandoffContext: refineHandoff } : {}),
+              },
               onStreamEvent: applyUnifiedStreamEvent,
               onStreamText,
             });
+            if (chatType === "research") {
+              bindResearchSessionAfterStream(
+                client,
+                conversationId,
+                researchSessionId,
+              );
+            }
             setSessionId(conversationId);
             const researchHandoffMessage =
               researchPollMode && parsed.message
@@ -2269,6 +2308,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     beginChatTypeFork,
     undoChatTypeFork,
     clearConversationBinding,
+    stageModeHandoff,
     workbenchSavedCanvasId,
     workbenchChatScope,
     workbenchScopePinned,

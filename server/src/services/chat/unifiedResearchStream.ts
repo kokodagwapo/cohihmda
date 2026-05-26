@@ -24,6 +24,11 @@ import {
   type ResearchSession,
 } from "../research/orchestrator.js";
 import type { CarryOverContextPayload } from "./chatConversationFork.js";
+import { readModeHandoffContext } from "./modeHandoff.js";
+import {
+  applyResearchHandoffToSession,
+  resolveResearchStructuralHandoff,
+} from "./handoffResolver.js";
 import type { UnifiedBlock } from "./unifiedChatMappers.js";
 import { validateUnifiedStreamEvent } from "./unifiedChatSchemas.js";
 import { researchArtifactBlock } from "./unifiedResearchChat.js";
@@ -44,6 +49,7 @@ export interface UnifiedResearchStreamArgs {
   uploadIds?: string[];
   policy: PolicyDecision;
   carryOver?: CarryOverContextPayload | null;
+  modeHandoff?: ReturnType<typeof readModeHandoffContext>;
   /** @deprecated Poll mode closes immediately; kept for tests. */
   maxWaitMs?: number;
 }
@@ -73,6 +79,9 @@ export async function runUnifiedResearchStream(
 
   let sessionId = args.legacyRef ?? undefined;
   let session: ResearchSession | undefined = sessionId ? getSession(sessionId) : undefined;
+  let handoffManifest: Awaited<
+    ReturnType<typeof resolveResearchStructuralHandoff>
+  >["manifest"] = [];
   if (sessionId && !session) {
     session = await loadSession(sessionId, tenantPool);
   }
@@ -81,6 +90,11 @@ export async function runUnifiedResearchStream(
       Array.isArray(args.uploadIds) && args.uploadIds.length > 0
         ? args.uploadIds.filter((id) => typeof id === "string")
         : [];
+    const structural = await resolveResearchStructuralHandoff(
+      args.modeHandoff ?? null,
+      tenantPool,
+    );
+    handoffManifest = structural.manifest;
     session = await createSession(
       tenantId,
       userId,
@@ -90,22 +104,25 @@ export async function runUnifiedResearchStream(
       undefined,
       mode,
       uploadIds,
+      structural.widgetContext,
     );
     if (args.carryOver) {
       applyChatCarryOver(session, args.carryOver);
     }
+    applyResearchHandoffToSession(session, structural);
   }
   sessionId = session.id;
 
   if (session.phase === "error") {
     return emitResearchPollStream(args, session, sessionId, {
       pipelineError: session.error ?? "Research session in error state",
+      handoffManifest,
     });
   }
 
   kickResearchPipelineInBackground(args, session, sessionId, tenantPool);
 
-  return emitResearchPollStream(args, session, sessionId);
+  return emitResearchPollStream(args, session, sessionId, { handoffManifest });
 }
 
 /** Start or resume pipeline work without blocking the unified SSE response. */
@@ -160,7 +177,10 @@ function emitResearchPollStream(
   args: UnifiedResearchStreamArgs,
   session: ResearchSession,
   sessionId: string,
-  options?: { pipelineError?: string },
+  options?: {
+    pipelineError?: string;
+    handoffManifest?: { tier: string; included: boolean; truncated: boolean }[];
+  },
 ): UnifiedResearchStreamResult {
   setupSseHeaders(args.res);
   const emit = makeEmitter(args.res);
@@ -178,6 +198,7 @@ function emitResearchPollStream(
       { tier: "identity", included: true, truncated: false },
       { tier: "research_pipeline", included: true, truncated: false },
       { tier: "retrieval", included: true, truncated: false },
+      ...(options?.handoffManifest ?? []),
     ],
   };
 

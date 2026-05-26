@@ -84,6 +84,21 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
             specifiers: { type: "object" },
           },
         },
+        modeHandoffContext: {
+          type: "object",
+          description:
+            "Structural cross-mode handoff (e.g. workbench canvas snapshot on mode switch).",
+          properties: {
+            fromChatType: { type: "string" },
+            fromConversationId: { type: "string" },
+            fromTitle: { type: "string" },
+            canvasState: { type: "object" },
+            widgetCatalog: { type: "string" },
+            canvasId: { type: "string" },
+            canvasTitle: { type: "string" },
+            route: { type: "string" },
+          },
+        },
       },
       additionalProperties: true,
     },

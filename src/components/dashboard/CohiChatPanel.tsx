@@ -103,6 +103,7 @@ import {
 } from "@/lib/workbench/workbenchChatHandoff";
 import { buildCarryOverContext } from "@/lib/carryOverContext";
 import { resolveCarryOverSummary } from "@/lib/carryOverContext.resolve";
+import { buildModeHandoffFromWorkbench } from "@/lib/chat/modeHandoff";
 import {
   getLatestWorkbenchActiveContext,
   markWorkbenchNewChatPendingFirstSend,
@@ -569,6 +570,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     beginChatTypeFork,
     undoChatTypeFork,
     clearConversationBinding,
+    stageModeHandoff,
     workbenchChatScope = null,
     workbenchScopePinned = false,
     workbenchPinnedScopeLabel = null,
@@ -1573,6 +1575,22 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           messageCount: messages.length,
         });
 
+      const stageWorkbenchStructuralHandoff = (
+        fromType: UnifiedChatType,
+        fromConversationId: string,
+        fromTitle?: string,
+      ) => {
+        if (fromType !== "workbench") return;
+        if (next !== "research" && next !== "insight_builder") return;
+        const handoff = buildModeHandoffFromWorkbench({
+          fromChatType: fromType,
+          fromConversationId,
+          fromTitle,
+          pathname,
+        });
+        stageModeHandoff(handoff);
+      };
+
       if (shouldFork) {
         const fromTitle =
           chatSessions.find((s) => s.id === currentSessionId)?.title ??
@@ -1586,44 +1604,52 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             legacyRef: prev === "research" ? legacyRef : null,
             tenantId,
           });
-          if (!summary.trim()) return;
-          beginChatTypeFork(
-            {
-              fromConversationId: forkConversationId,
-              fromChatType: prev,
-              fromTitle,
-              summary,
-            },
-            prev,
-          );
-          forkUndoToastRef.current?.dismiss();
-          forkUndoToastRef.current = toast({
-            title: `Started a new ${formatChatTypeLabel(next)} chat`,
-            description: "Context from your previous conversation was carried over.",
-            action: (
-              <ToastAction
-                altText="Undo chat type switch"
-                onClick={() => {
-                  forkUndoToastRef.current?.dismiss();
-                  forkUndoToastRef.current = null;
-                  const restored = undoChatTypeFork?.();
-                  if (restored) {
-                    setActiveChatType(restored.chatType);
-                  }
-                }}
-              >
-                Undo
-              </ToastAction>
-            ),
-            duration: 8000,
-          });
+          if (summary.trim()) {
+            beginChatTypeFork(
+              {
+                fromConversationId: forkConversationId,
+                fromChatType: prev,
+                fromTitle,
+                summary,
+              },
+              prev,
+            );
+            forkUndoToastRef.current?.dismiss();
+            forkUndoToastRef.current = toast({
+              title: `Started a new ${formatChatTypeLabel(next)} chat`,
+              description: "Context from your previous conversation was carried over.",
+              action: (
+                <ToastAction
+                  altText="Undo chat type switch"
+                  onClick={() => {
+                    forkUndoToastRef.current?.dismiss();
+                    forkUndoToastRef.current = null;
+                    const restored = undoChatTypeFork?.();
+                    if (restored) {
+                      setActiveChatType(restored.chatType);
+                    }
+                  }}
+                >
+                  Undo
+                </ToastAction>
+              ),
+              duration: 8000,
+            });
+          }
+          stageWorkbenchStructuralHandoff(prev, forkConversationId, fromTitle);
         })();
       } else if (
         prev === "workbench" &&
-        next === "research" &&
-        currentSessionId
+        (next === "research" || next === "insight_builder")
       ) {
-        clearConversationBinding();
+        if (currentSessionId) {
+          clearConversationBinding();
+          stageWorkbenchStructuralHandoff(
+            prev,
+            currentSessionId,
+            chatSessions.find((s) => s.id === currentSessionId)?.title,
+          );
+        }
       }
 
       setActiveChatType(next);
@@ -1636,7 +1662,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       currentSessionId,
       legacyRef,
       messages,
+      pathname,
       setActiveChatType,
+      stageModeHandoff,
       tenantId,
       toast,
       undoChatTypeFork,

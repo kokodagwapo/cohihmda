@@ -1,25 +1,53 @@
 # Cross-mode chat handoff plan
 
-**Status:** Draft for engineering + product review  
+**Status:** Draft for engineering + product review (updated post–COHI-386 merge)  
 **Related:** [cohi-chat-unified-architecture.md](./cohi-chat-unified-architecture.md), [COHI_CHAT_CENTRALIZATION_MEETING_SPEC.md](./COHI_CHAT_CENTRALIZATION_MEETING_SPEC.md)  
-**Code anchors:** `workbenchChatHandoff.ts`, `chatConversationFork.ts`, `useCohiChat.ts`, `unifiedResearchStream.ts`, `insightBuilderTurn.ts`, `cohiWorkbench.ts` (`buildCanvasContext`)
+**Code anchors:** `carryOverContext.ts`, `carryOverContext.resolve.ts`, `chatConversationFork.ts`, `useCohiChat.ts`, `unifiedResearchStream.ts`, `insightBuilderTurn.ts`, `cohiWorkbench.ts` (`buildCanvasContext`)
+
+---
+
+## 0. Baseline after dev merge (COHI-386 + COHI-398 fixes)
+
+**Already shipped on `dev` (text / fork layer):**
+
+| Piece | What it does |
+|-------|----------------|
+| `src/lib/carryOverContext.ts` | Rich fork summaries (dialogue, workbench actions, IB draft, research report/findings caps). |
+| `carryOverContext.resolve.ts` | Async summary when forking **from Research** (fetches session report, 5s timeout). |
+| `applyChatCarryOver()` | Injects carry-over into **new** Research Lab sessions (steering + `priorChatCarryOver`). |
+| `unifiedResearchStream` + `chatV1` | Passes `carryOver` into stream research same as non-stream. |
+| Fork UX | `resolveCarryOverSummary` in panel; parent/child links on `getConversation`. |
+
+**Shipped on workbench branch (runtime / binding, merged with dev):**
+
+| Piece | What it does |
+|-------|----------------|
+| `bindResearchSessionAfterStream` | Binds `researchSessionId` from stream metadata + `legacy_ref`; restores fork links. |
+| `clearConversationBinding` | WB → Research with empty thread: drop workbench `sessionId` so research does not reuse wrong conversation. |
+| Chat panel / scope fixes | History under header; no workbench mode snap-back on canvas; research shell expand. |
+
+**Still missing (this plan’s focus):**
+
+- **Structural** handoff: `canvasState` / open board → Research (and WB → Insight Builder).
+- Correct **location/scope** on research sends from canvas (`workbench_canvas`, `canvas` scope).
+- `ModeHandoffContext` envelope + server `HandoffResolver` (below).
 
 ---
 
 ## 1. Problem
 
-Users switch chat type in one shell (Workbench → Research, Workbench → Insight Builder, etc.) and expect the assistant to understand **where they were**—especially the **open canvas**. Today:
+Users switch chat type in one shell (Workbench → Research, Workbench → Insight Builder, etc.) and expect the assistant to understand **where they were**—especially the **open canvas**. After COHI-386, **text** carry-over is much better; **structural** context is still the gap:
 
 | Source mode | What the target mode actually receives |
 |-------------|----------------------------------------|
 | **Workbench** | Full `canvasState` + `widgetCatalog` (workbench route only). |
-| **Research** (unified) | Question + optional **text** carry-over (`carryOverContext`, ~1.2k chars). **No** canvas, **no** `widgetContext` on `createSession`. |
-| **Insight Builder** | `insightBuilderDraft` in context when revising; no canvas/research payload. |
+| **Research** (unified) | Question + **carry-over text** into Research steering (`applyChatCarryOver`). **No** canvas snapshot, **no** `widgetContext` on `createSession` unless standalone Research Lab POST. |
+| **Insight Builder** | `insightBuilderDraft` when revising; carry-over text via fork; **no** canvas payload. |
 | **Chat** | Tenant/session + RAG; optional carry-over text only. |
 
 Research from `/my-dashboard/:canvasId` still posts `scope: global_session` / `surface: data_chat_page` with empty structural context—so *“insights from **this** dashboard”* is under-specified.
 
-We need one **handoff model** that works for Research, Insight Builder, Workbench, and Chat without duplicating four ad-hoc paths.
+We extend COHI-386 with one **structural handoff** model—not a second carry-over system.
 
 ---
 
@@ -248,13 +276,15 @@ Emit `contextManifest` entries: `handoff_from`, `canvas_included`, `truncated: t
 
 ## 8. Implementation phases
 
-### Phase 0 — Align and extract (1–2 days)
+### Phase 0 — Align and extract (1–2 days) — **next up**
 
+- [x] Rich text carry-over + research steering (COHI-386).
+- [x] Research session binding after poll-mode stream (COHI-398 branch).
 - [ ] Extract `buildCanvasContext` / `buildResearchContext` to `server/src/services/chat/canvasContextBuilder.ts` (shared by workbench + handoff).
-- [ ] Document matrix in this file; add unit tests for `HandoffResolver` truncation.
+- [ ] Add unit tests for `HandoffResolver` truncation (new module).
 - [ ] Fix `sendUnifiedGlobalStream` to pass through `location` + `scope` from caller.
 
-### Phase 1 — Canvas → Research (highest value)
+### Phase 1 — Canvas → Research (highest value) — **MVP for handoff**
 
 - [ ] `ModeHandoffContext` types (client + server).
 - [ ] Client: build handoff on WB→Research switch; attach on first research send from canvas route.
@@ -312,9 +342,23 @@ Emit `contextManifest` entries: `handoff_from`, `canvas_included`, `truncated: t
 
 ## 11. Summary
 
-- **Today:** Text-only fork carry-over; workbench has rich context; research does not.
-- **Target:** Structured `ModeHandoffContext` + server `HandoffResolver` feeding each orchestrator appropriately.
-- **First ship:** Workbench/canvas → Research (steering + registry + canvas markdown).
+- **Today:** COHI-386 owns **text** fork carry-over + Research steering; workbench owns **canvas** on WB sends only.
+- **Target:** Add **structural** `ModeHandoffContext` + `HandoffResolver` on top of existing `carryOverContext` (do not fork a parallel summary pipeline).
+- **First ship:** Workbench/canvas → Research (steering + registry + canvas markdown + scope/location).
 - **Next:** Workbench → Insight Builder; then Research outbound handoffs.
+
+### 12. Suggested tickets (implementation prep)
+
+| Ticket | Scope | Depends on |
+|--------|--------|------------|
+| **H1** | `canvasContextBuilder.ts` extract + tests | — |
+| **H2** | `sendUnifiedGlobalStream` location/scope params; client passes canvas route | H1 optional |
+| **H3** | `HandoffResolver` + `modeHandoffContext` on request schema | H1 |
+| **H4** | Phase 1: wire resolver into `runUnifiedResearchStream` (`createSession` steering + catalog) | H2, H3 |
+| **H5** | Client: `buildModeHandoffContext` + stash on mode switch; attach on first send | H4 |
+| **H6** | Phase 2: Insight Builder prefix from canvas handoff | H3 |
+| **H7** | E2E: canvas → Research → timeline references board widgets | H5 |
+
+**Merge note:** Conclude the dev merge commit on `fix/COHI-398-workbench-live-solid` before starting H1 (conflicts resolved in `unifiedResearchStream.ts`, `useCohiChat.ts`, `CohiChatPanel.tsx`).
 
 This keeps one shell, one API envelope, and mode-specific execution paths—as intended in the unified architecture—while making cross-mode switches feel intentional instead of amnesiac.

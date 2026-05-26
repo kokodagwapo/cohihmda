@@ -6,6 +6,8 @@ import {
   createUnifiedChatClient,
   type UnifiedChatClient,
   type UnifiedChatType,
+  type UnifiedChatScope,
+  type UnifiedChatLocation,
   type ChatStreamEvent,
 } from "@/lib/unifiedChatClient";
 import {
@@ -41,6 +43,8 @@ export interface SendUnifiedGlobalParams {
   uploadIds?: string[];
   datasetUploadIds?: string[];
   context?: Record<string, unknown>;
+  location?: UnifiedChatLocation;
+  scope?: UnifiedChatScope;
   insightBuilder?: { action?: "approve" | "revise" };
   onStreamText?: (text: string) => void;
   onStreamEvent?: (ev: ChatStreamEvent) => void;
@@ -83,8 +87,8 @@ export async function sendUnifiedGlobalStream(
       chat_type: chatType,
       conversationId: params.conversationId ?? undefined,
       clientMessageId: params.clientMessageId ?? crypto.randomUUID(),
-      location: { surface: "data_chat_page" },
-      scope: { type: "global_session" },
+      location: params.location ?? { surface: "data_chat_page" },
+      scope: params.scope ?? { type: "global_session" },
       history: params.history ?? [],
       context: params.context,
       options: {
