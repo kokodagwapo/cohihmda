@@ -50,6 +50,14 @@ import {
   injectLoanAccessForLoansAlias,
   mergeLoanAccessWithParameterizedSql,
 } from "../metrics/accessEnforcer.js";
+import { METRIC_LANGUAGE_RULES } from "../chat/metricLexicon.js";
+import {
+  applyRankingSqlGuard,
+  detectRankingIntent,
+  isRankingGuardEnabled,
+  logRankingGuardTrace,
+  type RankingIntent,
+} from "../chat/rankingQueryGuard.js";
 
 // ============================================================================
 // Types
@@ -111,7 +119,10 @@ export interface VisualizationConfig {
     | "treemap"
     | "pivot";
   title: string;
+  subtitle?: string;
   data: any[];
+  /** Full result set when chart data was trimmed for readability */
+  fullData?: any[];
   xKey?: string;
   yKey?: string;
   yKeys?: string[]; // For multi-series charts
@@ -547,10 +558,77 @@ interface GeneratedQuery {
   accessFilterApplied?: boolean;
 }
 
+function buildHeuristicRankingLoQuery(
+  question: string,
+  intent: RankingIntent,
+  accessFilter?: LoanAccessFilter | null,
+): GeneratedQuery | null {
+  const q = question.toLowerCase();
+  if (!/\b(loan officers?|los?|officers?)\b/.test(q)) return null;
+
+  let dateClause = "l.application_date >= DATE_TRUNC('month', CURRENT_DATE)";
+  if (/\b(last|past)\s+30\s+days\b/.test(q)) {
+    dateClause = "l.application_date >= CURRENT_DATE - INTERVAL '30 days'";
+  } else if (/\bytd\b|\byear to date\b/.test(q)) {
+    dateClause = "EXTRACT(YEAR FROM l.application_date) = EXTRACT(YEAR FROM CURRENT_DATE)";
+  } else if (/\bthis quarter\b|\bqtd\b/.test(q)) {
+    dateClause = "l.application_date >= DATE_TRUNC('quarter', CURRENT_DATE)";
+  }
+
+  const orderDir = intent.kind === "bottom" ? "ASC" : "DESC";
+  const limit = intent.limit;
+  let sql = `
+    SELECT COALESCE(NULLIF(TRIM(l.loan_officer), ''), 'Unknown') AS loan_officer,
+           COUNT(*)::int AS loan_count
+    FROM public.loans l
+    WHERE ${dateClause}
+      AND l.application_date IS NOT NULL
+    GROUP BY 1
+    ORDER BY loan_count ${orderDir}
+    LIMIT ${limit}
+  `;
+  let params: unknown[] = [];
+  if (accessFilter?.sql) {
+    const merged = mergeLoanAccessWithParameterizedSql(sql, params, accessFilter);
+    sql = merged.sql;
+    params = merged.params;
+  }
+
+  const windowLabel = /\bthis month\b|\bmtd\b/.test(q)
+    ? "this month"
+    : "selected period";
+  return {
+    sql,
+    params,
+    explanation: `Top ${limit} loan officers by active application count for ${windowLabel}.`,
+    visualizationType: "horizontal_bar",
+    chartConfig: {
+      title: `Top ${limit} loan officers — ${windowLabel}`,
+      xKey: "loan_officer",
+      yKey: "loan_count",
+      xLabel: "Loan officer",
+      yLabel: "Loan count",
+    },
+    accessFilterApplied: !!accessFilter?.sql,
+  };
+}
+
 function buildHeuristicDataQuery(
   question: string,
   accessFilter?: LoanAccessFilter | null
 ): GeneratedQuery | null {
+  const rankingIntent = isRankingGuardEnabled()
+    ? detectRankingIntent(question)
+    : null;
+  if (rankingIntent) {
+    const loRanking = buildHeuristicRankingLoQuery(
+      question,
+      rankingIntent,
+      accessFilter,
+    );
+    if (loRanking) return loRanking;
+  }
+
   const q = question.toLowerCase();
 
   const asksPullThrough = hasPullThroughKeyword(q);
@@ -699,13 +777,30 @@ async function generateQuery(
       return null;
     }
 
-    return {
+    let generated: GeneratedQuery = {
       sql: parsed.sql,
       params: parsed.params || [],
       explanation: parsed.explanation,
       visualizationType: parsed.visualizationType || "table",
       chartConfig: parsed.chartConfig || {},
     };
+
+    if (isRankingGuardEnabled()) {
+      const intent = detectRankingIntent(question);
+      if (intent) {
+        generated.sql = applyRankingSqlGuard(generated.sql, intent);
+        if (!/\bLIMIT\s+\d+/i.test(generated.sql)) {
+          const rankingHeuristic = buildHeuristicRankingLoQuery(
+            question,
+            intent,
+            context.userAccessFilter,
+          );
+          if (rankingHeuristic) return rankingHeuristic;
+        }
+      }
+    }
+
+    return generated;
   } catch (error: any) {
     const heuristicFallback = context.uploadOnlyMode
       ? null
@@ -1124,6 +1219,47 @@ function buildVisualizationConfig(
       };
     }
   }
+}
+
+const CHART_READABILITY_MAX = 25;
+
+/** Trim oversized category charts while preserving full data for export. */
+export function applyVisualizationReadabilityGuard(
+  config: VisualizationConfig,
+  options?: { rankingIntent?: RankingIntent | null; maxCategories?: number },
+): VisualizationConfig {
+  const max =
+    options?.rankingIntent?.limit ??
+    options?.maxCategories ??
+    CHART_READABILITY_MAX;
+  const data = config.data ?? [];
+  if (
+    data.length <= max ||
+    !["bar", "horizontal_bar", "stacked_bar", "grouped_bar"].includes(
+      config.type,
+    )
+  ) {
+    return config;
+  }
+
+  const valueKey =
+    config.yKey ??
+    config.valueKey ??
+    Object.keys(data[0] ?? {}).find((k) => typeof data[0]?.[k] === "number");
+  let sorted = [...data];
+  if (valueKey) {
+    sorted.sort(
+      (a, b) => (Number(b[valueKey]) || 0) - (Number(a[valueKey]) || 0),
+    );
+  }
+  const trimmed = sorted.slice(0, max);
+  const subtitle = `Showing top ${trimmed.length} of ${data.length}`;
+  return {
+    ...config,
+    data: trimmed,
+    fullData: data,
+    subtitle: config.subtitle ? `${config.subtitle} · ${subtitle}` : subtitle,
+  };
 }
 
 // ============================================================================
@@ -1597,9 +1733,19 @@ async function gatherAllContext(
 
   let dataQueryResult: GatheredContext["dataQueryResult"] = undefined;
 
+  const rankingIntent = isRankingGuardEnabled()
+    ? detectRankingIntent(question)
+    : null;
+
   // If we got a valid query, try to execute it (with one auto-retry on failure)
   if (queryConfig?.sql) {
-    const effectiveConfig = queryConfig;
+    let effectiveConfig = queryConfig;
+    if (rankingIntent && effectiveConfig.sql) {
+      const guardedSql = applyRankingSqlGuard(effectiveConfig.sql, rankingIntent);
+      if (guardedSql !== effectiveConfig.sql) {
+        effectiveConfig = { ...effectiveConfig, sql: guardedSql };
+      }
+    }
     const contextForQuery = (cfg: GeneratedQuery): ChatContext =>
       cfg.accessFilterApplied
         ? { ...context, userAccessFilter: null }
@@ -1613,7 +1759,27 @@ async function gatherAllContext(
         effectiveConfig.params,
         contextForQuery(effectiveConfig)
       );
-      const formattedPrimaryData = formatDataRows(result.rows);
+      let formattedPrimaryData = formatDataRows(result.rows);
+      if (rankingIntent && formattedPrimaryData.length > rankingIntent.limit) {
+        const valueKey =
+          effectiveConfig.chartConfig.yKey ??
+          Object.keys(formattedPrimaryData[0] ?? {}).find(
+            (k) => typeof formattedPrimaryData[0]?.[k] === "number",
+          );
+        if (valueKey) {
+          formattedPrimaryData = [...formattedPrimaryData].sort(
+            (a, b) =>
+              (Number(b[valueKey]) || 0) - (Number(a[valueKey]) || 0),
+          );
+        }
+        formattedPrimaryData = formattedPrimaryData.slice(0, rankingIntent.limit);
+      }
+      logRankingGuardTrace(
+        question,
+        rankingIntent,
+        effectiveConfig.sql,
+        formattedPrimaryData.length,
+      );
       dataQueryResult = {
         query: effectiveConfig,
         result,
@@ -1853,11 +2019,11 @@ async function generateUnifiedResponse(
   const promptConfig = await getPromptConfig("cohi_chat.response");
 
   // Build the system prompt with variable substitution
-  const systemPrompt = buildPrompt(promptConfig.system_prompt, {
+  const systemPrompt = `${buildPrompt(promptConfig.system_prompt, {
     combinedContext: hasAnyContext
       ? contextParts.join("\n\n")
       : "No specific context available for this query.",
-  });
+  })}\n\n${METRIC_LANGUAGE_RULES}`;
 
   const messages: OpenAIChatMessage[] = [
     { role: "system", content: systemPrompt },
@@ -1879,11 +2045,15 @@ async function generateUnifiedResponse(
   let data: any[] | undefined;
 
   if (gathered.dataQueryResult) {
-    visualization = buildVisualizationConfig(
-      gathered.dataQueryResult.formattedData,
-      gathered.dataQueryResult.query
+    const rankingIntent = isRankingGuardEnabled()
+      ? detectRankingIntent(question)
+      : null;
+    const fullRows = gathered.dataQueryResult.formattedData;
+    visualization = applyVisualizationReadabilityGuard(
+      buildVisualizationConfig(fullRows, gathered.dataQueryResult.query),
+      { rankingIntent },
     );
-    data = gathered.dataQueryResult.formattedData;
+    data = visualization.fullData ?? fullRows;
   }
 
   // Keep message grounded to canonical dashboards only.
