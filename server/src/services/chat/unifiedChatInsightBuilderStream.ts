@@ -12,6 +12,7 @@ import {
   type InsightBuilderTurnOptions,
 } from "./insightBuilderTurn.js";
 import type { PolicyDecision } from "./unifiedChatPolicy.js";
+import type { HandoffManifestEntry } from "./handoffResolver.js";
 import type { UnifiedBlock } from "./unifiedChatMappers.js";
 import {
   createStreamEmitter,
@@ -31,6 +32,7 @@ export interface InsightBuilderStreamArgs {
   insightBuilderOptions?: InsightBuilderTurnOptions;
   surface?: string;
   scopeType?: string;
+  handoffManifest?: HandoffManifestEntry[];
 }
 
 export interface InsightBuilderStreamResult {
@@ -79,7 +81,10 @@ export async function runUnifiedInsightBuilderStream(
     chatType: "insight_builder",
     policyDecisionId: args.policy.decisionId,
     route: "insight_builder",
-    contextManifest: [{ tier: "insight_builder", included: true, truncated: false }],
+    contextManifest: [
+      { tier: "insight_builder", included: true, truncated: false },
+      ...(args.handoffManifest ?? []),
+    ],
     persistedPromptId: ib.persistedPromptId ?? null,
   };
 

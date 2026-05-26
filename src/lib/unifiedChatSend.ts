@@ -6,6 +6,8 @@ import {
   createUnifiedChatClient,
   type UnifiedChatClient,
   type UnifiedChatType,
+  type UnifiedChatScope,
+  type UnifiedChatLocation,
   type ChatStreamEvent,
 } from "@/lib/unifiedChatClient";
 import {
@@ -41,6 +43,8 @@ export interface SendUnifiedGlobalParams {
   uploadIds?: string[];
   datasetUploadIds?: string[];
   context?: Record<string, unknown>;
+  location?: UnifiedChatLocation;
+  scope?: UnifiedChatScope;
   insightBuilder?: { action?: "approve" | "revise" };
   onStreamText?: (text: string) => void;
   onStreamEvent?: (ev: ChatStreamEvent) => void;
@@ -49,6 +53,10 @@ export interface SendUnifiedGlobalParams {
 export interface SendUnifiedGlobalResult {
   conversationId: string;
   parsed: ParsedGlobalUnifiedFields;
+  /** Research Lab: stream ended after handshake; findings load via session polling. */
+  researchPollMode?: boolean;
+  /** Research Lab session id from stream metadata (poll mode). */
+  researchSessionId?: string;
 }
 
 function blocksToEnvelope(
@@ -79,8 +87,8 @@ export async function sendUnifiedGlobalStream(
       chat_type: chatType,
       conversationId: params.conversationId ?? undefined,
       clientMessageId: params.clientMessageId ?? crypto.randomUUID(),
-      location: { surface: "data_chat_page" },
-      scope: { type: "global_session" },
+      location: params.location ?? { surface: "data_chat_page" },
+      scope: params.scope ?? { type: "global_session" },
       history: params.history ?? [],
       context: params.context,
       options: {
@@ -137,7 +145,18 @@ export async function sendUnifiedGlobalStream(
     parsed.message = streamText;
   }
 
-  return { conversationId: result.conversationId, parsed };
+  const researchPollMode = result.metadata?.researchPollMode === true;
+  const researchSessionId =
+    typeof result.metadata?.researchSessionId === "string"
+      ? result.metadata.researchSessionId
+      : undefined;
+
+  return {
+    conversationId: result.conversationId,
+    parsed,
+    researchPollMode,
+    researchSessionId,
+  };
 }
 
 export interface SendUnifiedWorkbenchParams {

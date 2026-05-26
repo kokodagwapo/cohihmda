@@ -3,8 +3,8 @@
  *
  * The non-stream POST (`runUnifiedResearchTurn`) kicks off the Research Lab
  * pipeline and returns a "started" turn (text + artifact ref). The stream POST
- * proxy lives in {@link ./unifiedResearchStream.ts} and emits ChatStreamEvents
- * as the pipeline runs (Wave 3 locked decision #1, Option B).
+ * handshake in {@link ./unifiedResearchStream.ts} returns the same shape and
+ * closes immediately (`researchPollMode`); clients load results via session polling.
  */
 
 import type { AuthRequest } from "../../middleware/auth.js";

@@ -103,6 +103,7 @@ import {
 } from "@/lib/workbench/workbenchChatHandoff";
 import { buildCarryOverContext } from "@/lib/carryOverContext";
 import { resolveCarryOverSummary } from "@/lib/carryOverContext.resolve";
+import { buildModeHandoffFromWorkbench } from "@/lib/chat/modeHandoff";
 import {
   getLatestWorkbenchActiveContext,
   markWorkbenchNewChatPendingFirstSend,
@@ -173,6 +174,14 @@ import {
   resolveChatTypePromptCardsLayout,
 } from "@/components/cohi/ChatTypeSuggestedPromptCards";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
+import {
+  CHAT_TYPE_DEFAULT_SUGGESTIONS,
+  resolveWorkbenchTopicSuggestions,
+} from "@/lib/unifiedChatSuggestedPrompts";
+import {
+  isWorkbenchCanvasPopulated,
+  WORKBENCH_CANVAS_SAVED_EVENT,
+} from "@/lib/workbench/workbenchChatScopeSync";
 
 const CHAT_EXPORT_FORMAT_KEY = "cohi-chat-preferred-export-format";
 
@@ -510,6 +519,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     chatType: UnifiedChatType;
     forceNewConversation: boolean;
   } | null>(null);
+  /** Canvas id we last auto-selected workbench for (navigation only, not manual mode changes). */
+  const lastAutoWorkbenchCanvasIdRef = useRef<string | null>(null);
   const CHAT_INPUT_MAX_HEIGHT_PX = 128;
 
   const resizeChatInput = useCallback(() => {
@@ -573,6 +584,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     restoreDismissedForkLink,
     beginChatTypeFork,
     undoChatTypeFork,
+    clearConversationBinding,
+    stageModeHandoff,
     workbenchChatScope = null,
     workbenchScopePinned = false,
     workbenchPinnedScopeLabel = null,
@@ -789,16 +802,19 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [allowedChatTypes, activeChatType, setActiveChatType]);
 
-  /** Saved canvas on My Dashboard should use workbench chat (and auto-load its thread). */
+  /** Default to workbench chat when navigating to a saved canvas, not on every mode change. */
   useEffect(() => {
     if (!isUnifiedChatClientEnabled()) return;
     const canvasId = getMyDashboardCanvasIdFromPath(pathname);
-    if (!canvasId) return;
-    if (!allowedChatTypes.includes("workbench")) return;
-    if (activeChatType !== "workbench") {
-      setActiveChatType("workbench");
+    if (!canvasId) {
+      lastAutoWorkbenchCanvasIdRef.current = null;
+      return;
     }
-  }, [pathname, allowedChatTypes, activeChatType, setActiveChatType]);
+    if (!allowedChatTypes.includes("workbench")) return;
+    if (lastAutoWorkbenchCanvasIdRef.current === canvasId) return;
+    lastAutoWorkbenchCanvasIdRef.current = canvasId;
+    setActiveChatType("workbench");
+  }, [pathname, allowedChatTypes, setActiveChatType]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1219,7 +1235,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             userTurnCount,
           })
         : isShellCompact;
-    expandShellIfCompact();
+    if (isResearchMode) {
+      setShellExpandMode("full");
+    } else {
+      expandShellIfCompact();
+    }
     if (forceNewConversation) {
       setResearchViewOnly(false);
     }
@@ -1364,16 +1384,20 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   }, [input, resizeChatInput]);
 
   const dispatchSuggestion = useCallback(
-    (question: string, forceNewConversation: boolean) => {
+    async (question: string, forceNewConversation: boolean) => {
       expandShellIfCompact();
       navigateWorkbenchOnSubmit(forceNewConversation);
-      setInput(question);
       const opts = { forceNewConversation };
       if (activeChatType === "workbench") {
-        void workbenchScopeGuard.preflightWorkbenchSend(question, opts);
+        const sent = await workbenchScopeGuard.preflightWorkbenchSend(
+          question,
+          opts,
+        );
+        if (!sent) return;
       } else {
-        void sendMessage(question, opts);
+        await sendMessage(question, opts);
       }
+      setInput("");
     },
     [
       expandShellIfCompact,
@@ -1461,6 +1485,25 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     layout === "shell" &&
     shellExpandMode === "full" &&
     showEmptyPromptCards;
+
+  const [workbenchCanvasPopulated, setWorkbenchCanvasPopulated] = useState(
+    () => isWorkbenchCanvasPopulated(),
+  );
+  useEffect(() => {
+    const sync = () => setWorkbenchCanvasPopulated(isWorkbenchCanvasPopulated());
+    sync();
+    window.addEventListener(WORKBENCH_CANVAS_SAVED_EVENT, sync);
+    return () => window.removeEventListener(WORKBENCH_CANVAS_SAVED_EVENT, sync);
+  }, [pathname, isOpen, showEmptyPromptCards]);
+
+  const emptyStateSuggestionsByType = useMemo(
+    () => ({
+      ...CHAT_TYPE_DEFAULT_SUGGESTIONS,
+      workbench: resolveWorkbenchTopicSuggestions(workbenchCanvasPopulated),
+    }),
+    [workbenchCanvasPopulated],
+  );
+
   const shellBodyFillsPane =
     !isShellCompact && (isCenteredEmptyLanding || showStandardMessagesPane);
 
@@ -1570,6 +1613,22 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           messageCount: messages.length,
         });
 
+      const stageWorkbenchStructuralHandoff = (
+        fromType: UnifiedChatType,
+        fromConversationId: string,
+        fromTitle?: string,
+      ) => {
+        if (fromType !== "workbench") return;
+        if (next !== "research" && next !== "insight_builder") return;
+        const handoff = buildModeHandoffFromWorkbench({
+          fromChatType: fromType,
+          fromConversationId,
+          fromTitle,
+          pathname,
+        });
+        stageModeHandoff(handoff);
+      };
+
       if (shouldFork) {
         const fromTitle =
           chatSessions.find((s) => s.id === currentSessionId)?.title ??
@@ -1583,38 +1642,52 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             legacyRef: prev === "research" ? legacyRef : null,
             tenantId,
           });
-          if (!summary.trim()) return;
-          beginChatTypeFork(
-            {
-              fromConversationId: forkConversationId,
-              fromChatType: prev,
-              fromTitle,
-              summary,
-            },
-            prev,
-          );
-          forkUndoToastRef.current?.dismiss();
-          forkUndoToastRef.current = toast({
-            title: `Started a new ${formatChatTypeLabel(next)} chat`,
-            description: "Context from your previous conversation was carried over.",
-            action: (
-              <ToastAction
-                altText="Undo chat type switch"
-                onClick={() => {
-                  forkUndoToastRef.current?.dismiss();
-                  forkUndoToastRef.current = null;
-                  const restored = undoChatTypeFork?.();
-                  if (restored) {
-                    setActiveChatType(restored.chatType);
-                  }
-                }}
-              >
-                Undo
-              </ToastAction>
-            ),
-            duration: 8000,
-          });
+          if (summary.trim()) {
+            beginChatTypeFork(
+              {
+                fromConversationId: forkConversationId,
+                fromChatType: prev,
+                fromTitle,
+                summary,
+              },
+              prev,
+            );
+            forkUndoToastRef.current?.dismiss();
+            forkUndoToastRef.current = toast({
+              title: `Started a new ${formatChatTypeLabel(next)} chat`,
+              description: "Context from your previous conversation was carried over.",
+              action: (
+                <ToastAction
+                  altText="Undo chat type switch"
+                  onClick={() => {
+                    forkUndoToastRef.current?.dismiss();
+                    forkUndoToastRef.current = null;
+                    const restored = undoChatTypeFork?.();
+                    if (restored) {
+                      setActiveChatType(restored.chatType);
+                    }
+                  }}
+                >
+                  Undo
+                </ToastAction>
+              ),
+              duration: 8000,
+            });
+          }
+          stageWorkbenchStructuralHandoff(prev, forkConversationId, fromTitle);
         })();
+      } else if (
+        prev === "workbench" &&
+        (next === "research" || next === "insight_builder")
+      ) {
+        if (currentSessionId) {
+          clearConversationBinding();
+          stageWorkbenchStructuralHandoff(
+            prev,
+            currentSessionId,
+            chatSessions.find((s) => s.id === currentSessionId)?.title,
+          );
+        }
       }
 
       setActiveChatType(next);
@@ -1623,10 +1696,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       activeChatType,
       beginChatTypeFork,
       chatSessions,
+      clearConversationBinding,
       currentSessionId,
       legacyRef,
       messages,
+      pathname,
       setActiveChatType,
+      stageModeHandoff,
       tenantId,
       toast,
       undoChatTypeFork,
@@ -2613,6 +2689,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           </div>
         </div>
 
+        <div
+          className={cn(
+            "relative flex flex-col min-w-0 w-full",
+            isShellCompact ? "shrink-0" : "flex-1 min-h-0",
+          )}
+          data-cohi-chat-panel-body
+        >
         {showDatasetAttach && (
           <ChatFilesBar
             uploads={availableUploads}
@@ -2643,8 +2726,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
         {showResearchWorkspace && (
           <AnimatePresence initial={false}>
-            {!isShellCompact && (
-              <motion.div
+            <motion.div
                 key="research-workspace"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -2669,7 +2751,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   }}
                 />
               </motion.div>
-            )}
           </AnimatePresence>
         )}
 
@@ -2696,6 +2777,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 activeChatType={activeChatType}
                 expandedChatType={expandedPromptCard}
                 onCardSelect={handlePromptCardSelect}
+                suggestionsByType={emptyStateSuggestionsByType}
                 maxPromptsPerCard={3}
                 onPromptClick={handleSuggestionClick}
               />
@@ -2754,6 +2836,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                     activeChatType={activeChatType}
                     expandedChatType={expandedPromptCard}
                     onCardSelect={handlePromptCardSelect}
+                    suggestionsByType={emptyStateSuggestionsByType}
                     maxPromptsPerCard={promptCardsLayout === "row" ? 3 : 6}
                     onPromptClick={handleSuggestionClick}
                     className={cn(
@@ -2890,6 +2973,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         )}
         </div>
         </LayoutGroup>
+        </div>
       </motion.div>
   );
 

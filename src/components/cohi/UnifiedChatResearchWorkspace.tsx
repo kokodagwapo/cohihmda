@@ -84,7 +84,6 @@ export function UnifiedChatResearchWorkspace({
     isRunning,
     isPaused,
     sessions,
-    loadSession,
     refreshSession,
     submitFeedback,
     reset,
@@ -145,31 +144,36 @@ export function UnifiedChatResearchWorkspace({
     [chatSession, reset, sessionIsOwner, startSession],
   );
 
+  const [sessionHydrating, setSessionHydrating] = useState(false);
+
   useEffect(() => {
     if (!researchSessionId) {
       reset();
+      setSessionHydrating(false);
       setActiveTab("report");
       setSelectedFindingId(null);
       return;
     }
+    setSessionHydrating(true);
     reset();
-    void loadSession(researchSessionId);
-  }, [researchSessionId, loadSession, reset]);
+    void refreshSession(researchSessionId).finally(() => setSessionHydrating(false));
+  }, [researchSessionId, reset, refreshSession]);
 
-  // Unified chat stream does not feed useResearchSession — poll until DB catches up.
+  const investigationInProgress =
+    sessionHydrating ||
+    chatLoading ||
+    isRunning ||
+    (phase !== "complete" && phase !== "error");
+
+  // Unified chat poll mode: pipeline runs server-side; refresh session state on an interval.
   useEffect(() => {
     if (!researchSessionId) return;
 
-    const needsRefresh =
-      chatLoading ||
-      isRunning ||
-      (phase !== "complete" &&
-        phase !== "error" &&
-        phase !== "idle" &&
-        phase !== "creating") ||
-      (phase === "complete" && findings.length === 0);
+    const shouldPoll =
+      investigationInProgress ||
+      (phase === "complete" && findings.length === 0 && !report);
 
-    if (!needsRefresh) return;
+    if (!shouldPoll) return;
 
     const timer = window.setInterval(() => {
       void refreshSession(researchSessionId);
@@ -177,18 +181,13 @@ export function UnifiedChatResearchWorkspace({
 
     return () => window.clearInterval(timer);
   }, [
-    chatLoading,
     researchSessionId,
-    findings.length,
-    isRunning,
+    investigationInProgress,
     phase,
+    findings.length,
+    report,
     refreshSession,
   ]);
-
-  useEffect(() => {
-    if (!researchSessionId || chatLoading) return;
-    void refreshSession(researchSessionId);
-  }, [researchSessionId, chatLoading, refreshSession]);
 
   useEffect(() => {
     if (!researchSessionId) {
@@ -213,8 +212,7 @@ export function UnifiedChatResearchWorkspace({
       ? (findings.find((f) => String(f.questionId) === selectedFindingId) ?? null)
       : null;
 
-  const showRunningSpinner =
-    !!researchSessionId && (isRunning || chatLoading);
+  const showRunningSpinner = !!researchSessionId && investigationInProgress;
   const reportReady =
     !!researchSessionId &&
     (!!report || (findings.length >= 1 && phase === "complete"));
@@ -293,8 +291,18 @@ export function UnifiedChatResearchWorkspace({
 
   if (!researchSessionId) {
     return (
-      <div className="shrink-0 px-4 py-3 border-b border-violet-100/80 dark:border-indigo-900/50 text-xs text-slate-500">
-        Ask a research question below to start an investigation.
+      <div
+        data-testid="unified-research-workspace"
+        className="shrink-0 px-4 py-3 border-b border-violet-100/80 dark:border-indigo-900/50 flex items-center gap-2 text-xs text-slate-500"
+      >
+        {chatLoading && (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500 shrink-0" />
+        )}
+        <span>
+          {chatLoading
+            ? "Starting research investigation…"
+            : "Ask a research question below to start an investigation."}
+        </span>
       </div>
     );
   }
