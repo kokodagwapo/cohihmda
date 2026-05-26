@@ -170,7 +170,7 @@ export async function listCanonicalHistory(
     const legacyRows: CanonicalHistoryRow[] = legacyWorkbench.map((r) => ({
       conversation_id: r.conversation_id,
       title: r.title,
-      chat_type: "workbench",
+      chat_type: "workbench" as const,
       scope_type: "canvas",
       scope_key: query.scopeKey!,
       updated_at: r.updated_at,
