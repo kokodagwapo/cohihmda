@@ -28,6 +28,7 @@ import {
   fetchHistoricalPatternContext,
   fetchKnowledgeContextForInsights,
 } from "./insightMetricsCollector.js";
+import { METRIC_LANGUAGE_RULES } from "../chat/metricLexicon.js";
 import { hydrateInsightDetails } from "./insightDetailHydrator.js";
 import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
 import { getSchemaForTenant } from "../ai/schemaContextService.js";
@@ -1109,7 +1110,7 @@ function buildDomainPrompt(domainId: InsightDomainId, metrics: InsightMetricsPay
   return `Analyze these mortgage business metrics. Your focus domain is: ${domainConfig.label}.
 Generate ${domainConfig.candidateTarget} high-quality insights specifically about ${domainConfig.label}.
 Only output insights supported by the data below. If a metric is 0 or N/A, do not generate an insight about it.
-Use plain-language metric names and avoid shorthand like "Pct", "pp", "PT", or "Vol" unless you define them inline.
+${METRIC_LANGUAGE_RULES}
 
 ${shared}
 
@@ -1133,7 +1134,7 @@ ${shared}
 ${sections}
 
 Generate insights for your designated category now. Only output insights supported by this data. If a metric is 0 or N/A, do not generate an insight about it.
-Use plain-language metric names and avoid shorthand like "Pct", "pp", "PT", or "Vol" unless you define them inline.`;
+${METRIC_LANGUAGE_RULES}`;
 }
 
 // ============================================================================

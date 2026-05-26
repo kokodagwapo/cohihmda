@@ -23,6 +23,7 @@ import {
 import { pool as managementPool } from "../../../config/managementDatabase.js";
 import type { InvestigationQuestion } from "./plannerAgent.js";
 import { VIZ_STANDARDS_MEDIUM } from "../../../config/visualizationStandards.js";
+import { METRIC_LANGUAGE_RULES } from "../../chat/metricLexicon.js";
 import type { ResearchWidgetContext } from "../../../types/researchWidgetContext.js";
 import type { LoanAccessFilter } from "../../userLoanAccessService.js";
 import { safeParseMetricSpec } from "../../metrics/metricSpec.js";
@@ -200,8 +201,7 @@ You operate in a loop:
 4. DECIDE: Either formulate a follow-up query (if more data is needed) or produce your final finding
 
 LANGUAGE AND FORMATTING RULES:
-- Never write "pp" or "p.p." to mean percentage points. Write "ppts" or spell it out: "percentage points". Example: "pull-through fell 12 percentage points" not "fell 12pp".
-- Use "%" for rates and proportions (e.g. "pull-through is 74%"). Use "percentage points" or "ppts" only when describing the change between two rates (e.g. "improved 8 ppts YoY").
+${METRIC_LANGUAGE_RULES}
 
 RULES:
 - Prefer **metricSpec** (canonical MetricSpec JSON matching server catalog metrics) for standard KPIs instead of writing raw SQL — the server composes deterministic, access-aware SQL. Use raw SQL for exploratory analysis or non-catalog fields.
