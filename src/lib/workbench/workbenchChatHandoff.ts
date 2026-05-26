@@ -91,6 +91,46 @@ export function filterExecutableWorkbenchActions(
   return normalizeWidgetActionsForExecution(filtered);
 }
 
+/** Action types that add or replace canvas content (held when a dashboard is only suggested). */
+export const WORKBENCH_CANVAS_ADD_ACTION_TYPES = new Set<string>([
+  "suggest_dashboard",
+  "add_existing_widget",
+  "create_widget",
+  "create_dashboard",
+  "create_canvas",
+]);
+
+/** Auto-apply on canvas; suggest_dashboard waits for user confirmation. */
+export function partitionWorkbenchActionsForAutoApply(actions: WidgetAction[]): {
+  autoApply: WidgetAction[];
+  pendingConfirmation: WidgetAction[];
+} {
+  const executable = filterExecutableWorkbenchActions(actions);
+  const pendingConfirmation = executable.filter(
+    (a) => a.type === "suggest_dashboard",
+  );
+  if (pendingConfirmation.length === 0) {
+    return { autoApply: executable, pendingConfirmation: [] };
+  }
+  const autoApply = executable.filter(
+    (a) => !WORKBENCH_CANVAS_ADD_ACTION_TYPES.has(a.type),
+  );
+  return { autoApply, pendingConfirmation };
+}
+
+export type DeliverWorkbenchWidgetActionsOptions = {
+  /** When true, suggest_dashboard and companion add actions may be applied (user confirmed). */
+  allowDashboardSuggestions?: boolean;
+};
+
+/** Human-readable label for a suggest_dashboard sectionKey. */
+export function formatWorkbenchSectionKey(sectionKey: string): string {
+  return sectionKey
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (s) => s.toUpperCase())
+    .trim();
+}
+
 import {
   isAnalyticalWorkbenchQuestion,
   isRemoveWidgetOnlyQuestion,
@@ -115,9 +155,27 @@ export function gateWorkbenchActionsForUserQuestion(
         a.type !== "create_canvas",
     );
   }
+  filtered = gateIncrementalCanvasAddActions(filtered, userQuestion);
   if (!isAnalyticalWorkbenchQuestion(userQuestion)) return filtered;
   return filtered.filter(
     (a) => a.type !== "create_widget" && a.type !== "create_dashboard",
+  );
+}
+
+/** User is adding another section to a non-empty canvas — avoid rebuild actions. */
+export function isIncrementalCanvasAddRequest(userQuestion: string): boolean {
+  return /(already added|just add|also add|add (?:the )?\w+ (?:too|as well)|another (?:one|dashboard|section))/i.test(
+    userQuestion,
+  );
+}
+
+export function gateIncrementalCanvasAddActions(
+  actions: WidgetAction[],
+  userQuestion: string,
+): WidgetAction[] {
+  if (!isIncrementalCanvasAddRequest(userQuestion)) return actions;
+  return actions.filter(
+    (a) => a.type !== "create_canvas" && a.type !== "create_dashboard",
   );
 }
 
@@ -158,7 +216,7 @@ export function shouldForkOnChatTypeChange(options: {
 export function describeWorkbenchActionsApplied(
   actions: WidgetAction[] | undefined,
 ): string | null {
-  const applied = filterExecutableWorkbenchActions(actions);
+  const applied = partitionWorkbenchActionsForAutoApply(actions ?? []).autoApply;
   if (!applied.length) return null;
 
   const creates = applied.filter((a) => a.type === "create_widget").length;
@@ -577,20 +635,24 @@ export function clearPendingWorkbenchActions(draftScopeId: string): void {
 export function deliverWorkbenchWidgetActions(
   draftScopeId: string,
   actions: WidgetAction[],
+  options?: DeliverWorkbenchWidgetActionsOptions,
 ): void {
-  if (!actions.length) return;
+  const toDeliver = options?.allowDashboardSuggestions
+    ? filterExecutableWorkbenchActions(actions)
+    : partitionWorkbenchActionsForAutoApply(actions).autoApply;
+  if (!toDeliver.length) return;
   const bridge = getWorkbenchCanvasBridge();
   const targetScopeId =
     bridge?.isActive ? bridge.draftScopeId : draftScopeId;
   if (bridge?.isActive) {
-    dispatchWorkbenchActions(actions, { draftScopeId: targetScopeId });
+    dispatchWorkbenchActions(toDeliver, { draftScopeId: targetScopeId });
     clearPendingWorkbenchActions(targetScopeId);
     if (targetScopeId !== draftScopeId) {
       clearPendingWorkbenchActions(draftScopeId);
     }
     return;
   }
-  stashPendingWorkbenchActions(draftScopeId, actions);
+  stashPendingWorkbenchActions(draftScopeId, toDeliver);
 }
 
 /** Persist draft scope → ephemeral new-* tab id (survives /workbench hub redirect). */

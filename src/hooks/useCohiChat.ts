@@ -19,6 +19,7 @@ import {
   dispatchWorkbenchBindCanvas,
   filterExecutableWorkbenchActions,
   gateWorkbenchActionsForUserQuestion,
+  partitionWorkbenchActionsForAutoApply,
   COHI_WORKBENCH_BIND_CANVAS_EVENT,
   draftScopeIdForCanvasTab,
   getConnectedWorkbenchCanvasId,
@@ -43,7 +44,12 @@ import {
   clearPersistedWorkbenchConversationScope,
   persistWorkbenchConversationScope,
   readPersistedWorkbenchConversationScope,
+  shouldPromoteWorkbenchChatScopeOnCanvasSave,
+  buildWorkbenchChatScopeAfterCanvasSave,
+  suppressNextWorkbenchScopePrompt,
+  WORKBENCH_CANVAS_SAVED_EVENT,
   type WorkbenchActiveContext,
+  type WorkbenchCanvasSavedDetail,
   type WorkbenchChatScopeRef,
   type WorkbenchScopeMismatchActionsDetail,
   type SyncWorkbenchContextOptions,
@@ -227,6 +233,8 @@ export interface ChatMessage {
   /** Workbench mode: actions returned for this turn */
   workbenchActions?: WidgetAction[];
   workbenchActionsAppliedCount?: number;
+  /** suggest_dashboard actions awaiting user choice (add pre-built vs custom). */
+  workbenchPendingActions?: WidgetAction[];
 }
 
 export interface CohiChatResponse {
@@ -421,6 +429,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     [],
   );
 
+  const applyWorkbenchDashboardSuggestion = useCallback(
+    (action: WidgetAction) => {
+      if (action.type !== "suggest_dashboard") return;
+      const draftScopeId = getOrCreateActiveWorkbenchDraftScope();
+      deliverWorkbenchWidgetActions(draftScopeId, [action], {
+        allowDashboardSuggestions: true,
+      });
+    },
+    [],
+  );
+
   const resetWorkbenchChatSession = useCallback(() => {
     const urlCanvasId =
       typeof window !== "undefined" ? getMyDashboardCanvasIdFromPath() : null;
@@ -449,9 +468,30 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   useEffect(() => {
     if (chatType !== "workbench") return;
     const onSaved = (e: Event) => {
-      const detail = (e as CustomEvent<{ canvasId?: string; draftScopeId?: string }>)
-        .detail;
-      if (detail?.canvasId && detail.draftScopeId) {
+      const detail = (e as CustomEvent<WorkbenchCanvasSavedDetail>).detail;
+      if (!detail?.canvasId) return;
+
+      const conversationScope =
+        readPersistedWorkbenchConversationScope();
+      if (
+        shouldPromoteWorkbenchChatScopeOnCanvasSave(detail, conversationScope)
+      ) {
+        suppressNextWorkbenchScopePrompt(8);
+        const scopeRef = buildWorkbenchChatScopeAfterCanvasSave(detail);
+        setWorkbenchChatScopeRef(scopeRef);
+        setWorkbenchSavedCanvasId(detail.canvasId);
+        setWorkbenchScopePinned(false);
+        setPendingScopeSwitchTarget(null);
+        setScopeMismatchActions(null);
+        const canvasDraftScope = draftScopeIdForCanvasTab(detail.canvasId);
+        setActiveWorkbenchDraftScope(canvasDraftScope);
+        rememberWorkbenchDraftTab(canvasDraftScope, detail.canvasId);
+        lastSyncedWorkbenchScopeKeyRef.current = `canvas:${detail.canvasId}`;
+        dispatchWorkbenchBindCanvas(detail.canvasId);
+        return;
+      }
+
+      if (detail.draftScopeId) {
         const activeDraft = getOrCreateActiveWorkbenchDraftScope();
         if (detail.draftScopeId === activeDraft) {
           setWorkbenchSavedCanvasId(detail.canvasId);
@@ -462,13 +502,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       const canvasId = (e as CustomEvent<{ canvasId?: string }>).detail?.canvasId;
       if (canvasId) setWorkbenchSavedCanvasId(canvasId);
     };
-    window.addEventListener("workbench:canvas-saved", onSaved);
+    window.addEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
     window.addEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
     return () => {
-      window.removeEventListener("workbench:canvas-saved", onSaved);
+      window.removeEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
       window.removeEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
     };
-  }, [chatType]);
+  }, [chatType, setWorkbenchChatScopeRef]);
 
   useEffect(() => {
     setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
@@ -802,15 +842,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               viewingSessionRef.current = conversationId;
             }
 
-            const autoActions = gateWorkbenchActionsForUserQuestion(
+            const gatedActions = gateWorkbenchActionsForUserQuestion(
               parsed.actions,
               effectiveQuestion,
             );
+            const { autoApply, pendingConfirmation } =
+              partitionWorkbenchActionsForAutoApply(gatedActions);
             const appliedCount =
-              autoActions.length > 0
+              autoApply.length > 0
                 ? tryDeliverWorkbenchWidgetActions(
                     draftScopeId,
-                    autoActions,
+                    autoApply,
                     scopeRef,
                     conversationId,
                   )
@@ -824,8 +866,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 : parsed.message,
               timestamp: new Date(),
               workbenchActions:
-                autoActions.length > 0 ? autoActions : undefined,
+                gatedActions.length > 0 ? gatedActions : undefined,
               workbenchActionsAppliedCount: appliedCount,
+              workbenchPendingActions:
+                pendingConfirmation.length > 0 ? pendingConfirmation : undefined,
             };
             applyMessagesForStream(streamConversationId, (prev) =>
               prev.map((m) =>
@@ -1151,15 +1195,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               onStreamText,
             });
             setSessionId(conversationId);
-            const autoActions = gateWorkbenchActionsForUserQuestion(
+            const gatedActions = gateWorkbenchActionsForUserQuestion(
               parsed.actions,
               refinement,
             );
+            const { autoApply, pendingConfirmation } =
+              partitionWorkbenchActionsForAutoApply(gatedActions);
             const appliedCount =
-              autoActions.length > 0
+              autoApply.length > 0
                 ? tryDeliverWorkbenchWidgetActions(
                     draftScopeId,
-                    autoActions,
+                    autoApply,
                     scopeRef,
                     conversationId,
                   )
@@ -1172,8 +1218,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 : parsed.message,
               timestamp: new Date(),
               workbenchActions:
-                autoActions.length > 0 ? autoActions : undefined,
+                gatedActions.length > 0 ? gatedActions : undefined,
               workbenchActionsAppliedCount: appliedCount,
+              workbenchPendingActions:
+                pendingConfirmation.length > 0 ? pendingConfirmation : undefined,
             };
             const applyFinal = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
               if (streamConversationId) {
@@ -2036,5 +2084,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     cancelPendingWorkbenchScopeSwitch,
     resolveScopeMismatchActions,
     pinWorkbenchChatScope,
+    applyWorkbenchDashboardSuggestion,
   };
 }

@@ -150,6 +150,8 @@ import {
   applyCreateWidget,
   applyCreateCanvas,
   applyModifyWidget,
+  applySuggestDashboard,
+  applyAddExistingWidget,
   type WidgetGroupPayloadShape,
   type WidgetActionReducerOutcome,
 } from "@/lib/workbench/canvas/handlers/widgetActionDispatch";
@@ -181,6 +183,15 @@ import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
 import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardDialog";
 import { Camera } from "lucide-react";
 import { isUnifiedChatClientEnabled } from "@/lib/unifiedChatEnvelope";
+import {
+  isDefaultWorkbenchCanvasTitle,
+  suggestCanvasTitleFromLayout,
+} from "@/lib/workbench/suggestCanvasTitle";
+import {
+  createWorkbenchCanvas,
+  rebindWorkbenchDraftConversationScope,
+} from "@/lib/workbench/workbenchCanvasPersist";
+import { dispatchWorkbenchCanvasSaved } from "@/lib/workbench/workbenchChatScopeSync";
 
 /** Hide legacy embedded panel when unified Cohi chat shell is active. */
 function isWorkbenchEmbeddedCohiHidden(): boolean {
@@ -217,18 +228,19 @@ type WorkbenchToastFn = (props: {
 }) => void;
 
 function commitWidgetActionReducerOutcome(
-  outcome: WidgetActionReducerOutcome,
+  apply: (prev: CanvasLayoutItem[]) => WidgetActionReducerOutcome,
   setItemsWithHistory: (
     items: CanvasLayoutItem[] | ((prev: CanvasLayoutItem[]) => CanvasLayoutItem[]),
   ) => void,
   toast: WorkbenchToastFn,
 ) {
-  if (outcome.result === "ok") {
-    setItemsWithHistory(outcome.items);
-  }
-  if (outcome.toast) {
-    toast(outcome.toast);
-  }
+  setItemsWithHistory((prev) => {
+    const outcome = apply(prev);
+    if (outcome.toast) {
+      toast(outcome.toast);
+    }
+    return outcome.result === "ok" ? outcome.items : prev;
+  });
 }
 
 /**
@@ -1170,6 +1182,10 @@ export function WorkbenchCanvas({
   const lastSavedSnapshotRef = useRef<string>("");
   const manualSavingRef = useRef(false);
   const previousLoadCanvasIdRef = useRef<string | null>(loadCanvasId ?? null);
+  const autoPersistNewCanvasRef = useRef(false);
+  const autoPersistInFlightRef = useRef(false);
+  const itemsForAutoPersistRef = useRef(items);
+  itemsForAutoPersistRef.current = items;
 
   const {
     saveStatus,
@@ -1219,6 +1235,95 @@ export function WorkbenchCanvas({
     }
     previousLoadCanvasIdRef.current = nextLoadCanvasId;
   }, [canvasId, chatDraftScopeId, isDirty, isOwner, loadCanvasId, persistExistingCanvas]);
+
+  const persistNewCanvasIfNeeded = useCallback(async () => {
+    if (loadCanvasId || canvasId || !isOwner) return;
+    const layoutItems = itemsForAutoPersistRef.current;
+    if (layoutItems.length === 0) return;
+    if (autoPersistInFlightRef.current || autoPersistNewCanvasRef.current) return;
+
+    autoPersistInFlightRef.current = true;
+    manualSavingRef.current = true;
+    setSaveStatus("saving");
+    try {
+      const title = isDefaultWorkbenchCanvasTitle(saveTitle)
+        ? suggestCanvasTitleFromLayout(layoutItems)
+        : saveTitle.trim() || "Workbench canvas";
+      const persistedLayout = buildLayoutWithLatestGroupFilters(layoutItems);
+      const data = await createWorkbenchCanvas({
+        title,
+        layout: persistedLayout,
+        annotations,
+        background: canvasBackground,
+        uploads,
+        tenantId,
+      });
+      setCanvasId(data.id);
+      setSaveTitle(title);
+      setIsRecordOwner(true);
+      await rebindWorkbenchDraftConversationScope({
+        draftScopeId,
+        canvasId: data.id,
+        tenantId,
+      });
+      syncSavedSnapshot(
+        JSON.stringify({
+          items: persistedLayout,
+          annotations,
+          bg: canvasBackground,
+          uploads,
+          title,
+        }),
+      );
+      autoPersistNewCanvasRef.current = true;
+      setSaveStatus("saved");
+      dispatchWorkbenchCanvasSaved({
+        canvasId: data.id,
+        title,
+        draftScopeId,
+      });
+      onSaved?.(data.id, title);
+    } catch (err) {
+      setSaveStatus("unsaved");
+      autoPersistNewCanvasRef.current = false;
+      console.warn("[WorkbenchCanvas] Auto-save new canvas failed:", err);
+    } finally {
+      autoPersistInFlightRef.current = false;
+      manualSavingRef.current = false;
+    }
+  }, [
+    annotations,
+    buildLayoutWithLatestGroupFilters,
+    canvasBackground,
+    canvasId,
+    draftScopeId,
+    isOwner,
+    loadCanvasId,
+    onSaved,
+    saveTitle,
+    setSaveStatus,
+    syncSavedSnapshot,
+    tenantId,
+    uploads,
+  ]);
+
+  /** First widgets on a new (unsaved) tab → create canvas, name it, and promote the tab. */
+  useEffect(() => {
+    if (loadCanvasId || canvasId || !isOwner || items.length === 0) return;
+    if (autoPersistNewCanvasRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      void persistNewCanvasIfNeeded();
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    items,
+    loadCanvasId,
+    canvasId,
+    isOwner,
+    persistNewCanvasIfNeeded,
+  ]);
 
   useEffect(() => {
     if (chatDraftScopeId) setDraftScopeId(chatDraftScopeId);
@@ -1392,95 +1497,28 @@ export function WorkbenchCanvas({
     (action: WidgetAction) => {
       switch (action.type) {
         case "add_existing_widget": {
-          const def = getWidgetDefinition(action.widgetId);
-          if (!def) {
-            toast({
-              title: "Widget not found",
-              description: `Unknown widget: ${action.widgetId}`,
-              variant: "destructive",
-            });
-            return;
-          }
-          // Find the correct section type from SECTION_TO_WIDGETS
-          let sectionType: SectionType = "company-scorecard";
-          for (const [, cfg] of Object.entries(SECTION_TO_WIDGETS)) {
-            if (cfg.widgetIds.includes(action.widgetId)) {
-              sectionType = cfg.sectionType as SectionType;
-              break;
-            }
-          }
-          const groupId = `cohi-group-${Date.now()}`;
-          const newItem = createLayoutItem(
-            `canvas-${Date.now()}`,
-            "widget_group",
-            {
-              type: "widget_group",
-              groupId,
-              title: def.group,
-              sectionType,
-              widgetIds: [action.widgetId],
-            },
-            { x: 0, y: 20, w: defaultGroupWidth, h: 400 },
+          commitWidgetActionReducerOutcome(
+            (prev) =>
+              applyAddExistingWidget(prev, action, {
+                defaultGroupWidth,
+                sectionToWidgets: SECTION_TO_WIDGETS,
+              }),
+            setItemsWithHistory,
+            toast,
           );
-          setItemsWithHistory([...items, newItem]);
-          toast({
-            title: "Widget added",
-            description: `Added "${def.name}" to canvas`,
-          });
           break;
         }
         case "suggest_dashboard": {
-          const sectionKey = action.sectionKey as string;
-          const sectionTitle = sectionKey
-            .replace(/([A-Z])/g, " $1")
-            .replace(/^./, (s) => s.toUpperCase())
-            .trim();
-
-          // Check standalone widgets first
-          const sw = STANDALONE_WIDGETS[sectionKey];
-          if (sw) {
-            const swItem = createLayoutItem(
-              `canvas-${Date.now()}`,
-              "registry_widget",
-              { type: "registry_widget", definitionId: sw.defId },
-              { x: 20, y: 20, w: sw.w, h: sw.h },
-            );
-            setItemsWithHistory([...items, swItem]);
-            toast({
-              title: "Widget added",
-              description: `Added "${sectionTitle}" to canvas`,
-            });
-            break;
-          }
-
-          // Full dashboard sections
-          const section = SECTION_TO_WIDGETS[sectionKey];
-          if (!section) {
-            toast({
-              title: "Dashboard not found",
-              description: `Unknown section: ${sectionKey}`,
-              variant: "destructive",
-            });
-            return;
-          }
-          const gId = `cohi-dash-${Date.now()}`;
-          const dashItem = createLayoutItem(
-            `canvas-${Date.now()}`,
-            "widget_group",
-            {
-              type: "widget_group",
-              groupId: gId,
-              title: sectionTitle,
-              sectionType: section.sectionType as SectionType,
-              widgetIds: section.widgetIds,
-            },
-            { x: 0, y: 20, w: defaultGroupWidth, h: 800 },
+          commitWidgetActionReducerOutcome(
+            (prev) =>
+              applySuggestDashboard(prev, action, {
+                defaultGroupWidth,
+                sectionToWidgets: SECTION_TO_WIDGETS,
+                standaloneWidgets: STANDALONE_WIDGETS,
+              }),
+            setItemsWithHistory,
+            toast,
           );
-          setItemsWithHistory([...items, dashItem]);
-          toast({
-            title: "Dashboard added",
-            description: `Added ${section.widgetIds.length} widgets to canvas`,
-          });
           break;
         }
         case "modify_group": {
@@ -1573,7 +1611,7 @@ export function WorkbenchCanvas({
           }
           if (action.type !== "modify_widget") break;
           commitWidgetActionReducerOutcome(
-            applyModifyWidget(items, action, { editingWidgetId }),
+            (prev) => applyModifyWidget(prev, action, { editingWidgetId }),
             setItemsWithHistory,
             toast,
           );
@@ -1581,7 +1619,7 @@ export function WorkbenchCanvas({
         }
         case "convert_to_sql_widget": {
           commitWidgetActionReducerOutcome(
-            applyConvertToSqlWidget(items, action),
+            (prev) => applyConvertToSqlWidget(prev, action),
             setItemsWithHistory,
             toast,
           );
@@ -1589,7 +1627,7 @@ export function WorkbenchCanvas({
         }
         case "create_dashboard": {
           commitWidgetActionReducerOutcome(
-            applyCreateDashboard(items, action),
+            (prev) => applyCreateDashboard(prev, action),
             setItemsWithHistory,
             toast,
           );
@@ -1597,37 +1635,40 @@ export function WorkbenchCanvas({
         }
         case "create_widget": {
           commitWidgetActionReducerOutcome(
-            applyCreateWidget(items, action, { canvasWidth: width }),
+            (prev) => applyCreateWidget(prev, action, { canvasWidth: width }),
             setItemsWithHistory,
             toast,
           );
           break;
         }
         case "delete_widget": {
-          const { items: nextItems, removed } = applyDeleteWidgetFromItems(
-            items,
-            action.instanceId,
-          );
-          if (removed) {
-            setItemsWithHistory(nextItems);
-            toast({ title: "Widget removed" });
-          } else {
+          setItemsWithHistory((prev) => {
+            const { items: nextItems, removed } = applyDeleteWidgetFromItems(
+              prev,
+              action.instanceId,
+            );
+            if (removed) {
+              toast({ title: "Widget removed" });
+              return nextItems;
+            }
             toast({
               title: "Widget not found",
               description: `No widget matching "${action.instanceId}"`,
               variant: "destructive",
             });
-          }
+            return prev;
+          });
           break;
         }
         case "create_canvas": {
           if (action.title) setSaveTitle(action.title);
           commitWidgetActionReducerOutcome(
-            applyCreateCanvas(items, action, {
-              canvasWidth: width,
-              sectionToWidgets: SECTION_TO_WIDGETS,
-              standaloneWidgets: STANDALONE_WIDGETS,
-            }),
+            (prev) =>
+              applyCreateCanvas(prev, action, {
+                canvasWidth: width,
+                sectionToWidgets: SECTION_TO_WIDGETS,
+                standaloneWidgets: STANDALONE_WIDGETS,
+              }),
             setItemsWithHistory,
             toast,
           );
@@ -1989,6 +2030,8 @@ export function WorkbenchCanvas({
       next === null || (prev !== null && prev !== next);
     if (shouldReset) {
       fetchedCanvasIdRef.current = null;
+      autoPersistNewCanvasRef.current = false;
+      autoPersistInFlightRef.current = false;
       clearCanvasData();
       setItems([]);
       setAnnotations([]);
@@ -3409,49 +3452,36 @@ export function WorkbenchCanvas({
         toast({ title: "Canvas saved", description: title });
       } else {
         const persistedLayout = buildLayoutWithLatestGroupFilters(items);
-        const data = await api.request<{ id: string }>(
-          `/api/workbench/canvases${tenantQs}`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              title,
-              layoutVersion: "freeform-v1",
-              layout: persistedLayout,
-              annotations,
-              background: canvasBackground,
-              uploadsMeta: uploads,
-            }),
-          },
-        );
+        const data = await createWorkbenchCanvas({
+          title,
+          layout: persistedLayout,
+          annotations,
+          background: canvasBackground,
+          uploads,
+          tenantId,
+        });
         setCanvasId(data.id);
         setIsRecordOwner(true);
-        try {
-          await api.request(
-            `/api/cohi-chat/workbench/conversations/rebind-scope${tenantQs}`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                fromScopeId: `draft:${draftScopeId}`,
-                toScopeId: `canvas:${data.id}`,
-              }),
-            },
-          );
-        } catch (err) {
-          console.warn("[WorkbenchCanvas] Could not rebind draft conversation scope:", err);
-        }
+        autoPersistNewCanvasRef.current = true;
+        await rebindWorkbenchDraftConversationScope({
+          draftScopeId,
+          canvasId: data.id,
+          tenantId,
+        });
         toast({ title: "Canvas saved", description: title });
         onSaved?.(data.id, title);
-      }
-      // Update snapshot so dirty-state resets
-      if (!canvasId) {
-        const persistedLayout = buildLayoutWithLatestGroupFilters(items);
+        dispatchWorkbenchCanvasSaved({
+          canvasId: data.id,
+          title,
+          draftScopeId,
+        });
         syncSavedSnapshot(
           JSON.stringify({
             items: persistedLayout,
             annotations,
             bg: canvasBackground,
             uploads,
-            title: saveTitle,
+            title,
           }),
         );
       }

@@ -46,6 +46,7 @@ import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { loadSession as loadResearchSession } from "../services/research/orchestrator.js";
 import { callLLM, type LLMMessage } from "../services/research/tools.js";
+import { buildPlatformBusinessContext } from "../services/ai/platformBusinessContext.js";
 import { AGENT_PERSONAS, type AgentPersona } from "../config/agentPersonas.js";
 import { retrieveRAGContext } from "../services/ai/ragRetrieval.js";
 import { getLoanAccessContext } from "../services/userLoanAccessService.js";
@@ -513,6 +514,26 @@ function validatePullThroughSqlGuardrails(
   return null;
 }
 
+/** When the model suggests a dashboard, strip companion add actions so the client can prompt first. */
+function reconcileDashboardSuggestionActions(actions: any[]): any[] {
+  if (!Array.isArray(actions)) return [];
+  const suggests = actions.filter(
+    (a) => a?.type === "suggest_dashboard",
+  );
+  if (suggests.length === 0) return actions;
+  const blocked = new Set([
+    "suggest_dashboard",
+    "add_existing_widget",
+    "create_widget",
+    "create_dashboard",
+    "create_canvas",
+  ]);
+  return [
+    ...suggests,
+    ...actions.filter((a) => a?.type && !blocked.has(String(a.type))),
+  ];
+}
+
 function normalizeTableScopeLabelsForRequest(action: any, userQuestion: string): any {
   if (action?.type !== "modify_widget" || !action?.sql) return action;
   const q = String(userQuestion || "").toLowerCase();
@@ -665,7 +686,7 @@ const DATA_SOURCE_SQL_HINTS: Partial<Record<string, string>> = {
   "company-scorecard":
     "Typical tables: public.loans, public.loan_officers, public.branches. Common columns: application_date, funding_date, loan_amount, status, branch_id, loan_officer_id.",
   "sales-scorecard":
-    "Similar to company-scorecard; often filtered by sales channel or product.",
+    "Official Sales Scorecard API data (TTS, tiers, per-LO detail). Prefer suggest_dashboard salesScorecard or sales-scorecard-tabbed-table — do NOT approximate TTS with ad-hoc loans SQL.",
   "operations-scorecard":
     "Loans and operational metrics; cycle time, fallout, pipeline stages.",
 };
@@ -966,7 +987,7 @@ You help users build, modify, and understand data visualizations on their canvas
 
 ## Your Capabilities
 1. **Add existing widgets** from the catalog using the "add_existing_widget" action
-2. **Suggest full dashboards** using the "suggest_dashboard" action
+2. **Suggest full dashboards** using the "suggest_dashboard" action (user confirms before it is applied — see Dashboard suggestions below)
 3. **Create new widgets** with SQL queries using the "create_widget" action
 4. **Modify widgets** on the canvas using the "modify_widget" action
 5. **Delete widgets** using the "delete_widget" action
@@ -1035,8 +1056,10 @@ Each action in the "actions" array must be one of:
 1. **add_existing_widget**: Add a widget from the catalog
    {"type": "add_existing_widget", "widgetId": "<id from catalog>", "explanation": "Why this widget is relevant"}
 
-2. **suggest_dashboard**: Add an entire dashboard section
+2. **suggest_dashboard**: Recommend a pre-built dashboard section (NOT applied until the user confirms)
    {"type": "suggest_dashboard", "sectionKey": "<key like companyScorecard, salesScorecard, etc.>", "explanation": "Why this dashboard is useful"}
+   - Return ONLY suggest_dashboard (no add_existing_widget / create_widget / create_dashboard / create_canvas) when a catalog section is the right fit.
+   - In **message**, ask the user to add the suggested dashboard **or** ask you to build a custom dashboard instead.
 
 3. **create_widget**: Generate a new visualization from SQL
    {"type": "create_widget", "sql": "SELECT ...", "title": "Chart Title", "config": {"type": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot", "title": "...", "data": [], "xKey": "...", "yKey": "...", "yKeys": ["...", "..."], "pivotConfig": {"rowKey":"...","columnKey":"...","valueKey":"...","aggregation":"sum"}}, "filterConfig": {"filterable": true, "dateColumn": "funding_date", "defaultPreset": "L12M"}, "allowLowSamplePullThrough": false, "explanation": "What this shows"}
@@ -1220,14 +1243,33 @@ The CURRENT CANVAS STATE section below includes LIVE DATA VALUES — actual numb
 
 ## Important Rules
 
+### Platform derived metrics (CRITICAL)
+The PLATFORM BUSINESS LOGIC section below defines official formulas for TTS, OPS TTS, loan complexity, and tier assignments. These are NOT stored columns on loans.
+- For TTS / loan officer scorecard / tier tables: use **suggest_dashboard** with sectionKey **salesScorecard** only (user confirms before it is added). Do NOT pair suggest_dashboard with add_existing_widget for the same table — do NOT invent composite scores from production+revenue+margin SQL.
+- For operations scorecard / processor tiers: prefer **operationsScorecard** section or ops-scorecard-tabbed-table.
+- For revenue-based TopTiering comparison tiers: use **topTieringComparison** section.
+- Only use **create_widget** SQL to approximate derived metrics when the user explicitly asks for a **custom** variant or after they decline a suggest_dashboard recommendation.
+
+### Dashboard suggestions (CRITICAL)
+When a pre-built section matches the user's goal:
+1. Return ONE **suggest_dashboard** with the best sectionKey. Do NOT also return add_existing_widget / create_widget / create_dashboard / create_canvas for the same request.
+2. In **message**, clearly offer two paths: (A) add the suggested pre-built dashboard, or (B) build a custom dashboard instead.
+3. Mention that the pre-built section uses official platform metrics (e.g. tenant TTS weights from Admin > Scoring & Weights).
+
 ### WIDGET CREATION STRATEGY (CRITICAL)
-- **PREFER "create_widget" over "add_existing_widget"** — Cohi's power is creating entirely NEW, custom, data-driven widgets tailored to what the user asks for. Do NOT just dump library sections.
-- Use "create_widget" to build fresh KPIs, charts, and tables with SQL queries that answer the user's specific question.
-- Use "add_existing_widget" ONLY when the user explicitly asks for a specific pre-built widget by name (e.g., "add the Company Scorecard").
-- Use "create_canvas" ONLY when the user explicitly asks for a pre-built dashboard section (e.g., "add the Sales Scorecard section").
-- When the user asks something like "build me an executive dashboard" or "show me pipeline health", you should generate 3-6 custom "create_widget" actions with SQL queries — NOT dump multiple library sections. Each widget should be purposeful and answer a specific executive question.
-- When mixing custom and library widgets, create_widget items appear FIRST (the custom, relevant analysis), then optionally add 1-2 library sections if they add value.
-- Section keys (for when explicitly requested): companyScorecard, salesScorecard, operationsScorecard, operationsTrends, salesTrends, loanFunnel, topTieringComparison, creditRiskManagement, leaderboard, executiveDashboard
+- Use **create_widget** for bespoke analysis that is NOT covered by a catalog section (executive KPI mixes, one-off cuts, custom filters).
+- Use **suggest_dashboard** when an official section already answers the question (scorecards, funnel, top tiering comparison, etc.).
+- Use **add_existing_widget** when the user wants one catalog widget (e.g. sales-scorecard-tabbed-table only).
+- Use **create_canvas** only when the user explicitly asks for multiple named sections at once.
+- When the user asks for a custom executive dashboard or pipeline view without a matching section, generate 3-6 purposeful **create_widget** actions — do not default to library dumps.
+- Section keys: companyScorecard, salesScorecard, operationsScorecard, operationsTrends, salesTrends, loanFunnel, topTieringComparison, creditRiskManagement, leaderboard, executiveDashboard, actors, highPerformers, pricingDashboard, pipelineAnalysis, salesScorecardOverview, salesCompanyOverview, lockStratification, productionTrends, productionSummaryByWeek
+
+### Incremental adds to a non-empty canvas (CRITICAL)
+When CURRENT CANVAS STATE already lists dashboard groups and the user says they **already added** a section, or asks to **also add** / **just add** another:
+- APPEND only — never remove, replace, or rebuild the canvas.
+- Return ONE **suggest_dashboard** for the **new** section only (e.g. sectionKey **actors**). Do NOT include sections already on the canvas.
+- Do NOT return **create_canvas** or **create_dashboard** (those are for empty canvas or full rebuilds).
+- Read group titles and sectionTypes in CANVAS STATE; if Sales Scorecard is already present, do not suggest salesScorecard again.
 
 ### General
 - For "create_widget" and "query_data", write PostgreSQL-compatible SQL against the "loans" table
@@ -1568,6 +1610,18 @@ export async function runWorkbenchChatTurn(
 
       let verifiedMetricsBlock = "";
       let dataMaxDate = "";
+      let platformBusinessContext = "";
+      if (tenantId && !hasUploadContext) {
+        try {
+          platformBusinessContext = await buildPlatformBusinessContext(tenantId);
+        } catch (err) {
+          console.warn(
+            "[CohiWorkbench] Could not load platform business context:",
+            err,
+          );
+        }
+      }
+
       if (tenantId && !hasUploadContext) {
         try {
           const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -1704,6 +1758,16 @@ export async function runWorkbenchChatTurn(
       }
 
       if (
+        (canvasState?.totalItems ?? 0) > 0 &&
+        /(already added|just add|also add|add .+ too)/i.test(question)
+      ) {
+        const onCanvas = (canvasState?.groups ?? [])
+          .map((g) => `${g.title} (${g.sectionType})`)
+          .join("; ");
+        personaSupplement += `\n\n## Incremental add (CRITICAL)\nThe user is adding to an existing canvas — do NOT remove or replace existing groups. Sections already on canvas: ${onCanvas || "see CANVAS STATE"}. Return ONE suggest_dashboard for the NEW section only. Do NOT return create_canvas or create_dashboard. Do NOT re-suggest sections already listed above. In message, acknowledge what is already on the canvas.`;
+      }
+
+      if (
         shouldBuildExecutiveDashboardOnEmptyCanvas(
           question,
           canvasState?.totalItems,
@@ -1739,7 +1803,10 @@ export async function runWorkbenchChatTurn(
           canvasContext +
             researchContext +
             personaSupplement +
-            knowledgeContext,
+            knowledgeContext +
+            (platformBusinessContext
+              ? `\n\n## PLATFORM BUSINESS LOGIC\n${platformBusinessContext}`
+              : ""),
         );
 
       // Build message history
@@ -1800,11 +1867,13 @@ export async function runWorkbenchChatTurn(
       ];
 
       // Validate actions
-      let validActions = (parsed.actions || []).filter(
-        (a: any) =>
-          a &&
-          typeof a.type === "string" &&
-          VALID_ACTION_TYPES.includes(a.type),
+      let validActions = reconcileDashboardSuggestionActions(
+        (parsed.actions || []).filter(
+          (a: any) =>
+            a &&
+            typeof a.type === "string" &&
+            VALID_ACTION_TYPES.includes(a.type),
+        ),
       );
       validActions = validActions.map((a: any) =>
         normalizeTableScopeLabelsForRequest(a, question),
