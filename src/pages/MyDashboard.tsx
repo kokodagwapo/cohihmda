@@ -104,6 +104,8 @@ export default function MyDashboard() {
   const [tabTitles, setTabTitles] = useState<Record<string, string>>({});
   /** Per-tab draft scope ids for unified workbench chat widget handoff. */
   const [tabDraftScopes, setTabDraftScopes] = useState<Record<string, string>>({});
+  const tabDraftScopesRef = useRef(tabDraftScopes);
+  tabDraftScopesRef.current = tabDraftScopes;
   // Track which tabs have unsaved changes (dirty state from canvas autosave)
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
 
@@ -526,17 +528,17 @@ export default function MyDashboard() {
         buildActiveContextFromTab({
           tabId,
           tabTitle: getTabTitle(tabId),
-          tabDraftScopes,
+          tabDraftScopes: tabDraftScopesRef.current,
         }),
       );
     },
-    [getTabTitle, tabDraftScopes],
+    [getTabTitle],
   );
 
   useEffect(() => {
     if (isHydratingWorkbench || !activeTabId) return;
     emitActiveWorkbenchContext(activeTabId);
-  }, [activeTabId, isHydratingWorkbench, emitActiveWorkbenchContext, tabDraftScopes]);
+  }, [activeTabId, isHydratingWorkbench, emitActiveWorkbenchContext]);
 
   // Handle dirty-state changes from the active canvas
   const handleDirtyChange = useCallback((dirty: boolean) => {

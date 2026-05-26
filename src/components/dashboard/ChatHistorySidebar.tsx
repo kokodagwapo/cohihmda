@@ -33,7 +33,7 @@ interface ChatHistorySidebarProps {
   sessions: ChatSession[];
   activeSessionId: string | null;
   isLoading: boolean;
-  isLoadingSession: boolean;
+  loadingSessionId: string | null;
   onFetchSessions: () => void;
   onLoadSession: (sessionId: string) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
@@ -112,14 +112,14 @@ function formatRelativeTime(dateStr: string): string {
 function SessionItem({
   session,
   isActive,
-  isLoadingSession,
+  loadingSessionId,
   onLoad,
   onDelete,
   onRename,
 }: {
   session: ChatSession;
   isActive: boolean;
-  isLoadingSession: boolean;
+  loadingSessionId: string | null;
   onLoad: () => void;
   onDelete: () => void;
   onRename: (title: string) => void;
@@ -193,11 +193,11 @@ function SessionItem({
           : "hover:bg-slate-50 dark:hover:bg-slate-800/50 border border-transparent"
       )}
       onClick={() => {
-        if (!isEditing && !isLoadingSession) onLoad();
+        if (!isEditing && loadingSessionId !== session.id) onLoad();
       }}
     >
       <div className="mt-0.5 shrink-0">
-        {isLoadingSession && isActive ? (
+        {loadingSessionId === session.id ? (
           <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
         ) : (
           <MessageSquare
@@ -300,7 +300,7 @@ export function ChatHistorySidebar({
   sessions,
   activeSessionId,
   isLoading,
-  isLoadingSession,
+  loadingSessionId,
   onFetchSessions,
   onLoadSession,
   onDeleteSession,
@@ -483,7 +483,7 @@ export function ChatHistorySidebar({
                               key={session.id}
                               session={session}
                               isActive={session.id === activeSessionId}
-                              isLoadingSession={isLoadingSession}
+                              loadingSessionId={loadingSessionId}
                               onLoad={() => {
                                 onLoadSession(session.id);
                                 onClose();

@@ -16,20 +16,30 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   activeContextToScopeRef,
+  beginWorkbenchNewCanvasHandoff,
   COHI_WORKBENCH_ACTIVE_CONTEXT_EVENT,
   consumeWorkbenchNewChatPendingFirstSend,
+  consumeWorkbenchScopePromptSuppression,
+  endWorkbenchNewCanvasHandoff,
   getLatestWorkbenchActiveContext,
   isWorkbenchCanvasPopulated,
+  isGreenfieldWorkbenchTab,
+  isWorkbenchNewCanvasHandoffActive,
+  suppressNextWorkbenchScopePrompt,
   isWorkbenchChatScopeSyncEnabled,
+  scopeRefKey,
   shouldConfirmNewCanvasBeforeSend,
   readPersistedWorkbenchConversationScope,
   requestWorkbenchNewCanvasTab,
   scopeRefsEqual,
+  workbenchScopeMatchesActiveContext,
   trackWorkbenchScopeSyncEvent,
   type WorkbenchActiveContext,
   type WorkbenchChatScopeRef,
   type WorkbenchScopeMismatchActionsDetail,
+  type SyncWorkbenchContextOptions,
 } from "@/lib/workbench/workbenchChatScopeSync";
+import type { CarryOverContext } from "@/lib/workbench/workbenchChatHandoff";
 import type { SendMessageOptions } from "@/hooks/useCohiChat";
 
 export interface UseWorkbenchChatScopeGuardArgs {
@@ -42,11 +52,25 @@ export interface UseWorkbenchChatScopeGuardArgs {
   scopeMismatchActions: WorkbenchScopeMismatchActionsDetail | null;
   acceptPendingWorkbenchScopeSwitch: () => Promise<void>;
   cancelPendingWorkbenchScopeSwitch: () => void;
-  syncChatToActiveCanvas: (ctx: WorkbenchActiveContext) => Promise<void>;
+  syncChatToActiveCanvas: (
+    ctx: WorkbenchActiveContext,
+    options?: SyncWorkbenchContextOptions,
+  ) => Promise<void>;
   resolveScopeMismatchActions: (mode: "active" | "conversation") => void;
   sendMessage: (message: string, options?: SendMessageOptions) => Promise<void>;
+  buildCarryOverForNewCanvas?: (
+    pendingUserMessage?: string,
+  ) => CarryOverContext | undefined;
+  prepareForNewCanvasHandoff?: () => void;
   onNewCanvasPreflightDismiss?: (message: string) => void;
   onOpenCanvasThreads?: () => void;
+}
+
+function activeContextKey(ctx: WorkbenchActiveContext): string {
+  if (ctx.isSavedCanvas && ctx.canvasId) {
+    return `canvas:${ctx.canvasId}`;
+  }
+  return `draft:${ctx.draftScopeId}`;
 }
 
 export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs) {
@@ -63,6 +87,8 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
     syncChatToActiveCanvas,
     resolveScopeMismatchActions,
     sendMessage,
+    buildCarryOverForNewCanvas,
+    prepareForNewCanvasHandoff,
     onNewCanvasPreflightDismiss,
   } = args;
 
@@ -77,6 +103,10 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
     options?: SendMessageOptions;
   } | null>(null);
   const skipNextContextCheckRef = useRef(false);
+  const lastHandledContextKeyRef = useRef<string | null>(null);
+  const lastPromptedSwitchKeyRef = useRef<string | null>(null);
+  const declinedSwitchKeyRef = useRef<string | null>(null);
+  const lastReconciledContextKeyRef = useRef<string | null>(null);
 
   const resolveConversationScope = useCallback((): WorkbenchChatScopeRef | null => {
     return (
@@ -86,38 +116,94 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
     );
   }, [workbenchChatScope]);
 
-  const maybePromptScopeSwitch = useCallback(
-    (ctx: WorkbenchActiveContext) => {
+  const queueScopeSwitchPrompt = useCallback(
+    (ctx: WorkbenchActiveContext, options?: { forceDialog?: boolean }) => {
       const conversationScope = resolveConversationScope();
       if (!conversationScope) return;
+      if (workbenchScopeMatchesActiveContext(conversationScope, ctx)) {
+        setPendingScopeSwitchTarget(null);
+        return;
+      }
+
       const nextScope = activeContextToScopeRef(ctx);
-      if (scopeRefsEqual(conversationScope, nextScope)) return;
-      trackWorkbenchScopeSyncEvent("scope_switch_prompt_shown");
+      const switchKey = `${scopeRefKey(conversationScope)}->${scopeRefKey(nextScope)}`;
       setPendingScopeSwitchTarget(ctx);
+
+      if (declinedSwitchKeyRef.current === switchKey) {
+        return;
+      }
+
+      if (
+        !options?.forceDialog &&
+        (workbenchScopePinned || lastPromptedSwitchKeyRef.current === switchKey)
+      ) {
+        return;
+      }
+
+      lastPromptedSwitchKeyRef.current = switchKey;
+      trackWorkbenchScopeSyncEvent("scope_switch_prompt_shown");
       setScopeSwitchOpen(true);
     },
-    [resolveConversationScope, setPendingScopeSwitchTarget],
+    [resolveConversationScope, setPendingScopeSwitchTarget, workbenchScopePinned],
   );
 
   const handleActiveCanvasContext = useCallback(
     (ctx: WorkbenchActiveContext) => {
-      if (workbenchScopePinned) {
-        maybePromptScopeSwitch(ctx);
-        return;
-      }
+      const ctxKey = activeContextKey(ctx);
       const conversationScope = resolveConversationScope();
-      const nextScope = activeContextToScopeRef(ctx);
-      if (!conversationScope || scopeRefsEqual(conversationScope, nextScope)) {
-        void syncChatToActiveCanvas(ctx);
+      const scopeAligned =
+        !conversationScope ||
+        workbenchScopeMatchesActiveContext(conversationScope, ctx);
+      const suppressed = consumeWorkbenchScopePromptSuppression();
+
+      if (isWorkbenchNewCanvasHandoffActive()) {
+        // Scope + send are handled in confirmNewCanvas; avoid sync wiping the new message UI.
+        lastHandledContextKeyRef.current = ctxKey;
         return;
       }
-      maybePromptScopeSwitch(ctx);
+
+      if (suppressed) {
+        lastHandledContextKeyRef.current = ctxKey;
+        if (!workbenchScopePinned) {
+          void syncChatToActiveCanvas(ctx, {
+            loadLatestThread: ctx.isSavedCanvas,
+          });
+        }
+        return;
+      }
+
+      if (scopeAligned) {
+        lastHandledContextKeyRef.current = ctxKey;
+        if (!workbenchScopePinned) {
+          void syncChatToActiveCanvas(ctx);
+        }
+        return;
+      }
+
+      lastHandledContextKeyRef.current = ctxKey;
+
+      // UI "New canvas" / unsaved tabs: chat follows the tab; only prompt between saved canvases.
+      if (isGreenfieldWorkbenchTab(ctx)) {
+        if (!workbenchScopePinned) {
+          void syncChatToActiveCanvas(ctx);
+        } else {
+          queueScopeSwitchPrompt(ctx);
+        }
+        return;
+      }
+
+      if (workbenchScopePinned) {
+        queueScopeSwitchPrompt(ctx);
+        return;
+      }
+
+      queueScopeSwitchPrompt(ctx, { forceDialog: true });
     },
     [
       workbenchScopePinned,
       resolveConversationScope,
       syncChatToActiveCanvas,
-      maybePromptScopeSwitch,
+      queueScopeSwitchPrompt,
     ],
   );
 
@@ -137,11 +223,17 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
       window.removeEventListener(COHI_WORKBENCH_ACTIVE_CONTEXT_EVENT, handler);
   }, [enabled, handleActiveCanvasContext]);
 
-  /** Reconcile when scope sync turns on after navigation (context event may have fired earlier). */
+  /** Reconcile when scope sync enables or the active tab context changes. */
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      lastReconciledContextKeyRef.current = null;
+      return;
+    }
     const ctx = getLatestWorkbenchActiveContext();
     if (!ctx) return;
+    const ctxKey = activeContextKey(ctx);
+    if (lastReconciledContextKeyRef.current === ctxKey) return;
+    lastReconciledContextKeyRef.current = ctxKey;
     handleActiveCanvasContext(ctx);
   }, [enabled, handleActiveCanvasContext]);
 
@@ -178,32 +270,56 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
   const confirmScopeSwitch = useCallback(async () => {
     setScopeSwitchOpen(false);
     skipNextContextCheckRef.current = true;
+    declinedSwitchKeyRef.current = null;
     await acceptPendingWorkbenchScopeSwitch();
     setPendingScopeSwitchTarget(null);
   }, [acceptPendingWorkbenchScopeSwitch, setPendingScopeSwitchTarget]);
 
   const cancelScopeSwitch = useCallback(() => {
     setScopeSwitchOpen(false);
+    const conversationScope = resolveConversationScope();
+    const target = pendingScopeSwitchTarget;
+    if (conversationScope && target) {
+      const nextScope = activeContextToScopeRef(target);
+      declinedSwitchKeyRef.current = `${scopeRefKey(conversationScope)}->${scopeRefKey(nextScope)}`;
+    }
     cancelPendingWorkbenchScopeSwitch();
-  }, [cancelPendingWorkbenchScopeSwitch]);
+  }, [
+    cancelPendingWorkbenchScopeSwitch,
+    pendingScopeSwitchTarget,
+    resolveConversationScope,
+  ]);
 
   const confirmNewCanvas = useCallback(async () => {
     const pending = pendingSendRef.current;
     pendingSendRef.current = null;
     setNewCanvasOpen(false);
     if (!pending) return;
+    prepareForNewCanvasHandoff?.();
+    beginWorkbenchNewCanvasHandoff();
     try {
       trackWorkbenchScopeSyncEvent("new_canvas_intent_confirmed");
+      suppressNextWorkbenchScopePrompt(8);
       skipNextContextCheckRef.current = true;
-      await requestWorkbenchNewCanvasTab();
+      const carryOver = buildCarryOverForNewCanvas?.(pending.message);
+      const ctx = await requestWorkbenchNewCanvasTab();
+      await syncChatToActiveCanvas(ctx, { loadLatestThread: false });
       await sendMessage(pending.message, {
         ...pending.options,
         forceNewConversation: true,
+        carryOverContext: carryOver,
       });
     } catch (err) {
       console.warn("[WorkbenchChatScopeGuard] new canvas tab:", err);
+    } finally {
+      endWorkbenchNewCanvasHandoff();
     }
-  }, [sendMessage]);
+  }, [
+    buildCarryOverForNewCanvas,
+    prepareForNewCanvasHandoff,
+    sendMessage,
+    syncChatToActiveCanvas,
+  ]);
 
   const dismissNewCanvas = useCallback(() => {
     setNewCanvasOpen(false);
@@ -245,8 +361,9 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
             variant="outline"
             className="h-7 text-xs"
             onClick={() => {
-              trackWorkbenchScopeSyncEvent("scope_switch_prompt_shown");
-              setScopeSwitchOpen(true);
+              queueScopeSwitchPrompt(pendingScopeSwitchTarget, {
+                forceDialog: true,
+              });
             }}
           >
             Switch chat to {pendingScopeSwitchTarget.tabTitle}

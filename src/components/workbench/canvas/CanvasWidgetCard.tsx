@@ -14,7 +14,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles, FileSpreadsheet } from 'lucide-react';
+import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles, FileSpreadsheet, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /** Optional: for dashboard_section widgets, allow hiding sub-sections (e.g. Executive summary). */
@@ -124,6 +124,24 @@ export function CanvasWidgetCard({
       {editing && (
         <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-indigo-500 text-white text-[10px] font-medium shadow-sm">
           Editing
+        </div>
+      )}
+      {typeof onEditWithCohi === 'function' && (
+        <div className="absolute top-2 right-2 z-10">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-8 gap-1.5 rounded-lg border border-violet-200/90 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 shadow-sm hover:bg-violet-100 dark:border-violet-700/60 dark:bg-violet-950/80 dark:text-violet-200 dark:hover:bg-violet-900/60 canvas-interactive"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditWithCohi();
+            }}
+            data-testid="canvas-widget-edit-cohi"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            Edit
+          </Button>
         </div>
       )}
       {hasAnyMenuActions && (
@@ -245,8 +263,8 @@ export function CanvasWidgetCard({
             {onEditWithCohi && (
               <>
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEditWithCohi(); }} className="gap-2">
-                  <Sparkles className="h-4 w-4 text-violet-500" />
-                  Edit with Cohi
+                  <MessageSquare className="h-4 w-4 text-violet-500" />
+                  Edit
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>

@@ -8,8 +8,8 @@ export function BackgroundChatRunsBadge({
   activeConversationId: string | null;
 }) {
   const count = useUnifiedChatRunStore((s) => {
+    if (!activeConversationId) return 0;
     const ids = Object.keys(s.runs);
-    if (!activeConversationId) return ids.length;
     return ids.filter((id) => id !== activeConversationId).length;
   });
 

@@ -362,7 +362,6 @@ export function WorkbenchCanvasItemsLayer({
                         payload.type === "widget_group"
                           ? payload.groupId
                           : item.i;
-                      const message = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, groupId: ${targetId}, layoutId: ${item.i}). What changes can I make?`;
                       const resolvedCanvasId = canvasId ?? loadCanvasId;
                       const resolvedDraftScope = resolvedCanvasId
                         ? draftScopeIdForCanvasTab(resolvedCanvasId)
@@ -370,7 +369,6 @@ export function WorkbenchCanvasItemsLayer({
                       window.dispatchEvent(
                         new CustomEvent(COHI_WORKBENCH_EDIT_WIDGET_EVENT, {
                           detail: {
-                            message,
                             widgetId: targetId,
                             widgetTitle: String(widgetTitle),
                             widgetType,
@@ -390,8 +388,26 @@ export function WorkbenchCanvasItemsLayer({
                         (payload as { sectionId?: string }).sectionId ||
                         item.type;
                       const widgetType = item.type;
-                      const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
-                      cohiSendMessage(contextMsg);
+                      const targetId =
+                        item.type === "widget_group" &&
+                        payload.type === "widget_group"
+                          ? payload.groupId
+                          : item.i;
+                      const resolvedCanvasId = canvasId ?? loadCanvasId;
+                      const resolvedDraftScope = resolvedCanvasId
+                        ? draftScopeIdForCanvasTab(resolvedCanvasId)
+                        : draftScopeId;
+                      window.dispatchEvent(
+                        new CustomEvent(COHI_WORKBENCH_EDIT_WIDGET_EVENT, {
+                          detail: {
+                            widgetId: targetId,
+                            widgetTitle: String(widgetTitle),
+                            widgetType,
+                            draftScopeId: resolvedDraftScope,
+                            canvasId: resolvedCanvasId,
+                          },
+                        }),
+                      );
                     }
               }
             >

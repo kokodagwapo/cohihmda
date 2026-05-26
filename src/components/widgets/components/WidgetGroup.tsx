@@ -1897,11 +1897,13 @@ function GridCellWidget({
                 e.stopPropagation();
                 onOpenEditDialog!();
               }}
-              className="p-0.5 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:text-violet-400 dark:hover:bg-violet-900/30 canvas-interactive transition-colors"
-              title="Edit with Cohi"
-              aria-label="Edit with Cohi"
+              className="inline-flex items-center gap-1 rounded-md border border-violet-200/80 bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-700/50 dark:bg-violet-950/70 dark:text-violet-200 dark:hover:bg-violet-900/50 canvas-interactive transition-colors"
+              title="Edit"
+              aria-label="Edit"
+              data-testid="widget-group-edit-cohi"
             >
-              <MessageSquare className="h-3 w-3" />
+              <MessageSquare className="h-3 w-3 shrink-0" />
+              <span>Edit</span>
             </button>
           )}
           {/* Move to group popover */}

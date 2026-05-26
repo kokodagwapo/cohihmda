@@ -4,6 +4,7 @@
 
 import type { NavigateFunction } from "react-router-dom";
 import type { WidgetAction } from "@/types/widgetActions";
+import { suppressNextWorkbenchScopePrompt } from "@/lib/workbench/workbenchChatScopeSync";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
 import { getWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
 import { normalizeWidgetActionsForExecution } from "@/lib/workbench/normalizeModifyWidgetAction";
@@ -29,7 +30,8 @@ export const COHI_WORKBENCH_FOCUS_CANVAS_EVENT = "cohi-workbench-focus-canvas";
 export const COHI_WORKBENCH_BIND_CANVAS_EVENT = "cohi-workbench-bind-canvas";
 
 export interface WorkbenchEditWidgetEventDetail {
-  message: string;
+  /** When omitted, chat opens in edit mode without auto-sending to the LLM. */
+  message?: string;
   widgetId: string;
   widgetTitle: string;
   widgetType: string;
@@ -275,6 +277,7 @@ export function resolveWorkbenchEditDraftScope(
 export function bindWorkbenchEditDraftScope(
   detail: Pick<WorkbenchEditWidgetEventDetail, "draftScopeId" | "canvasId">,
 ): string {
+  suppressNextWorkbenchScopePrompt(3);
   const draftScopeId = resolveWorkbenchEditDraftScope(detail);
   if (detail.canvasId) {
     dispatchWorkbenchFocusCanvas(detail.canvasId);
