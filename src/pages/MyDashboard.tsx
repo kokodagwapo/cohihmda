@@ -495,6 +495,13 @@ export default function MyDashboard() {
 
     if (isNoOpExistingSave) return;
 
+    const promotedFromTabId =
+      isNewTabPromotion && activeTabId ? activeTabId : null;
+    const greenfieldDraftId = promotedFromTabId
+      ? tabDraftScopesRef.current[promotedFromTabId]
+      : undefined;
+    const canvasDraftScope = draftScopeIdForCanvasTab(savedId);
+
     setOpenTabs((prev) => {
       const currentActive = activeTabId;
       if (currentActive && currentActive.startsWith('new-')) {
@@ -504,6 +511,19 @@ export default function MyDashboard() {
     });
     setActiveTabId(savedId);
     setTabTitles((prev) => ({ ...prev, [savedId]: title }));
+    setTabDraftScopes((prev) => {
+      const next = { ...prev };
+      if (promotedFromTabId) {
+        delete next[promotedFromTabId];
+      }
+      next[savedId] = canvasDraftScope;
+      return next;
+    });
+    rememberWorkbenchDraftTab(canvasDraftScope, savedId);
+    if (greenfieldDraftId) {
+      rememberWorkbenchDraftTab(greenfieldDraftId, savedId);
+    }
+    setActiveWorkbenchDraftScope(canvasDraftScope);
     updateUrl(savedId);
     // Update the canvas list in the background — don't block or re-trigger load
     fetchCanvases().catch(() => {});

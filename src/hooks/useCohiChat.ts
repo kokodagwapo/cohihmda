@@ -44,7 +44,12 @@ import {
   clearPersistedWorkbenchConversationScope,
   persistWorkbenchConversationScope,
   readPersistedWorkbenchConversationScope,
+  shouldPromoteWorkbenchChatScopeOnCanvasSave,
+  buildWorkbenchChatScopeAfterCanvasSave,
+  suppressNextWorkbenchScopePrompt,
+  WORKBENCH_CANVAS_SAVED_EVENT,
   type WorkbenchActiveContext,
+  type WorkbenchCanvasSavedDetail,
   type WorkbenchChatScopeRef,
   type WorkbenchScopeMismatchActionsDetail,
   type SyncWorkbenchContextOptions,
@@ -444,9 +449,30 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   useEffect(() => {
     if (chatType !== "workbench") return;
     const onSaved = (e: Event) => {
-      const detail = (e as CustomEvent<{ canvasId?: string; draftScopeId?: string }>)
-        .detail;
-      if (detail?.canvasId && detail.draftScopeId) {
+      const detail = (e as CustomEvent<WorkbenchCanvasSavedDetail>).detail;
+      if (!detail?.canvasId) return;
+
+      const conversationScope =
+        readPersistedWorkbenchConversationScope();
+      if (
+        shouldPromoteWorkbenchChatScopeOnCanvasSave(detail, conversationScope)
+      ) {
+        suppressNextWorkbenchScopePrompt(8);
+        const scopeRef = buildWorkbenchChatScopeAfterCanvasSave(detail);
+        setWorkbenchChatScopeRef(scopeRef);
+        setWorkbenchSavedCanvasId(detail.canvasId);
+        setWorkbenchScopePinned(false);
+        setPendingScopeSwitchTarget(null);
+        setScopeMismatchActions(null);
+        const canvasDraftScope = draftScopeIdForCanvasTab(detail.canvasId);
+        setActiveWorkbenchDraftScope(canvasDraftScope);
+        rememberWorkbenchDraftTab(canvasDraftScope, detail.canvasId);
+        lastSyncedWorkbenchScopeKeyRef.current = `canvas:${detail.canvasId}`;
+        dispatchWorkbenchBindCanvas(detail.canvasId);
+        return;
+      }
+
+      if (detail.draftScopeId) {
         const activeDraft = getOrCreateActiveWorkbenchDraftScope();
         if (detail.draftScopeId === activeDraft) {
           setWorkbenchSavedCanvasId(detail.canvasId);
@@ -457,13 +483,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       const canvasId = (e as CustomEvent<{ canvasId?: string }>).detail?.canvasId;
       if (canvasId) setWorkbenchSavedCanvasId(canvasId);
     };
-    window.addEventListener("workbench:canvas-saved", onSaved);
+    window.addEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
     window.addEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
     return () => {
-      window.removeEventListener("workbench:canvas-saved", onSaved);
+      window.removeEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
       window.removeEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
     };
-  }, [chatType]);
+  }, [chatType, setWorkbenchChatScopeRef]);
 
   useEffect(() => {
     setSuggestedQuestions(CHAT_TYPE_DEFAULT_SUGGESTIONS[chatType]);
