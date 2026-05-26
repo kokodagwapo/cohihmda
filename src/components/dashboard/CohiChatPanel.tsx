@@ -2813,6 +2813,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           </div>
         </div>
 
+        <div
+          className={cn(
+            "relative flex flex-col min-w-0 w-full",
+            isShellCompact ? "shrink-0" : "flex-1 min-h-0",
+          )}
+          data-cohi-chat-panel-body
+        >
         {showDatasetAttach && (
           <ChatFilesBar
             uploads={availableUploads}
@@ -3090,6 +3097,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         )}
         </div>
         </LayoutGroup>
+        </div>
       </motion.div>
   );
 

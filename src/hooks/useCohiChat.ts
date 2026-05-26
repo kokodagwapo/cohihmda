@@ -53,6 +53,7 @@ import {
   type WorkbenchChatScopeRef,
   type WorkbenchScopeMismatchActionsDetail,
   type SyncWorkbenchContextOptions,
+  buildWorkbenchCanvasScopeQueries,
 } from "@/lib/workbench/workbenchChatScopeSync";
 import {
   getWorkbenchCanvasBridge,
@@ -275,6 +276,39 @@ function buildWorkbenchRequestContext(draftScopeId?: string): Record<string, unk
     canvasState,
     widgetCatalog: serializeWidgetCatalog(),
   };
+}
+
+/** Pre-unified workbench threads stored in `cohi_conversations`. */
+async function loadLegacyWorkbenchConversationMessages(
+  conversationId: string,
+  tenantId: string | null,
+): Promise<ChatMessage[] | null> {
+  const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  try {
+    const conv = await api.request<{
+      messages: Array<{
+        id?: string;
+        role: string;
+        content: string;
+        actions?: WidgetAction[];
+        timestamp?: string | Date;
+      }>;
+    }>(`/api/cohi-chat/workbench/conversations/${conversationId}${qs}`);
+    if (!conv?.messages?.length) return null;
+    return conv.messages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m, i) => ({
+        id: m.id ?? `legacy-wb-${i}`,
+        role: m.role as "user" | "assistant",
+        content: m.content ?? "",
+        timestamp: new Date(m.timestamp ?? Date.now()),
+        ...(m.role === "assistant" && m.actions?.length
+          ? { workbenchActions: m.actions }
+          : {}),
+      }));
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
@@ -1474,10 +1508,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             scope_key: string;
           }> = [];
           if (activeCtx?.isSavedCanvas && activeCtx.canvasId) {
-            listQueries.push(
-              { scope_type: "canvas", scope_key: activeCtx.canvasId },
-              { scope_type: "draft", scope_key: activeCtx.draftScopeId },
-            );
+            listQueries.push(...buildWorkbenchCanvasScopeQueries(activeCtx.canvasId));
           } else if (activeCtx) {
             listQueries.push({
               scope_type: "draft",
@@ -1488,10 +1519,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               workbenchSavedCanvasId,
             );
             if (scopeRef.type === "canvas") {
-              listQueries.push(
-                { scope_type: "canvas", scope_key: scopeRef.id },
-                { scope_type: "draft", scope_key: draftScopeId },
-              );
+              listQueries.push(...buildWorkbenchCanvasScopeQueries(scopeRef.id));
             } else {
               listQueries.push({
                 scope_type: "draft",
@@ -1789,6 +1817,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         workbenchFreshThreadScopeKeyRef.current = null;
       }
       if (
+        !options?.forceReload &&
         lastSyncedWorkbenchScopeKeyRef.current === scopeKey &&
         sessionId &&
         workbenchChatScope &&
@@ -1840,10 +1869,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           scope_key: string;
         }> = [];
         if (ctx.isSavedCanvas && ctx.canvasId) {
-          listQueries.push(
-            { scope_type: "canvas", scope_key: ctx.canvasId },
-            { scope_type: "draft", scope_key: ctx.draftScopeId },
-          );
+          listQueries.push(...buildWorkbenchCanvasScopeQueries(ctx.canvasId));
         } else {
           listQueries.push({
             scope_type: "draft",
@@ -1906,7 +1932,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     const target = pendingScopeSwitchTarget;
     if (!target) return;
     trackWorkbenchScopeSyncEvent("scope_switch_confirmed");
-    await syncWorkbenchChatToActiveContext(target);
+    await syncWorkbenchChatToActiveContext(target, { forceReload: true });
   }, [pendingScopeSwitchTarget, syncWorkbenchChatToActiveContext]);
 
   const cancelPendingWorkbenchScopeSwitch = useCallback(() => {
