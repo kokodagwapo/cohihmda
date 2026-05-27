@@ -45,6 +45,18 @@ export function resolveChatRouteGroundingLabel(
   return map[route];
 }
 
+function coerceCanvasStateSnapshot(
+  raw: unknown,
+): CanvasStateSnapshot | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.totalItems !== "number") return undefined;
+  if (!Array.isArray(o.groups) || !Array.isArray(o.standaloneWidgets)) {
+    return undefined;
+  }
+  return raw as CanvasStateSnapshot;
+}
+
 export function readDashboardGroundingHandoff(
   body: UnifiedChatRequestBody,
 ): ModeHandoffContextPayload | null {
@@ -54,18 +66,11 @@ export function readDashboardGroundingHandoff(
     | ModeHandoffContextPayload
     | undefined;
 
-  const dashboardOnly = body.context?.dashboardGrounding as
-    | {
-        canvasState?: CanvasStateSnapshot;
-        canvasTitle?: string;
-        widgetCatalog?: string;
-        route?: string;
-        canvasId?: string;
-      }
-    | undefined;
+  const dashboardOnly = body.context?.dashboardGrounding;
 
   const canvas =
-    explicit?.canvasState ?? dashboardOnly?.canvasState;
+    explicit?.canvasState ??
+    coerceCanvasStateSnapshot(dashboardOnly?.canvasState);
   const hasCanvas =
     canvas && typeof canvas.totalItems === "number" && canvas.totalItems > 0;
   const hasCatalog = Boolean(

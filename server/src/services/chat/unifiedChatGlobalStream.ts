@@ -52,7 +52,7 @@ async function buildChatContextForStream(
   const tenantId = req.tenantContext?.tenantId || req.tenantId;
   if (!tenantId) throw new Error("No tenant context available");
   const pageRoute =
-    requestBody?.context?.location?.route ??
+    requestBody?.location?.route ??
     requestBody?.context?.dashboardGrounding?.route ??
     null;
 
