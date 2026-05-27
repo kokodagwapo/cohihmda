@@ -173,7 +173,9 @@ import {
 } from "@/lib/workbench/workbenchDraftLayoutCache";
 import {
   consumePendingWorkbenchActions,
+  COHI_WORKBENCH_OPEN_REPORT_BUILDER_EVENT,
   COHI_WORKBENCH_STOP_EDITING_EVENT,
+  dispatchOpenWorkbenchReportBuilder,
   dispatchWorkbenchEditingWidgetState,
   draftScopeIdForCanvasTab,
   filterExecutableWorkbenchActions,
@@ -1681,6 +1683,10 @@ export function WorkbenchCanvas({
           // AI-generated report: send the report definition to the backend for PPTX generation
           const reportAction =
             action as import("@/types/widgetActions").GenerateReportAction;
+          dispatchOpenWorkbenchReportBuilder({
+            canvasId: canvasId ?? loadCanvasId ?? undefined,
+          });
+          setShowReportBuilder(true);
           const reportDef = reportAction.reportDefinition;
           if (!reportDef || !reportDef.slides?.length) {
             toast({
@@ -3198,6 +3204,34 @@ export function WorkbenchCanvas({
     canvasId,
     draftScopeId,
   ]);
+
+  useEffect(() => {
+    const onOpenReportBuilder = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ canvasId?: string | null }>).detail;
+      const targetCanvasId = detail?.canvasId?.trim();
+      const activeCanvasId = loadCanvasId ?? canvasId ?? null;
+      if (
+        targetCanvasId &&
+        activeCanvasId &&
+        targetCanvasId !== activeCanvasId
+      ) {
+        return;
+      }
+      if (canvasLoading) return;
+      autoOpenedReportBuilderRef.current =
+        loadCanvasId ?? canvasId ?? draftScopeId;
+      setShowReportBuilder(true);
+    };
+    window.addEventListener(
+      COHI_WORKBENCH_OPEN_REPORT_BUILDER_EVENT,
+      onOpenReportBuilder,
+    );
+    return () =>
+      window.removeEventListener(
+        COHI_WORKBENCH_OPEN_REPORT_BUILDER_EVENT,
+        onOpenReportBuilder,
+      );
+  }, [canvasLoading, items.length, loadCanvasId, canvasId, draftScopeId]);
 
   const getShareUrl = useCallback(() => {
     if (!canvasId) return "";

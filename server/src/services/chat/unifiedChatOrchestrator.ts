@@ -12,6 +12,7 @@ import {
 } from "../ai/cohiChatService.js";
 import { runWorkbenchChatTurn } from "../../routes/cohiWorkbench.js";
 import { parseRequestedPeriodFromText } from "../workbench/workbenchWidgetPeriodReconcile.js";
+import { isReportRequest } from "../workbench/workbenchPresentationAugment.js";
 import {
   mapCohiChatResponseToBlocks,
   mapWorkbenchResponseToBlocks,
@@ -276,12 +277,18 @@ async function executeWorkbenchBranch(
     () => runWorkbenchChatTurn(req, wbBody),
   );
   const blocks = sanitizeActionBlocks(mapWorkbenchResponseToBlocks(raw));
+  const canvasItems =
+    (body.context?.canvasState as { totalItems?: number } | undefined)
+      ?.totalItems ?? 0;
+  const deckFromCanvas =
+    canvasItems > 0 && isReportRequest(body.message);
   return {
     blocks,
     metadata: {
       promptHash: bundle.bundleHash,
       suggestedQuestions: raw.suggestedQuestions ?? [],
       route: "workbench",
+      ...(deckFromCanvas ? { openReportBuilder: true } : {}),
       contextManifest: baseContextManifest(body, [
         {
           tier: "workbench_snapshot",
@@ -568,7 +575,14 @@ export async function processUnifiedChatMessage(
   }
 
   if (presentationExport) {
-    metadata = { ...metadata, presentationExport };
+    metadata = {
+      ...metadata,
+      presentationExport,
+      ...(presentationExport.wantsPresentationExport &&
+      (chatType === "workbench" || shouldUseWorkbench(body))
+        ? { openReportBuilder: true }
+        : {}),
+    };
   }
 
   return {

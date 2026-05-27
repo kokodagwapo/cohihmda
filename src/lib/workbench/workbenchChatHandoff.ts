@@ -5,6 +5,7 @@
 import type { NavigateFunction } from "react-router-dom";
 import type { ReportDefinition } from "@/types/reportTypes";
 import type { WidgetAction } from "@/types/widgetActions";
+import { presentationExportPrefilter } from "@/lib/presentationExportIntent";
 import { suppressNextWorkbenchScopePrompt } from "@/lib/workbench/workbenchChatScopeSync";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
 import { getWorkbenchCanvasBridge } from "@/lib/workbench/workbenchCanvasBridge";
@@ -250,6 +251,38 @@ export function describeWorkbenchActionsApplied(
   }
 
   return "Updated dashboard";
+}
+
+/** Generic parser fallback — never show as the assistant bubble body. */
+export const WORKBENCH_GENERIC_ACK = "I processed your request.";
+
+export function isGenericWorkbenchAck(content: string | undefined): boolean {
+  const t = content?.trim().toLowerCase();
+  if (!t) return true;
+  return (
+    t === WORKBENCH_GENERIC_ACK.toLowerCase() ||
+    t === "i processed your request"
+  );
+}
+
+/** Prefer real model text; never surface {@link WORKBENCH_GENERIC_ACK}. */
+export function resolveWorkbenchAssistantContent(args: {
+  parsedContent?: string;
+  streamedContent?: string;
+  appliedCount?: number;
+}): string {
+  const { parsedContent, streamedContent, appliedCount = 0 } = args;
+  for (const candidate of [parsedContent, streamedContent]) {
+    if (candidate?.trim() && !isGenericWorkbenchAck(candidate)) {
+      return candidate.trim();
+    }
+  }
+  if (appliedCount > 0) {
+    return appliedCount === 1
+      ? "Applied 1 widget to canvas."
+      : `Applied ${appliedCount} widgets to canvas.`;
+  }
+  return "";
 }
 
 const DRAFT_TAB_STORAGE_KEY = "cohi_workbench_draft_tabs";
@@ -545,6 +578,19 @@ export function scheduleWorkbenchConversationResume(conversationId: string): voi
 }
 
 /**
+ * Re-bind the active workbench transcript after canvas save / scope promotion.
+ * Retries help when persist or rebind finishes slightly after the UI updates.
+ */
+export function scheduleWorkbenchTranscriptRefresh(conversationId: string): void {
+  if (typeof window === "undefined" || !conversationId) return;
+  const fire = () => dispatchCohiChatResume(conversationId, "workbench");
+  // Defer first refresh so the in-memory finalize pass commits before loadSession.
+  window.setTimeout(fire, 400);
+  window.setTimeout(fire, 1200);
+  window.setTimeout(fire, 2500);
+}
+
+/**
  * Resume a historical workbench conversation on its linked canvas with split chat.
  */
 export function navigateForWorkbenchConversationResume(
@@ -794,6 +840,60 @@ export const COHI_RESEARCH_PPT_EXPORT_EVENT = "cohi-research-ppt-export";
 
 export const COHI_OPEN_WORKBENCH_PPT_EDITOR_EVENT = "cohi-open-workbench-ppt-editor";
 
+/** Open Report Builder on the active (or specified) canvas without a full route round-trip. */
+export const COHI_WORKBENCH_OPEN_REPORT_BUILDER_EVENT =
+  "cohi-workbench-open-report-builder";
+
+export function dispatchOpenWorkbenchReportBuilder(detail?: {
+  canvasId?: string | null;
+}): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(COHI_WORKBENCH_OPEN_REPORT_BUILDER_EVENT, {
+      detail: detail ?? {},
+    }),
+  );
+}
+
+/** Whether a workbench chat message is asking for slides / PowerPoint. */
+export function isWorkbenchPresentationChatRequest(
+  message: string,
+  ...extra: Array<string | undefined | null>
+): boolean {
+  const combined = [message, ...extra].filter(Boolean).join("\n");
+  if (presentationExportPrefilter(combined)) return true;
+  const lower = combined.toLowerCase();
+  return /\b(board[- ]?ready|executive summary|slide deck|into a (powerpoint|presentation|deck))\b/.test(
+    lower,
+  );
+}
+
+/**
+ * Open Report Builder on the connected canvas (chat NL path).
+ * Does not require React Router — uses DOM events consumed by WorkbenchCanvas.
+ */
+export function requestOpenWorkbenchReportBuilderFromChat(args?: {
+  messages?: Array<{
+    id: string;
+    role: string;
+    visualization?: import("@/hooks/useCohiChat").VisualizationConfig;
+  }>;
+  assistantMessageId?: string;
+  userQuestion?: string;
+  mode?: import("@/lib/presentationExportIntent").PresentationExportMode;
+}): boolean {
+  const canvasId = getConnectedWorkbenchCanvasId();
+  if (!canvasId) return false;
+  dispatchOpenWorkbenchReportBuilder({ canvasId });
+  dispatchOpenWorkbenchPptEditor({
+    messages: args?.messages ?? [],
+    mode: args?.mode ?? "create",
+    latestAssistantId: args?.assistantMessageId,
+    userQuestion: args?.userQuestion,
+  });
+  return true;
+}
+
 /** Ask unified research workspace to run full report PPT export (same as Export PPT button). */
 export function dispatchResearchPptExport(): void {
   if (typeof window === "undefined") return;
@@ -878,7 +978,19 @@ export async function openWorkbenchPowerPointEditorFromChat(
 
   if (canvasId) {
     dispatchWorkbenchFocusCanvas(canvasId);
-    navigate(`/my-dashboard/${canvasId}?reportBuilder=1`);
+    dispatchOpenWorkbenchReportBuilder({ canvasId });
+    const path = `/my-dashboard/${canvasId}`;
+    const onCanvas =
+      typeof window !== "undefined" &&
+      window.location.pathname.replace(/\/$/, "") === path;
+    if (onCanvas) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("reportBuilder") !== "1") {
+        navigate(`${path}?reportBuilder=1`, { replace: true });
+      }
+    } else {
+      navigate(`${path}?reportBuilder=1`);
+    }
     return;
   }
 
@@ -887,6 +999,7 @@ export async function openWorkbenchPowerPointEditorFromChat(
     activateDraftScopeId: draftScopeId,
   });
   queueMicrotask(() => {
+    dispatchOpenWorkbenchReportBuilder();
     if (typeof window !== "undefined") {
       const path = window.location.pathname;
       if (!path.includes("reportBuilder=1")) {

@@ -62,3 +62,20 @@ describe("resolvePresentationExportAction", () => {
     expect(meta.action).toBe("none");
   });
 });
+
+describe("detectPresentationExportIntent research fallback", () => {
+  it("treats prefilter presentation asks as deferred research export when classifier declines", async () => {
+    const { detectPresentationExportIntent } = await import(
+      "./presentationExportIntent.js"
+    );
+    const meta = await detectPresentationExportIntent({
+      message:
+        "Can you make me a presentation of loan officer scorecard: volume, tiers, and performance outliers",
+      chatType: "research",
+      tenantId: "no-key-tenant",
+    });
+    expect(meta?.wantsPresentationExport).toBe(true);
+    expect(meta?.action).toBe("export_research_report");
+    expect(meta?.researchTopic?.toLowerCase()).toContain("loan officer");
+  });
+});

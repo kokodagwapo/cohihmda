@@ -34,7 +34,13 @@ import {
   markWorkbenchCanvasNavBound,
   resetActiveWorkbenchDraftSession,
   setActiveWorkbenchDraftScope,
+  isWorkbenchPresentationChatRequest,
+  requestOpenWorkbenchReportBuilderFromChat,
+  scheduleWorkbenchTranscriptRefresh,
+  isGenericWorkbenchAck,
+  resolveWorkbenchAssistantContent,
 } from "@/lib/workbench/workbenchChatHandoff";
+import { parsePresentationExportMetadata } from "@/lib/presentationExportTypes";
 import {
   activeContextToScopeRef,
   scopeRefsEqual,
@@ -384,7 +390,22 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const isLoadingSession = loadingSessionId !== null;
 
   const messageIdCounter = useRef(0);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const sessionIdRef = useRef<string | null>(null);
   const viewingSessionRef = useRef<string | null>(null);
+  /** Conversation id for the in-flight unified stream (may differ from sessionId until React commits). */
+  const activeStreamConversationRef = useRef<string | null>(null);
+  /** After first canvas save, block scope sync from swapping away the active transcript. */
+  const workbenchCanvasSavePreserveRef = useRef<{
+    conversationId: string;
+    until: number;
+  } | null>(null);
+  /** Last non-empty workbench transcript — restored if scope sync clears the pane. */
+  const workbenchPinnedTranscriptRef = useRef<{
+    conversationId: string;
+    messages: ChatMessage[];
+    until: number;
+  } | null>(null);
   const loadSessionGenerationRef = useRef(0);
   /** Set from research stream metadata before poll-mode stream closes. */
   const activeResearchSessionIdRef = useRef<string | null>(null);
@@ -403,15 +424,147 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
   useEffect(() => {
     viewingSessionRef.current = sessionId;
+    sessionIdRef.current = sessionId;
   }, [sessionId]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const stripWorkbenchLoadingFlags = useCallback(
+    (msgs: ChatMessage[]): ChatMessage[] =>
+      msgs.map((m) => {
+        if (m.role !== "assistant") return m;
+        let next = m;
+        if (m.isLoading) {
+          next = { ...next, isLoading: false };
+        }
+        if (isGenericWorkbenchAck(next.content)) {
+          next = { ...next, content: "" };
+        }
+        return next;
+      }),
+    [],
+  );
+
+  const pinWorkbenchTranscript = useCallback(
+    (conversationId: string, transcript: ChatMessage[]) => {
+      if (!conversationId || transcript.length === 0) return;
+      workbenchPinnedTranscriptRef.current = {
+        conversationId,
+        messages: stripWorkbenchLoadingFlags(transcript),
+        until: Date.now() + 120_000,
+      };
+    },
+    [stripWorkbenchLoadingFlags],
+  );
+
+  /** Recover transcript if scope sync cleared messages while the thread is still active. */
+  useEffect(() => {
+    if (chatType !== "workbench" || messages.length > 0) return;
+    const pinned = workbenchPinnedTranscriptRef.current;
+    if (!pinned || Date.now() > pinned.until || pinned.messages.length === 0) {
+      return;
+    }
+    const activeId =
+      sessionIdRef.current ??
+      viewingSessionRef.current ??
+      activeStreamConversationRef.current;
+    if (activeId && activeId !== pinned.conversationId) return;
+    setMessages(pinned.messages);
+    setSessionId(pinned.conversationId);
+    viewingSessionRef.current = pinned.conversationId;
+    sessionIdRef.current = pinned.conversationId;
+  }, [messages.length, chatType]);
 
   const applyMessagesForStream = useCallback(
     (
       streamConversationId: string,
       updater: (prev: ChatMessage[]) => ChatMessage[],
     ) => {
-      if (viewingSessionRef.current !== streamConversationId) return;
+      const viewing = viewingSessionRef.current;
+      const session = sessionIdRef.current;
+      const activeStream = activeStreamConversationRef.current;
+      const isActiveStream =
+        activeStream === streamConversationId ||
+        viewing === streamConversationId ||
+        session === streamConversationId;
+      if (!isActiveStream) return;
       setMessages(updater);
+    },
+    [],
+  );
+
+  /**
+   * Replace the streaming placeholder with the final assistant turn.
+   * Always uses setMessages so the UI clears "Analyzing…" even when stream
+   * scope refs were cleared by canvas-save scope sync mid-flight.
+   */
+  const finalizeWorkbenchAssistantMessage = useCallback(
+    (
+      conversationId: string,
+      assistantMessageId: string,
+      patch: Omit<ChatMessage, "id" | "role"> & Partial<Pick<ChatMessage, "role">>,
+    ): ChatMessage[] => {
+      const updater = (prev: ChatMessage[]) => {
+        const existing = prev.find((m) => m.id === assistantMessageId);
+        const appliedCount = patch.workbenchActionsAppliedCount ?? 0;
+        const content = resolveWorkbenchAssistantContent({
+          parsedContent: patch.content,
+          streamedContent: existing?.content,
+          appliedCount,
+        });
+        const finalized: ChatMessage = {
+          ...existing,
+          ...patch,
+          id: assistantMessageId,
+          role: "assistant",
+          content,
+          isLoading: false,
+          timestamp: patch.timestamp ?? existing?.timestamp ?? new Date(),
+          workbenchActions:
+            patch.workbenchActions ?? existing?.workbenchActions,
+          workbenchActionsAppliedCount:
+            patch.workbenchActionsAppliedCount ??
+            existing?.workbenchActionsAppliedCount,
+          workbenchPendingActions:
+            patch.workbenchPendingActions ?? existing?.workbenchPendingActions,
+        };
+        return prev.map((m) => (m.id === assistantMessageId ? finalized : m));
+      };
+      applyMessagesForStream(conversationId, updater);
+      let next: ChatMessage[] = [];
+      setMessages((prev) => {
+        next = updater(prev);
+        return next;
+      });
+      return next;
+    },
+    [applyMessagesForStream],
+  );
+
+  /** Align client stream id with server conversation id when they diverge (legacy resume). */
+  const reconcileStreamConversationId = useCallback(
+    (clientStreamId: string, serverConversationId: string) => {
+      const resolved = serverConversationId || clientStreamId;
+      if (!resolved || resolved === clientStreamId) {
+        viewingSessionRef.current = resolved;
+        sessionIdRef.current = resolved;
+        return resolved;
+      }
+      activeStreamConversationRef.current = resolved;
+      viewingSessionRef.current = resolved;
+      sessionIdRef.current = resolved;
+      setSessionId(resolved);
+      const runStore = useUnifiedChatRunStore.getState();
+      if (runStore.isRunning(clientStreamId)) {
+        const meta = runStore.runs[clientStreamId];
+        runStore.endRun(clientStreamId);
+        if (meta) {
+          runStore.startRun({ ...meta, conversationId: resolved });
+        }
+      }
+      return resolved;
     },
     [],
   );
@@ -565,51 +718,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   }, []);
 
   useEffect(() => {
-    if (chatType !== "workbench") return;
-    const onSaved = (e: Event) => {
-      const detail = (e as CustomEvent<WorkbenchCanvasSavedDetail>).detail;
-      if (!detail?.canvasId) return;
-
-      const conversationScope =
-        readPersistedWorkbenchConversationScope();
-      if (
-        shouldPromoteWorkbenchChatScopeOnCanvasSave(detail, conversationScope)
-      ) {
-        suppressNextWorkbenchScopePrompt(8);
-        const scopeRef = buildWorkbenchChatScopeAfterCanvasSave(detail);
-        setWorkbenchChatScopeRef(scopeRef);
-        setWorkbenchSavedCanvasId(detail.canvasId);
-        setWorkbenchScopePinned(false);
-        setPendingScopeSwitchTarget(null);
-        setScopeMismatchActions(null);
-        const canvasDraftScope = draftScopeIdForCanvasTab(detail.canvasId);
-        setActiveWorkbenchDraftScope(canvasDraftScope);
-        rememberWorkbenchDraftTab(canvasDraftScope, detail.canvasId);
-        lastSyncedWorkbenchScopeKeyRef.current = `canvas:${detail.canvasId}`;
-        dispatchWorkbenchBindCanvas(detail.canvasId);
-        return;
-      }
-
-      if (detail.draftScopeId) {
-        const activeDraft = getOrCreateActiveWorkbenchDraftScope();
-        if (detail.draftScopeId === activeDraft) {
-          setWorkbenchSavedCanvasId(detail.canvasId);
-        }
-      }
-    };
-    const onBind = (e: Event) => {
-      const canvasId = (e as CustomEvent<{ canvasId?: string }>).detail?.canvasId;
-      if (canvasId) setWorkbenchSavedCanvasId(canvasId);
-    };
-    window.addEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
-    window.addEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
-    return () => {
-      window.removeEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
-      window.removeEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
-    };
-  }, [chatType, setWorkbenchChatScopeRef]);
-
-  useEffect(() => {
     setSuggestedQuestions(defaultSuggestionsForChatType(chatType));
   }, [chatType]);
 
@@ -644,6 +752,121 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       return null;
     }
   }, [tenantId]);
+
+  useEffect(() => {
+    if (chatType !== "workbench") return;
+    const onSaved = (e: Event) => {
+      const detail = (e as CustomEvent<WorkbenchCanvasSavedDetail>).detail;
+      if (!detail?.canvasId) return;
+
+      const activeConversationId =
+        sessionIdRef.current ??
+        activeStreamConversationRef.current ??
+        viewingSessionRef.current;
+
+      const promoteScopeAfterCanvasSave = () => {
+        suppressNextWorkbenchScopePrompt(8);
+        const scopeRef = buildWorkbenchChatScopeAfterCanvasSave(detail);
+        setWorkbenchChatScopeRef(scopeRef);
+        setWorkbenchSavedCanvasId(detail.canvasId);
+        setWorkbenchScopePinned(false);
+        setPendingScopeSwitchTarget(null);
+        setScopeMismatchActions(null);
+        const canvasDraftScope = draftScopeIdForCanvasTab(detail.canvasId);
+        setActiveWorkbenchDraftScope(canvasDraftScope);
+        rememberWorkbenchDraftTab(canvasDraftScope, detail.canvasId);
+        if (detail.draftScopeId) {
+          rememberWorkbenchDraftTab(detail.draftScopeId, detail.canvasId);
+        }
+        const canvasScopeKey = `canvas:${detail.canvasId}`;
+        workbenchFreshThreadScopeKeyRef.current = canvasScopeKey;
+        lastSyncedWorkbenchScopeKeyRef.current = canvasScopeKey;
+        if (activeConversationId) {
+          workbenchCanvasSavePreserveRef.current = {
+            conversationId: activeConversationId,
+            until: Date.now() + 120_000,
+          };
+          viewingSessionRef.current = activeConversationId;
+          sessionIdRef.current = activeConversationId;
+          setSessionId(activeConversationId);
+          if (messagesRef.current.length > 0) {
+            pinWorkbenchTranscript(activeConversationId, messagesRef.current);
+          }
+          scheduleWorkbenchTranscriptRefresh(activeConversationId);
+        }
+        dispatchWorkbenchBindCanvas(detail.canvasId);
+      };
+
+      const conversationScope =
+        readPersistedWorkbenchConversationScope();
+      const shouldPromote =
+        shouldPromoteWorkbenchChatScopeOnCanvasSave(detail, conversationScope) ||
+        (!!activeConversationId &&
+          messagesRef.current.length > 0 &&
+          !!detail.draftScopeId);
+
+      if (shouldPromote) {
+        promoteScopeAfterCanvasSave();
+        if (activeConversationId && typeof window !== "undefined") {
+          void (async () => {
+            try {
+              const effectiveTenantId = await getEffectiveTenantId();
+              if (!effectiveTenantId) return;
+              const client = createUnifiedChatClient(
+                tenantId ?? effectiveTenantId,
+              );
+              await client.rebindConversation(activeConversationId, {
+                scope: { type: "canvas", id: detail.canvasId },
+                chat_type: "workbench",
+              });
+            } catch (err) {
+              console.warn(
+                "[useCohiChat] rebind conversation after canvas save:",
+                err,
+              );
+            }
+          })();
+        }
+        return;
+      }
+
+      if (detail.draftScopeId) {
+        const activeDraft = getOrCreateActiveWorkbenchDraftScope();
+        if (detail.draftScopeId === activeDraft) {
+          setWorkbenchSavedCanvasId(detail.canvasId);
+          const canvasScopeKey = `canvas:${detail.canvasId}`;
+          workbenchFreshThreadScopeKeyRef.current = canvasScopeKey;
+          lastSyncedWorkbenchScopeKeyRef.current = canvasScopeKey;
+          if (activeConversationId) {
+            workbenchCanvasSavePreserveRef.current = {
+              conversationId: activeConversationId,
+              until: Date.now() + 120_000,
+            };
+            if (messagesRef.current.length > 0) {
+              pinWorkbenchTranscript(activeConversationId, messagesRef.current);
+            }
+            scheduleWorkbenchTranscriptRefresh(activeConversationId);
+          }
+        }
+      }
+    };
+    const onBind = (e: Event) => {
+      const canvasId = (e as CustomEvent<{ canvasId?: string }>).detail?.canvasId;
+      if (canvasId) setWorkbenchSavedCanvasId(canvasId);
+    };
+    window.addEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
+    window.addEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
+    return () => {
+      window.removeEventListener(WORKBENCH_CANVAS_SAVED_EVENT, onSaved);
+      window.removeEventListener(COHI_WORKBENCH_BIND_CANVAS_EVENT, onBind);
+    };
+  }, [
+    chatType,
+    setWorkbenchChatScopeRef,
+    getEffectiveTenantId,
+    tenantId,
+    pinWorkbenchTranscript,
+  ]);
 
   // Resolve linked conversation titles when we only have fork UUIDs (e.g. mid-fork UI).
   useEffect(() => {
@@ -754,12 +977,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       metadata: Record<string, unknown> | undefined,
       userQuestion: string,
       activeChatType: UnifiedChatType,
+      messagesOverride?: ChatMessage[],
     ) => {
-      let snapshot: ChatMessage[] = [];
-      applyMessagesForStream(conversationId, (prev) => {
-        snapshot = prev;
-        return prev;
-      });
+      let snapshot: ChatMessage[] = messagesOverride ?? [];
+      if (!messagesOverride) {
+        applyMessagesForStream(conversationId, (prev) => {
+          snapshot = prev;
+          return prev;
+        });
+      }
       const updated = await import("@/lib/applyPresentationExportAfterTurn").then(
         (m) =>
           m.applyPresentationExportAfterTurn({
@@ -772,7 +998,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               presentationExportHandlers?.onOpenWorkbenchEditor,
           }),
       );
-      applyMessagesForStream(conversationId, () => updated);
+      if (messagesOverride || viewingSessionRef.current === conversationId) {
+        applyMessagesForStream(conversationId, () => updated);
+      }
     },
     [applyMessagesForStream, presentationExportHandlers],
   );
@@ -789,17 +1017,24 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         activeResearchSessionIdRef.current = bound;
         setLegacyRef(bound);
       }
-      try {
-        const row = await client.getConversation(conversationId);
-        if (row.legacy_ref) {
-          activeResearchSessionIdRef.current = row.legacy_ref;
-          setLegacyRef(row.legacy_ref);
+      const loadForkLinks = async (attempt = 0): Promise<void> => {
+        try {
+          const row = await client.getConversation(conversationId);
+          if (row.legacy_ref) {
+            activeResearchSessionIdRef.current = row.legacy_ref;
+            setLegacyRef(row.legacy_ref);
+          }
+          const links = forkLinksFromConversationRow(row);
+          if (links) setConversationForkLinks(links);
+        } catch (err) {
+          if (attempt < 4) {
+            await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+            return loadForkLinks(attempt + 1);
+          }
+          console.warn("[CohiChat] Failed to bind research session:", err);
         }
-        const links = forkLinksFromConversationRow(row);
-        if (links) setConversationForkLinks(links);
-      } catch (err) {
-        console.warn("[CohiChat] Failed to bind research session:", err);
-      }
+      };
+      void loadForkLinks();
     },
     [],
   );
@@ -834,8 +1069,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       const hasDatasetOnly = !!datasetIds && !question.trim();
       if (!question.trim() && !hasDatasetOnly) return;
 
-      if (chatType === "workbench") {
-        workbenchFreshThreadScopeKeyRef.current = null;
+      if (chatType === "workbench" && !options?.forceNewConversation) {
+        const ctx = getLatestWorkbenchActiveContext();
+        if (ctx) {
+          const scopeRef = activeContextToScopeRef(ctx);
+          workbenchFreshThreadScopeKeyRef.current = `${scopeRef.type}:${scopeRef.id}`;
+        }
       }
 
       const forceNew = options?.forceNewConversation ?? false;
@@ -968,6 +1207,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
           const beginStreamRun = (conversationId: string) => {
             streamConversationIdForRun = conversationId;
+            activeStreamConversationRef.current = conversationId;
+            viewingSessionRef.current = conversationId;
+            sessionIdRef.current = conversationId;
             useUnifiedChatRunStore.getState().startRun({
               conversationId,
               title: effectiveQuestion.slice(0, 120),
@@ -975,11 +1217,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               startedAt: Date.now(),
             });
             setLoadingForStream(conversationId, true);
+            setIsLoading(true);
           };
 
           const endStreamRun = (conversationId: string) => {
             useUnifiedChatRunStore.getState().endRun(conversationId);
             setLoadingForStream(conversationId, false);
+            if (activeStreamConversationRef.current === conversationId) {
+              activeStreamConversationRef.current = null;
+            }
           };
 
           if (chatType === "workbench") {
@@ -1024,10 +1270,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 );
               },
             });
-            setSessionId(conversationId);
-            if (viewingSessionRef.current === conversationId) {
-              viewingSessionRef.current = conversationId;
-            }
+            const resolvedConversationId = reconcileStreamConversationId(
+              streamConversationId,
+              conversationId,
+            );
 
             const gatedActions = gateWorkbenchActionsForUserQuestion(
               parsed.actions,
@@ -1041,42 +1287,66 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                     draftScopeId,
                     autoApply,
                     scopeRef,
-                    conversationId,
+                    resolvedConversationId,
                   )
                 : 0;
 
-            const assistantMessage: ChatMessage = {
-              id: assistantMessageId,
-              role: "assistant",
-              content: parsed.error
-                ? `${parsed.message}\n${parsed.error}`
-                : parsed.message,
-              timestamp: new Date(),
-              workbenchActions:
-                gatedActions.length > 0 ? gatedActions : undefined,
-              workbenchActionsAppliedCount: appliedCount,
-              workbenchPendingActions:
-                pendingConfirmation.length > 0 ? pendingConfirmation : undefined,
-            };
-            applyMessagesForStream(streamConversationId, (prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId ? assistantMessage : m,
-              ),
+            const messagesAfterTurn = finalizeWorkbenchAssistantMessage(
+              resolvedConversationId,
+              assistantMessageId,
+              {
+                content: parsed.error
+                  ? `${parsed.message}\n${parsed.error}`
+                  : parsed.message,
+                timestamp: new Date(),
+                workbenchActions:
+                  gatedActions.length > 0 ? gatedActions : undefined,
+                workbenchActionsAppliedCount: appliedCount,
+                workbenchPendingActions:
+                  pendingConfirmation.length > 0
+                    ? pendingConfirmation
+                    : undefined,
+              },
             );
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
-            void client.getConversation(conversationId).then((row) => {
+            const pptMeta = parsePresentationExportMetadata(streamMetadata);
+            const wantsWorkbenchPpt =
+              isWorkbenchPresentationChatRequest(effectiveQuestion) ||
+              pptMeta?.wantsPresentationExport === true ||
+              streamMetadata?.openReportBuilder === true ||
+              autoApply.some((a) => a.type === "generate_report");
+            if (wantsWorkbenchPpt) {
+              requestOpenWorkbenchReportBuilderFromChat({
+                messages: messagesAfterTurn,
+                assistantMessageId,
+                userQuestion: effectiveQuestion,
+                mode: pptMeta?.mode ?? "create",
+              });
+            }
+            void client.getConversation(resolvedConversationId).then((row) => {
               const links = forkLinksFromConversationRow(row);
               if (links) setConversationForkLinks(links);
             });
-            endStreamRun(streamConversationId);
+            endStreamRun(resolvedConversationId);
+            workbenchCanvasSavePreserveRef.current = {
+              conversationId: resolvedConversationId,
+              until: Date.now() + 120_000,
+            };
+            if (messagesAfterTurn.length > 0) {
+              pinWorkbenchTranscript(resolvedConversationId, messagesAfterTurn);
+            }
+            workbenchFreshThreadScopeKeyRef.current = `${scopeRef.type}:${scopeRef.id}`;
+            lastSyncedWorkbenchScopeKeyRef.current =
+              workbenchFreshThreadScopeKeyRef.current;
             void runPresentationExportAfterTurn(
-              streamConversationId,
+              resolvedConversationId,
               assistantMessageId,
               streamMetadata,
               effectiveQuestion,
               "workbench",
+              messagesAfterTurn,
             );
           } else {
             const ibOpts = options?.insightBuilder;
@@ -1149,7 +1419,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 );
               },
             });
-            setSessionId(conversationId);
+            const resolvedConversationId = reconcileStreamConversationId(
+              streamConversationId,
+              conversationId,
+            );
             const researchHandoffMessage =
               researchPollMode && parsed.message
                 ? parsed.message
@@ -1170,7 +1443,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               insightBuilderPhase: parsed.insightBuilderPhase,
               visualizationArtifactId: parsed.visualizationArtifactId,
             };
-            applyMessagesForStream(streamConversationId, (prev) =>
+            applyMessagesForStream(resolvedConversationId, (prev) =>
               prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
             );
             if (parsed.suggestedQuestions?.length) {
@@ -1179,18 +1452,18 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             if (chatType === "research") {
               await bindResearchSessionAfterStream(
                 client,
-                conversationId,
+                resolvedConversationId,
                 researchSessionId,
               );
             } else {
-              void client.getConversation(conversationId).then((row) => {
+              void client.getConversation(resolvedConversationId).then((row) => {
                 const links = forkLinksFromConversationRow(row);
                 if (links) setConversationForkLinks(links);
               });
             }
-            endStreamRun(streamConversationId);
+            endStreamRun(resolvedConversationId);
             void runPresentationExportAfterTurn(
-              streamConversationId,
+              resolvedConversationId,
               assistantMessageId,
               streamMetadata,
               effectiveQuestion,
@@ -1477,31 +1750,48 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                     conversationId,
                   )
                 : 0;
-            const assistantMessage: ChatMessage = {
-              id: assistantMessageId,
-              role: "assistant",
-              content: parsed.error
-                ? `${parsed.message}\n${parsed.error}`
-                : parsed.message,
-              timestamp: new Date(),
-              workbenchActions:
-                gatedActions.length > 0 ? gatedActions : undefined,
-              workbenchActionsAppliedCount: appliedCount,
-              workbenchPendingActions:
-                pendingConfirmation.length > 0 ? pendingConfirmation : undefined,
-            };
-            const applyFinal = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
-              if (streamConversationId) {
-                applyMessagesForStream(streamConversationId, updater);
-              } else {
-                setMessages(updater);
-              }
-            };
-            applyFinal((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId ? assistantMessage : m,
-              ),
-            );
+            if (streamConversationId) {
+              finalizeWorkbenchAssistantMessage(
+                streamConversationId,
+                assistantMessageId,
+                {
+                  content: parsed.error
+                    ? `${parsed.message}\n${parsed.error}`
+                    : parsed.message,
+                  timestamp: new Date(),
+                  workbenchActions:
+                    gatedActions.length > 0 ? gatedActions : undefined,
+                  workbenchActionsAppliedCount: appliedCount,
+                  workbenchPendingActions:
+                    pendingConfirmation.length > 0
+                      ? pendingConfirmation
+                      : undefined,
+                },
+              );
+            } else {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMessageId
+                    ? {
+                        id: assistantMessageId,
+                        role: "assistant",
+                        content: parsed.error
+                          ? `${parsed.message}\n${parsed.error}`
+                          : parsed.message,
+                        timestamp: new Date(),
+                        isLoading: false,
+                        workbenchActions:
+                          gatedActions.length > 0 ? gatedActions : undefined,
+                        workbenchActionsAppliedCount: appliedCount,
+                        workbenchPendingActions:
+                          pendingConfirmation.length > 0
+                            ? pendingConfirmation
+                            : undefined,
+                      }
+                    : m,
+                ),
+              );
+            }
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
@@ -1709,6 +1999,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       workbenchSavedCanvasId,
       tryDeliverWorkbenchWidgetActions,
       setWorkbenchChatScopeRef,
+      pinWorkbenchTranscript,
+      finalizeWorkbenchAssistantMessage,
     ]
   );
   const clearMessages = useCallback(() => {
@@ -1965,7 +2257,32 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       scope?: { type: string; id?: string };
     }> => {
       const generation = ++loadSessionGenerationRef.current;
-      if (sessionId !== targetSessionId) {
+      const isActiveThread =
+        viewingSessionRef.current === targetSessionId ||
+        sessionIdRef.current === targetSessionId ||
+        activeStreamConversationRef.current === targetSessionId;
+      const inMemoryMessages = messagesRef.current;
+      const pinnedTranscript =
+        workbenchPinnedTranscriptRef.current &&
+        Date.now() < workbenchPinnedTranscriptRef.current.until &&
+        workbenchPinnedTranscriptRef.current.conversationId === targetSessionId
+          ? workbenchPinnedTranscriptRef.current
+          : null;
+      const preserveInMemoryOnFailure =
+        (isActiveThread && inMemoryMessages.length > 0) ||
+        (!!pinnedTranscript && pinnedTranscript.messages.length > 0);
+      const canvasSavePreserve =
+        workbenchCanvasSavePreserveRef.current &&
+        Date.now() < workbenchCanvasSavePreserveRef.current.until &&
+        workbenchCanvasSavePreserveRef.current.conversationId ===
+          targetSessionId;
+      if (
+        !preserveInMemoryOnFailure &&
+        !canvasSavePreserve &&
+        !pinnedTranscript &&
+        !isActiveThread &&
+        sessionId !== targetSessionId
+      ) {
         setMessages([]);
       }
       setLoadingSessionId(targetSessionId);
@@ -2028,10 +2345,16 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                   turn: { id: messageId, blocks },
                   metadata: m.metadata,
                 });
+                const legacyContent =
+                  typeof m.content === "string" ? m.content.trim() : "";
+                let content = wb.message?.trim() ?? "";
+                if (isGenericWorkbenchAck(content) && legacyContent) {
+                  content = legacyContent;
+                }
                 return {
                   id: messageId,
                   role: "assistant" as const,
-                  content: wb.message,
+                  content,
                   timestamp: new Date(m.at ?? Date.now()),
                   workbenchActions: wb.actions,
                 };
@@ -2066,7 +2389,64 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           if (generation !== loadSessionGenerationRef.current) {
             return { datasetUploadIds: [] };
           }
-          setMessages(hydratedMessages);
+          let messagesToApply = hydratedMessages;
+          if (
+            loadedChatType === "workbench" &&
+            (preserveInMemoryOnFailure || canvasSavePreserve || pinnedTranscript)
+          ) {
+            const memAssistant = [...inMemoryMessages]
+              .reverse()
+              .find((m) => m.role === "assistant");
+            if (memAssistant?.content?.trim()) {
+              const lastAssistantIdx = messagesToApply.reduce(
+                (acc, m, i) => (m.role === "assistant" ? i : acc),
+                -1,
+              );
+              if (lastAssistantIdx >= 0) {
+                const hyd = messagesToApply[lastAssistantIdx];
+                if (!hyd.content?.trim()) {
+                  messagesToApply = messagesToApply.map((m, i) =>
+                    i === lastAssistantIdx
+                      ? {
+                          ...hyd,
+                          content: memAssistant.content,
+                          workbenchActions:
+                            hyd.workbenchActions ?? memAssistant.workbenchActions,
+                          workbenchActionsAppliedCount:
+                            hyd.workbenchActionsAppliedCount ??
+                            memAssistant.workbenchActionsAppliedCount,
+                          workbenchPendingActions:
+                            hyd.workbenchPendingActions ??
+                            memAssistant.workbenchPendingActions,
+                        }
+                      : m,
+                  );
+                }
+              } else if (messagesToApply.length === 0) {
+                messagesToApply = inMemoryMessages;
+              }
+            }
+          }
+          if (
+            messagesToApply.length === 0 &&
+            (preserveInMemoryOnFailure || canvasSavePreserve || pinnedTranscript)
+          ) {
+            if (inMemoryMessages.length === 0 && pinnedTranscript) {
+              setMessages(pinnedTranscript.messages);
+            }
+            setSessionId(targetSessionId);
+            viewingSessionRef.current = targetSessionId;
+            sessionIdRef.current = targetSessionId;
+            return {
+              datasetUploadIds: row.dataset_upload_ids ?? [],
+              chatType: loadedChatType,
+              scope: rowScope,
+            };
+          }
+          setMessages(messagesToApply);
+          if (loadedChatType === "workbench" && messagesToApply.length > 0) {
+            pinWorkbenchTranscript(targetSessionId, messagesToApply);
+          }
           if (presentationMetaTurns.length > 0 && loadedChatType !== "workbench") {
             void enrichVizPresentationExportsOnLoad(
               hydratedMessages,
@@ -2143,6 +2523,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         return { datasetUploadIds: [], chatType };
       } catch (error) {
         console.error("[CohiChat] Failed to load session:", error);
+        if (preserveInMemoryOnFailure || canvasSavePreserve || pinnedTranscript) {
+          if (inMemoryMessages.length === 0 && pinnedTranscript) {
+            setMessages(pinnedTranscript.messages);
+          }
+          viewingSessionRef.current = targetSessionId;
+          sessionIdRef.current = targetSessionId;
+          setSessionId(targetSessionId);
+        }
         return { datasetUploadIds: [] };
       } finally {
         if (generation === loadSessionGenerationRef.current) {
@@ -2150,7 +2538,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         }
       }
     },
-    [getEffectiveTenantId, tenantId, chatType, sessionId, setWorkbenchChatScopeRef],
+    [
+      getEffectiveTenantId,
+      tenantId,
+      chatType,
+      sessionId,
+      setWorkbenchChatScopeRef,
+      pinWorkbenchTranscript,
+    ],
   );
 
   const syncWorkbenchChatToActiveContext = useCallback(
@@ -2161,11 +2556,27 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       const scopeRef = activeContextToScopeRef(ctx);
       const scopeKey = `${scopeRef.type}:${scopeRef.id}`;
       const loadLatestThread = options?.loadLatestThread !== false;
+      const activeConversationId =
+        sessionIdRef.current ??
+        activeStreamConversationRef.current ??
+        viewingSessionRef.current;
+      const hasActiveInMemoryThread =
+        messagesRef.current.length > 0 && !!activeConversationId;
+      const canvasSavePreserve =
+        workbenchCanvasSavePreserveRef.current &&
+        Date.now() < workbenchCanvasSavePreserveRef.current.until &&
+        !!activeConversationId &&
+        workbenchCanvasSavePreserveRef.current.conversationId ===
+          activeConversationId;
       if (
         workbenchFreshThreadScopeKeyRef.current &&
         workbenchFreshThreadScopeKeyRef.current !== scopeKey
       ) {
-        workbenchFreshThreadScopeKeyRef.current = null;
+        if (hasActiveInMemoryThread) {
+          workbenchFreshThreadScopeKeyRef.current = scopeKey;
+        } else {
+          workbenchFreshThreadScopeKeyRef.current = null;
+        }
       }
       if (
         !options?.forceReload &&
@@ -2178,7 +2589,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       }
       const skipAutoLoad =
         !loadLatestThread ||
-        workbenchFreshThreadScopeKeyRef.current === scopeKey;
+        workbenchFreshThreadScopeKeyRef.current === scopeKey ||
+        hasActiveInMemoryThread ||
+        canvasSavePreserve;
       if (!loadLatestThread) {
         workbenchFreshThreadScopeKeyRef.current = scopeKey;
       }
@@ -2205,9 +2618,27 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       }
 
       if (skipAutoLoad) {
-        viewingSessionRef.current = null;
-        setSessionId(null);
-        setConversationForkLinks(null);
+        if (activeConversationId && messagesRef.current.length > 0) {
+          viewingSessionRef.current = activeConversationId;
+          sessionIdRef.current = activeConversationId;
+          setSessionId(activeConversationId);
+          pinWorkbenchTranscript(activeConversationId, messagesRef.current);
+        } else if (
+          activeConversationId &&
+          (canvasSavePreserve || workbenchPinnedTranscriptRef.current)
+        ) {
+          viewingSessionRef.current = activeConversationId;
+          sessionIdRef.current = activeConversationId;
+          setSessionId(activeConversationId);
+          const pinned =
+            workbenchPinnedTranscriptRef.current?.conversationId ===
+            activeConversationId
+              ? workbenchPinnedTranscriptRef.current.messages
+              : null;
+          if (pinned && pinned.length > 0) {
+            setMessages(pinned);
+          }
+        }
         void fetchSessions();
         return;
       }
@@ -2243,20 +2674,38 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               new Date(b.updated_at).getTime() -
               new Date(a.updated_at).getTime(),
           );
+        const currentConversationId =
+          sessionIdRef.current ??
+          activeStreamConversationRef.current ??
+          viewingSessionRef.current;
         if (rows[0]?.id) {
+          if (
+            currentConversationId &&
+            rows[0].id === currentConversationId
+          ) {
+            void fetchSessions();
+            return;
+          }
+          if (
+            (hasActiveInMemoryThread || canvasSavePreserve) &&
+            !options?.forceReload
+          ) {
+            void fetchSessions();
+            return;
+          }
+          if (
+            canvasSavePreserve &&
+            currentConversationId &&
+            rows[0].id !== currentConversationId
+          ) {
+            void fetchSessions();
+            return;
+          }
           await loadSession(rows[0].id);
-        } else {
-          viewingSessionRef.current = null;
-          setSessionId(null);
-          setMessages([]);
-          setConversationForkLinks(null);
         }
         void fetchSessions();
       } catch (err) {
         console.warn("[useCohiChat] syncWorkbenchChatToActiveContext:", err);
-        viewingSessionRef.current = null;
-        setSessionId(null);
-        setMessages([]);
       }
     },
     [
@@ -2267,6 +2716,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       fetchSessions,
       sessionId,
       workbenchChatScope,
+      pinWorkbenchTranscript,
     ],
   );
 
@@ -2391,6 +2841,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    * Start a new session
    */
   const newSession = useCallback(async () => {
+    workbenchCanvasSavePreserveRef.current = null;
+    workbenchPinnedTranscriptRef.current = null;
     clearMessages();
     viewingSessionRef.current = null;
     setSessionId(null);
@@ -2438,9 +2890,43 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     chatType,
   ]);
 
-  const isSessionRunning = useUnifiedChatRunStore((s) =>
-    sessionId ? !!s.runs[sessionId] : false,
+  /** Any in-flight stream (sessionId may lag behind startRun for new conversations). */
+  const isSessionRunning = useUnifiedChatRunStore(
+    (s) =>
+      s.runningIds().length > 0 ||
+      (!!sessionId && !!s.runs[sessionId]),
   );
+
+  /** After stream ends: clear stuck loading flag or backfill text (never generic ack). */
+  useEffect(() => {
+    if (chatType !== "workbench") return;
+    if (useUnifiedChatRunStore.getState().runningIds().length > 0) return;
+    if (isLoading) return;
+
+    const needsFix = messages.some((m) => {
+      if (m.role !== "assistant") return false;
+      const applied = m.workbenchActionsAppliedCount ?? 0;
+      return applied > 0 && !m.content?.trim();
+    });
+    if (!needsFix) return;
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.role !== "assistant") return m;
+        const applied = m.workbenchActionsAppliedCount ?? 0;
+        if (!m.content?.trim() && applied > 0) {
+          return {
+            ...m,
+            isLoading: false,
+            content: resolveWorkbenchAssistantContent({
+              appliedCount: applied,
+            }),
+          };
+        }
+        return m;
+      }),
+    );
+  }, [chatType, isLoading, messages]);
 
   return {
     messages,

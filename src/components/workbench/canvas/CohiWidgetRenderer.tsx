@@ -350,13 +350,13 @@ function resolveChartKeys(config: VisualizationConfig, chartData: any[]): Resolv
     ? config.valueKey!
     : fuzzyMatch(config.valueKey) || numericCols[0] || cols[1];
 
-  // Log when resolution was needed (helps debugging in dev)
   if (
-    (config.xKey && config.xKey !== xKey) ||
-    (config.yKey && config.yKey !== yKey)
+    import.meta.env.DEV &&
+    ((config.xKey && config.xKey !== xKey) ||
+      (config.yKey && config.yKey !== yKey))
   ) {
-    console.warn(
-      `[CohiWidget] Key resolution: xKey ${config.xKey} → ${xKey}, yKey ${config.yKey} → ${yKey}. Columns: [${cols.join(', ')}]`,
+    console.debug(
+      `[CohiWidget] Key resolution: xKey ${config.xKey} → ${xKey}, yKey ${config.yKey} → ${yKey}. Columns: [${cols.join(", ")}]`,
     );
   }
 

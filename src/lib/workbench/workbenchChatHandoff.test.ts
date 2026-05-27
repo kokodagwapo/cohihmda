@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   consumePendingWorkbenchActions,
   deliverWorkbenchWidgetActions,
@@ -8,6 +8,8 @@ import {
   gateWorkbenchActionsForUserQuestion,
   describeWorkbenchActionsApplied,
   formatWorkbenchSectionKey,
+  isGenericWorkbenchAck,
+  resolveWorkbenchAssistantContent,
   shouldForceNewWorkbenchConversation,
   shouldForkOnChatTypeChange,
   generateWorkbenchDraftScopeId,
@@ -93,6 +95,29 @@ describe("workbenchChatHandoff", () => {
         userTurnCount: 0,
       }),
     ).toBe(false);
+  });
+
+  it("isGenericWorkbenchAck rejects parser placeholder", () => {
+    expect(isGenericWorkbenchAck("I processed your request.")).toBe(true);
+    expect(isGenericWorkbenchAck("")).toBe(true);
+    expect(
+      isGenericWorkbenchAck("Added KPIs to your dashboard."),
+    ).toBe(false);
+  });
+
+  it("resolveWorkbenchAssistantContent prefers real text over generic ack", () => {
+    expect(
+      resolveWorkbenchAssistantContent({
+        parsedContent: "I processed your request.",
+        streamedContent: "Building your dashboard now.",
+      }),
+    ).toBe("Building your dashboard now.");
+    expect(
+      resolveWorkbenchAssistantContent({
+        parsedContent: "I processed your request.",
+        appliedCount: 6,
+      }),
+    ).toBe("Applied 6 widgets to canvas.");
   });
 
   it("describeWorkbenchActionsApplied distinguishes group updates from creates", () => {
@@ -333,6 +358,27 @@ describe("workbenchChatHandoff", () => {
     await Promise.resolve();
     expect(received).toEqual(["conv-123"]);
     window.removeEventListener("cohi-chat-resume", handler);
+  });
+
+  it("scheduleWorkbenchTranscriptRefresh retries cohi-chat-resume", async () => {
+    vi.useFakeTimers();
+    const { scheduleWorkbenchTranscriptRefresh } = await import(
+      "./workbenchChatHandoff"
+    );
+    const received: string[] = [];
+    const handler = (e: Event) => {
+      received.push((e as CustomEvent).detail.conversationId);
+    };
+    window.addEventListener("cohi-chat-resume", handler);
+    scheduleWorkbenchTranscriptRefresh("conv-456");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(received).toEqual(["conv-456"]);
+    await vi.advanceTimersByTimeAsync(800);
+    expect(received.filter((id) => id === "conv-456")).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(received.filter((id) => id === "conv-456")).toHaveLength(3);
+    window.removeEventListener("cohi-chat-resume", handler);
+    vi.useRealTimers();
   });
 
   it("stashChatPptSeed is consumed once per canvas id", () => {

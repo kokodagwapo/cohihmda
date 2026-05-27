@@ -211,7 +211,7 @@ export async function sendUnifiedWorkbenchStream(
       ? result.blocks
       : streamText
         ? [{ type: "text", markdown: streamText }]
-        : [{ type: "text", markdown: "I processed your request." }];
+        : [];
 
   const { blocks, suggestedQuestions: repairedSuggestions } =
     repairWorkbenchBlocks(rawBlocks);

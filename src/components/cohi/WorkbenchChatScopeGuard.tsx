@@ -165,9 +165,8 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
       if (suppressed) {
         lastHandledContextKeyRef.current = ctxKey;
         if (!workbenchScopePinned) {
-          void syncChatToActiveCanvas(ctx, {
-            loadLatestThread: ctx.isSavedCanvas,
-          });
+          // After canvas save / bind: update scope only — do not swap threads.
+          void syncChatToActiveCanvas(ctx, { loadLatestThread: false });
         }
         return;
       }
@@ -175,7 +174,7 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
       if (scopeAligned) {
         lastHandledContextKeyRef.current = ctxKey;
         if (!workbenchScopePinned) {
-          void syncChatToActiveCanvas(ctx);
+          void syncChatToActiveCanvas(ctx, { loadLatestThread: false });
         }
         return;
       }
@@ -185,7 +184,7 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
       // UI "New canvas" / unsaved tabs: chat follows the tab; only prompt between saved canvases.
       if (isGreenfieldWorkbenchTab(ctx)) {
         if (!workbenchScopePinned) {
-          void syncChatToActiveCanvas(ctx);
+          void syncChatToActiveCanvas(ctx, { loadLatestThread: false });
         } else {
           queueScopeSwitchPrompt(ctx);
         }

@@ -510,6 +510,7 @@ export default function MyDashboard() {
       return prev.includes(savedId) ? prev : [...prev, savedId];
     });
     setActiveTabId(savedId);
+    setLoadCanvasId(savedId);
     setTabTitles((prev) => ({ ...prev, [savedId]: title }));
     setTabDraftScopes((prev) => {
       const next = { ...prev };

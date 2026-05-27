@@ -1053,7 +1053,6 @@ async function handleResearchStream(
   }
 
   legacyRef = result.legacyRef;
-  res.end();
 
   if (process.env.UNIFIED_CHAT_PERSIST !== "false") {
     try {
@@ -1080,6 +1079,8 @@ async function handleResearchStream(
       console.warn("[chat/v1 research stream] Persist skipped:", persistErr?.message);
     }
   }
+
+  res.end();
 }
 
 async function handlePostMessage(
@@ -1295,16 +1296,23 @@ async function handlePostMessage(
     res.setHeader("X-Accel-Buffering", "no");
     (res as Response & { flushHeaders?: () => void }).flushHeaders?.();
 
+    const streamTurnMetadata: Record<string, unknown> = {
+      suggestedQuestions: (result.metadata?.suggestedQuestions as string[]) ?? [],
+      chatType: result.metadata?.chatType,
+      promptHash: result.metadata?.promptHash,
+    };
+    if (result.metadata?.presentationExport != null) {
+      streamTurnMetadata.presentationExport = result.metadata.presentationExport;
+    }
+    if (result.metadata?.openReportBuilder === true) {
+      streamTurnMetadata.openReportBuilder = true;
+    }
     emitValidatedStreamWithDeltas(
       res,
       result.conversationId,
       result.turn.id,
       result.turn.blocks as Array<Record<string, unknown>>,
-      {
-        suggestedQuestions: (result.metadata?.suggestedQuestions as string[]) ?? [],
-        chatType: result.metadata?.chatType,
-        promptHash: result.metadata?.promptHash,
-      },
+      streamTurnMetadata,
     );
     res.end();
   } catch (err: any) {
