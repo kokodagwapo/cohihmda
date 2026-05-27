@@ -789,3 +789,109 @@ export function generateWorkbenchDraftScopeId(): string {
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
+
+export const COHI_RESEARCH_PPT_EXPORT_EVENT = "cohi-research-ppt-export";
+
+export const COHI_OPEN_WORKBENCH_PPT_EDITOR_EVENT = "cohi-open-workbench-ppt-editor";
+
+/** Ask unified research workspace to run full report PPT export (same as Export PPT button). */
+export function dispatchResearchPptExport(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(COHI_RESEARCH_PPT_EXPORT_EVENT));
+}
+
+export function dispatchOpenWorkbenchPptEditor(
+  detail: Omit<OpenWorkbenchPowerPointEditorOptions, "navigate">,
+): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(COHI_OPEN_WORKBENCH_PPT_EDITOR_EVENT, { detail }),
+  );
+}
+
+export type OpenWorkbenchPowerPointEditorOptions = {
+  navigate: NavigateFunction;
+  messages: Array<{
+    id: string;
+    role: string;
+    visualization?: import("@/hooks/useCohiChat").VisualizationConfig;
+  }>;
+  mode?: import("@/lib/presentationExportIntent").PresentationExportMode;
+  latestAssistantId?: string;
+  userQuestion?: string;
+};
+
+/**
+ * NL workbench path: open Report Builder on the current canvas (optional viz seed).
+ */
+export async function openWorkbenchPowerPointEditorFromChat(
+  options: OpenWorkbenchPowerPointEditorOptions,
+): Promise<void> {
+  const { navigate, messages, mode = "create", latestAssistantId } = options;
+  markWorkbenchChatSplitLayout();
+
+  const canvasId = getConnectedWorkbenchCanvasId();
+  const draftScopeId = canvasId
+    ? draftScopeIdForCanvasTab(canvasId)
+    : getOrCreateActiveWorkbenchDraftScope();
+
+  setActiveWorkbenchDraftScope(draftScopeId);
+  markWorkbenchCanvasNavBound();
+
+  const { resolvePresentationExportTargetMessage } =
+    await import("@/lib/pptMessageResolver");
+  const target = resolvePresentationExportTargetMessage(
+    messages as import("@/hooks/useCohiChat").ChatMessage[],
+    mode,
+    latestAssistantId,
+  );
+
+  if (target?.visualization && canvasId) {
+    const { buildChatVizExportContent } = await import(
+      "@/lib/chatVisualizationPptContent"
+    );
+    const { buildChatVisualizationReportDefinition } = await import(
+      "@/lib/chatVisualizationPptSeed"
+    );
+    const { captureChartAsBlob, blobToDataUrl } = await import(
+      "@/lib/captureChartForExport"
+    );
+
+    let chartImageDataUrl: string | undefined;
+    try {
+      const blob = await captureChartAsBlob(target.id);
+      if (blob) chartImageDataUrl = await blobToDataUrl(blob);
+    } catch {
+      /* optional capture */
+    }
+
+    const exportContent = buildChatVizExportContent({
+      viz: target.visualization,
+      title: target.visualization.title,
+      chartImageDataUrl,
+    });
+    stashChatPptSeed(
+      canvasId,
+      buildChatVisualizationReportDefinition(exportContent),
+    );
+  }
+
+  if (canvasId) {
+    dispatchWorkbenchFocusCanvas(canvasId);
+    navigate(`/my-dashboard/${canvasId}?reportBuilder=1`);
+    return;
+  }
+
+  navigateForWorkbenchChatSubmit(navigate, {
+    draftScopeId,
+    activateDraftScopeId: draftScopeId,
+  });
+  queueMicrotask(() => {
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      if (!path.includes("reportBuilder=1")) {
+        navigate(`${path.split("?")[0]}?reportBuilder=1`, { replace: true });
+      }
+    }
+  });
+}

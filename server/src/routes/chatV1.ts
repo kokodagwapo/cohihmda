@@ -1030,6 +1030,7 @@ async function handleResearchStream(
       legacyRef,
       deepAnalysis: body.options?.research?.deepAnalysis,
       uploadIds: mergeDatasetUploadIds(body),
+      history: body.history,
       policy,
       carryOver: readCarryOverContext(body),
       modeHandoff: readModeHandoffContext(body),
@@ -1062,6 +1063,7 @@ async function handleResearchStream(
         conversationId,
         userMessage: body.message,
         assistantBlocks: result.finalBlocks,
+        assistantMetadata: result.metadata,
         assistantTurnId: turnId,
         scopeType: body.scope?.type,
         scopeKey:
@@ -1211,6 +1213,7 @@ async function handlePostMessage(
             conversationId,
             userMessage: body.message,
             assistantBlocks: streamResult.blocks,
+            assistantMetadata: streamResult.metadata,
             assistantTurnId: turnId,
             scopeType: body.scope?.type,
             scopeKey:

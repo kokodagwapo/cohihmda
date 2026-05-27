@@ -481,6 +481,7 @@ router.get(
       isOwner,
       ownerEmail: isOwner ? "" : session.userEmail,
       ownerName: "",
+      pendingPresentationExport: !!session.pendingPresentationExport,
     });
   }
 );

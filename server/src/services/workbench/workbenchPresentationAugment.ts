@@ -2,6 +2,8 @@
  * Fallback generate_report when the model asks for live values instead of using canvas data.
  */
 
+import { presentationExportPrefilter } from "../chat/presentationExportIntent.js";
+
 export type CanvasWidgetDataEntry = {
   widgetName: string;
   category: string;
@@ -36,9 +38,10 @@ export function isReportRequest(
 ): boolean {
   const combined = texts
     .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
-    .join("\n")
-    .toLowerCase();
-  return /\b(report|presentation|powerpoint|pptx|pdf|slide|deck)\b/.test(combined);
+    .join("\n");
+  if (presentationExportPrefilter(combined)) return true;
+  const lower = combined.toLowerCase();
+  return /\bpdf\b/.test(lower);
 }
 
 export function extractPrimaryValue(data: unknown): number | string {

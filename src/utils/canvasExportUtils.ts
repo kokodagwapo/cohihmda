@@ -32,30 +32,40 @@ export async function captureChartAsImage(node: HTMLElement): Promise<Blob | nul
 
   try {
     const clone = svgEl.cloneNode(true) as SVGElement;
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
     clone.setAttribute('width', String(w));
     clone.setAttribute('height', String(h));
-    if (!clone.getAttribute('viewBox')) {
+    const viewBox = svgEl.getAttribute('viewBox');
+    if (viewBox) {
+      clone.setAttribute('viewBox', viewBox);
+    } else if (!clone.getAttribute('viewBox')) {
       clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
     }
+    // Drop shadow filters often fail when rasterizing standalone SVG → PNG.
+    clone.querySelectorAll('[filter]').forEach((node) => {
+      node.removeAttribute('filter');
+    });
     const svgString = new XMLSerializer().serializeToString(clone);
-    const dataUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgString)));
+    const dataUrl =
+      'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
 
     return new Promise<Blob | null>((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         try {
+          const scale = 2;
           const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
+          canvas.width = w * scale;
+          canvas.height = h * scale;
           const ctx = canvas.getContext('2d');
           if (!ctx) {
             resolve(null);
             return;
           }
           ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, w, h);
-          ctx.drawImage(img, 0, 0, w, h);
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           canvas.toBlob((b) => resolve(b ?? null), 'image/png', 1);
         } catch {
           resolve(null);

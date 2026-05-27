@@ -21,6 +21,7 @@ import {
 } from "./unifiedChatStream.js";
 import { runSqlThroughRouter } from "./sqlAndMetricsRouter.js";
 import type { UnifiedChatRequestBody } from "./unifiedChatOrchestrator.js";
+import { routePresentationExportIntent } from "./pptIntentRouter.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import {
   resolveDatasetUploadIdsForRequest,
@@ -97,6 +98,29 @@ export function setupGlobalStreamHeaders(res: Response): void {
 export async function runUnifiedGlobalStream(
   args: GlobalStreamArgs,
 ): Promise<GlobalStreamResult> {
+  const tenantId = args.req.tenantContext?.tenantId || args.req.tenantId;
+  let presentationExport = null as Awaited<
+    ReturnType<typeof routePresentationExportIntent>
+  >;
+  try {
+    presentationExport = await routePresentationExportIntent({
+      message: args.message.trim(),
+      chatType: "chat",
+      history: args.history,
+      tenantId: tenantId ?? undefined,
+    });
+  } catch (err: unknown) {
+    console.warn(
+      "[unifiedChatGlobalStream] presentation intent failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  const convertOnlyVizExport =
+    presentationExport?.wantsPresentationExport &&
+    presentationExport.action === "export_viz" &&
+    presentationExport.mode === "convert";
+
   const chatContext = await buildChatContextForStream(args.req, args.requestBody);
   const convHistory = mapHistory(args.history);
   const retrievalAllowed =
@@ -106,6 +130,36 @@ export async function runUnifiedGlobalStream(
   setupGlobalStreamHeaders(args.res);
   const emit = createStreamEmitter(args.res);
   emit({ event: "turn.started", conversationId: args.conversationId, turnId: args.turnId });
+
+  if (convertOnlyVizExport) {
+    const blocks: UnifiedBlock[] = [
+      {
+        type: "text",
+        markdown:
+          "I'll prepare a PowerPoint from your last chart. Use **Download** on the card below.",
+      },
+    ];
+    emitValidatedStreamWithDeltas(
+      args.res,
+      args.conversationId,
+      args.turnId,
+      blocks as Array<Record<string, unknown>>,
+      {
+        chatType: args.policy.chatType,
+        presentationExport,
+        ...args.streamMetadata,
+      },
+      { emit, skipTurnStarted: true },
+    );
+    return {
+      blocks,
+      metadata: {
+        route: "global",
+        presentationExport,
+        contextManifest: [],
+      },
+    };
+  }
   emit({
     event: "block.started",
     conversationId: args.conversationId,
@@ -159,6 +213,7 @@ export async function runUnifiedGlobalStream(
     {
       suggestedQuestions: response.suggestedQuestions ?? [],
       chatType: args.policy.chatType,
+      presentationExport,
       ...args.streamMetadata,
     },
     {
@@ -177,6 +232,7 @@ export async function runUnifiedGlobalStream(
       sources: response.sources,
       suggestedQuestions: response.suggestedQuestions,
       retrievalIncluded: includeRag,
+      presentationExport,
       contextManifest: [
         { tier: "identity", included: true, truncated: false },
         {

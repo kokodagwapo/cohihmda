@@ -133,7 +133,18 @@ import {
   writeChatVizExportToPptFile,
 } from "@/lib/chatVisualizationPptContent";
 import { buildChatVisualizationReportDefinition } from "@/lib/chatVisualizationPptSeed";
-import { stashChatPptSeed } from "@/lib/workbench/workbenchChatHandoff";
+import {
+  COHI_OPEN_WORKBENCH_PPT_EDITOR_EVENT,
+  openWorkbenchPowerPointEditorFromChat,
+  stashChatPptSeed,
+  type OpenWorkbenchPowerPointEditorOptions,
+} from "@/lib/workbench/workbenchChatHandoff";
+import { exportAssistantVisualizationAsPpt } from "@/lib/chatPptExport";
+import {
+  blobToDataUrl,
+  captureChartAsBlob,
+} from "@/lib/captureChartForExport";
+import { PptExportCard } from "@/components/cohi/PptExportCard";
 import {
   createLayoutItem,
   type CanvasLayoutItem,
@@ -1743,15 +1754,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [createSingleVisualizationCanvas, toast, navigate, onClose]);
 
-  const blobToDataUrl = useCallback(async (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }, []);
-
   const handleBuildInCanvas = useCallback(
     async (
       visualization: VisualizationConfig,
@@ -1775,7 +1777,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         const exportContent = buildChatVizExportContent({
           viz: visualization,
           title: visualization.title,
-          description: question.slice(0, 200),
           chartImageDataUrl,
         });
         stashChatPptSeed(
@@ -1796,7 +1797,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         });
       }
     },
-    [createSingleVisualizationCanvas, toast, navigate, blobToDataUrl],
+    [createSingleVisualizationCanvas, toast, navigate],
   );
 
   /**
@@ -1856,28 +1857,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
     try {
       const displayTitle = title || viz.title || "Visualization";
-      let chartImageDataUrl: string | undefined;
-      if (messageId) {
-        try {
-          const blob = await captureChartAsBlob(messageId);
-          if (blob) {
-            chartImageDataUrl = await blobToDataUrl(blob);
-          }
-        } catch (captureErr) {
-          console.warn("Chart capture for PPT failed:", captureErr);
-        }
-      }
-
-      const exportContent = buildChatVizExportContent({
+      const { chartEmbedded } = await exportAssistantVisualizationAsPpt({
         viz,
         title: displayTitle,
         description: desc,
-        chartImageDataUrl,
+        messageId,
+        download: true,
       });
-      const { chartEmbedded } = await writeChatVizExportToPptFile(
-        exportContent,
-        displayTitle,
-      );
 
       setPreferredExportFormat("ppt");
       if (typeof window !== "undefined") {
@@ -1898,6 +1884,31 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       });
     }
   };
+
+  useEffect(() => {
+    const onOpenEditor = (ev: Event) => {
+      const detail = (ev as CustomEvent<
+        Omit<OpenWorkbenchPowerPointEditorOptions, "navigate">
+      >).detail;
+      if (!detail) return;
+      void openWorkbenchPowerPointEditorFromChat({
+        navigate,
+        ...detail,
+      }).then(() => {
+        toast({
+          title: "Opening PowerPoint Editor",
+          description: "Edit and export your deck from Workbench.",
+        });
+      });
+    };
+    window.addEventListener(COHI_OPEN_WORKBENCH_PPT_EDITOR_EVENT, onOpenEditor);
+    return () => {
+      window.removeEventListener(
+        COHI_OPEN_WORKBENCH_PPT_EDITOR_EVENT,
+        onOpenEditor,
+      );
+    };
+  }, [navigate, toast]);
 
   /**
    * Share visualization via copy link
@@ -2099,30 +2110,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       }`
     );
     window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
-  };
-
-  /** Capture chart as PNG blob via html2canvas (element id = cohi-viz-{messageId}) */
-  const captureChartAsBlob = async (
-    messageId: string
-  ): Promise<Blob | null> => {
-    const el = document.getElementById(`cohi-viz-${messageId}`);
-    if (!el) return null;
-    try {
-      const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(el, {
-        useCORS: true,
-        allowTaint: true,
-        scale: 2,
-        backgroundColor: undefined,
-        logging: false,
-      });
-      return new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b ?? null), "image/png", 1);
-      });
-    } catch (e) {
-      console.error("Capture chart error:", e);
-      return null;
-    }
   };
 
   /** Email with screenshot: capture chart, copy to clipboard, open mailto so user can paste image in body */
@@ -3441,6 +3428,13 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                   }}
                 />
               )}
+
+            {!isUser && message.pptExport && (
+              <PptExportCard
+                pptExport={message.pptExport}
+                visualization={message.visualization}
+              />
+            )}
 
             {!isUser && message.insightBuilderDraft && (
               <InsightBuilderPreviewCard

@@ -57,6 +57,7 @@ export interface SendUnifiedGlobalResult {
   researchPollMode?: boolean;
   /** Research Lab session id from stream metadata (poll mode). */
   researchSessionId?: string;
+  streamMetadata?: Record<string, unknown>;
 }
 
 function blocksToEnvelope(
@@ -156,6 +157,7 @@ export async function sendUnifiedGlobalStream(
     parsed,
     researchPollMode,
     researchSessionId,
+    streamMetadata: result.metadata,
   };
 }
 
@@ -223,7 +225,11 @@ export async function sendUnifiedWorkbenchStream(
     }),
   );
 
-  return { conversationId: result.conversationId, parsed };
+  return {
+    conversationId: result.conversationId,
+    parsed,
+    streamMetadata: result.metadata,
+  };
 }
 
 export { createUnifiedChatClient };

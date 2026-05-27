@@ -12,6 +12,7 @@ import { renderMarkdownText } from "@/utils/renderMarkdown";
 import { ResearchReport, QuickAnswerView } from "@/components/research/ResearchReport";
 import type { SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import type { ChatMessage } from "@/hooks/useCohiChat";
+import { PptExportCard } from "@/components/cohi/PptExportCard";
 import type {
   Finding,
   ResearchReport as ResearchReportType,
@@ -41,6 +42,10 @@ export interface ResearchReportTabContentProps {
   reportContainerRef?: React.RefObject<HTMLDivElement | null>;
   className?: string;
   forceEvidenceOpen?: boolean;
+  researchPptExportTitle?: string;
+  researchPptSlideCount?: number;
+  onDownloadResearchPpt?: () => void | Promise<void>;
+  researchPptDownloadBusy?: boolean;
 }
 
 type ResearchTurn = {
@@ -65,13 +70,32 @@ function sortFindings(findings: Finding[]): Finding[] {
   return [...findings].sort((a, b) => a.questionId - b.questionId);
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  researchPptExportTitle,
+  researchPptSlideCount,
+  onDownloadResearchPpt,
+  researchPptDownloadBusy,
+}: {
+  message: ChatMessage;
+  researchPptExportTitle?: string;
+  researchPptSlideCount?: number;
+  onDownloadResearchPpt?: () => void | Promise<void>;
+  researchPptDownloadBusy?: boolean;
+}) {
   const isUser = message.role === "user";
+  const pptExport = message.pptExport;
+  const showPptCard =
+    !isUser && pptExport?.exportKind === "research_report";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn("flex w-full min-w-0", isUser ? "justify-end" : "justify-start")}
+      className={cn(
+        "flex w-full min-w-0 flex-col gap-2",
+        isUser ? "items-end" : "items-start",
+      )}
     >
       <div
         className={cn(
@@ -100,6 +124,19 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <p className="mt-2 text-xs text-red-600 dark:text-red-400">{message.error}</p>
         )}
       </div>
+      {showPptCard && pptExport && (
+        <div className="w-full">
+          <PptExportCard
+            pptExport={{
+              ...pptExport,
+              title: researchPptExportTitle ?? pptExport.title,
+              slideCount: researchPptSlideCount ?? pptExport.slideCount,
+            }}
+            onDownloadResearchReport={onDownloadResearchPpt}
+            researchDownloadBusy={researchPptDownloadBusy}
+          />
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -122,6 +159,10 @@ export function ResearchReportTabContent({
   reportContainerRef,
   className,
   forceEvidenceOpen = false,
+  researchPptExportTitle,
+  researchPptSlideCount,
+  onDownloadResearchPpt,
+  researchPptDownloadBusy,
 }: ResearchReportTabContentProps) {
   const reportSnapshotsRef = useRef<ResearchReportType[]>([]);
   const sortedFindings = useMemo(() => sortFindings(findings), [findings]);
@@ -257,7 +298,15 @@ export function ResearchReportTabContent({
         return (
           <div key={turn.user.id} className="space-y-4 min-w-0">
             <MessageBubble message={turn.user} />
-            {turn.assistant && <MessageBubble message={turn.assistant} />}
+            {turn.assistant && (
+              <MessageBubble
+                message={turn.assistant}
+                researchPptExportTitle={researchPptExportTitle}
+                researchPptSlideCount={researchPptSlideCount}
+                onDownloadResearchPpt={onDownloadResearchPpt}
+                researchPptDownloadBusy={researchPptDownloadBusy}
+              />
+            )}
             {turn.assistant && !turn.assistant.isLoading && renderAnswer(idx, isLast)}
           </div>
         );
