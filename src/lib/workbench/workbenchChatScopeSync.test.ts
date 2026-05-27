@@ -146,6 +146,14 @@ describe("workbenchChatScopeSync", () => {
     expect(draft.isSavedCanvas).toBe(false);
     expect(draft.canvasId).toBeNull();
     expect(draft.draftScopeId).toBe("draft-abc");
+
+    const draftWithoutMap = buildActiveContextFromTab({
+      tabId: "new-456",
+      tabTitle: "New Canvas",
+      tabDraftScopes: {},
+    });
+    expect(draftWithoutMap.draftScopeId).not.toContain("new-456");
+    expect(draftWithoutMap.draftScopeId).not.toMatch(/^canvas-tab:new-/);
   });
 
   it("activeContextToScopeRef uses canvas id when saved", () => {

@@ -137,6 +137,11 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
   // -------------------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
+    // Unified sidebar chat owns transcript state; embedded hook is actions-only.
+    if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+      return;
+    }
+
     // Scope-scoped chat: reset when switching canvas/draft scope.
     setConversationId(null);
     setMessages([]);
@@ -146,9 +151,6 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         // Must have a concrete scope key (canvas:* or draft:*).
         if (!conversationScopeId) {
           setConversationId(null);
-          return;
-        }
-        if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
           return;
         }
         const tid = await resolveEffectiveTenantId(tenantId);

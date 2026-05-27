@@ -1356,6 +1356,17 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         chatType: import("@/lib/unifiedChatClient").UnifiedChatType;
       }>).detail;
       if (!detail?.conversationId) return;
+      const hasWorkbenchTranscript = messages.some(
+        (m) => m.role === "assistant" && !!m.content?.trim(),
+      );
+      if (
+        detail.conversationId === currentSessionId &&
+        messages.length > 0 &&
+        detail.chatType === "workbench" &&
+        hasWorkbenchTranscript
+      ) {
+        return;
+      }
       const chatType = detail.chatType ?? "chat";
       if (layout === "shell") {
         if (
@@ -1380,6 +1391,8 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     setShellExpandMode,
     pathname,
     isMobile,
+    currentSessionId,
+    messages.length,
   ]);
 
   /**
@@ -1484,7 +1497,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     promptCardsLayout !== "hidden" &&
     !isSharedResearchViewOnly &&
     !showResearchWorkspace &&
-    !(activeChatType === "research" && isUnifiedChatClientEnabled() && isLoadingSession);
+    !(activeChatType === "research" && isUnifiedChatClientEnabled() && isLoadingSession) &&
+    !(
+      activeChatType === "workbench" &&
+      !!currentSessionId &&
+      (isLoadingSession || isSessionRunning)
+    );
   /** Research transcript lives in {@link UnifiedChatResearchWorkspace}; skip empty flex-1 messages pane. */
   const showStandardMessagesPane =
     !isShellCompact &&
@@ -2727,7 +2745,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 )}
               >
                 <UnifiedChatResearchWorkspace
-                  key={legacyRef ?? "research-empty"}
+                  key={legacyRef ?? currentSessionId ?? "research-empty"}
                   researchSessionId={legacyRef}
                   tenantId={tenantId}
                   messages={messages}
@@ -2914,6 +2932,26 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 />
               </motion.div>
             ))}
+
+            {activeChatType === "workbench" &&
+              isLoading &&
+              messages.length > 0 &&
+              messages[messages.length - 1]?.role === "user" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="rounded-2xl w-full max-w-[calc(100%-8px)] border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm">
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <Loader2 className="w-5 h-5 text-blue-500 animate-spin shrink-0" />
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Analyzing your data...
+                      </span>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
             <div ref={messagesEndRef} />
           </div>
@@ -3247,6 +3285,22 @@ const VIZ_DESIGN_OPTIONS: {
   { type: "table", label: "Table", Icon: LayoutGrid },
 ];
 
+function assistantMessageHasVisibleBody(message: ChatMessage): boolean {
+  if (message.visualization || message.pptExport || message.insightBuilderDraft) {
+    return true;
+  }
+  if ((message.workbenchPendingActions?.length ?? 0) > 0) return true;
+  if ((message.workbenchActionsAppliedCount ?? 0) > 0) return true;
+  if (describeWorkbenchActionsApplied(message.workbenchActions)) return true;
+  const text = message.content?.trim() ?? "";
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (lower === "i processed your request." || lower === "i processed your request") {
+    return false;
+  }
+  return true;
+}
+
 interface EnhancedChatMessageBubbleProps {
   message: ChatMessage;
   onSave: (visualization: VisualizationConfig, question: string, sqlQuery?: string) => void;
@@ -3311,13 +3365,23 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   onApplyWorkbenchDashboardSuggestion,
 }) => {
   const isUser = message.role === "user";
-  const styling = !isUser ? getMessageStyling(message.content) : null;
+  const hasVisibleBody = assistantMessageHasVisibleBody(message);
+  const showAnalyzing =
+    message.isLoading || (!isUser && !!isLoading && !hasVisibleBody);
+  const styling =
+    !isUser && !showAnalyzing && !!message.content?.trim()
+      ? getMessageStyling(message.content)
+      : null;
   const [showSql, setShowSql] = useState(false);
 
   // Don't parse content - render as markdown to preserve structure
   const messageContent = isUser
     ? message.content
     : normalizeAssistantMarkdown(message.content);
+
+  if (!isUser && !showAnalyzing && !hasVisibleBody) {
+    return null;
+  }
 
   return (
     <div
@@ -3335,7 +3399,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
             : "border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm min-w-0 overflow-x-hidden overflow-y-visible"
         )}
       >
-        {message.isLoading ? (
+        {showAnalyzing ? (
           <div className="flex items-center gap-3 px-4 py-3">
             <Loader2 className="w-5 h-5 text-blue-500 animate-spin shrink-0" />
             <div className="flex flex-col gap-1.5">
@@ -3405,9 +3469,14 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
 
             {!isUser &&
               (() => {
-                const summary = describeWorkbenchActionsApplied(
-                  message.workbenchActions,
-                );
+                const appliedCount = message.workbenchActionsAppliedCount ?? 0;
+                const summary =
+                  describeWorkbenchActionsApplied(message.workbenchActions) ??
+                  (appliedCount > 0
+                    ? appliedCount === 1
+                      ? "Applied 1 widget to canvas"
+                      : `Applied ${appliedCount} widgets to canvas`
+                    : null);
                 return summary ? (
                   <p className="px-4 pb-2 text-xs font-medium text-violet-600 dark:text-violet-400">
                     {summary}

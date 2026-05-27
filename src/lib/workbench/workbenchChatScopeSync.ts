@@ -311,7 +311,7 @@ export function buildActiveContextFromTab(args: {
   const canvasId = isSavedCanvas ? tabId : null;
   const draftScopeId = isSavedCanvas
     ? draftScopeIdForCanvasTab(tabId)
-    : tabDraftScopes[tabId] ?? draftScopeIdForCanvasTab(tabId);
+    : tabDraftScopes[tabId] ?? getOrCreateActiveWorkbenchDraftScope();
   return {
     tabId,
     canvasId,

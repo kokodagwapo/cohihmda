@@ -215,7 +215,9 @@ export function UnifiedChatResearchWorkspace({
       ? (findings.find((f) => String(f.questionId) === selectedFindingId) ?? null)
       : null;
 
-  const showRunningSpinner = !!researchSessionId && investigationInProgress;
+  const showRunningSpinner =
+    (!!researchSessionId && investigationInProgress) ||
+    (!researchSessionId && chatLoading);
   const reportReady =
     !!researchSessionId &&
     (!!report || (findings.length >= 1 && phase === "complete"));
@@ -345,20 +347,13 @@ export function UnifiedChatResearchWorkspace({
     toast,
   ]);
 
-  if (!researchSessionId) {
+  if (!researchSessionId && messages.length === 0 && !chatLoading) {
     return (
       <div
         data-testid="unified-research-workspace"
         className="shrink-0 px-4 py-3 border-b border-violet-100/80 dark:border-indigo-900/50 flex items-center gap-2 text-xs text-slate-500"
       >
-        {chatLoading && (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500 shrink-0" />
-        )}
-        <span>
-          {chatLoading
-            ? "Starting research investigation…"
-            : "Ask a research question below to start an investigation."}
-        </span>
+        <span>Ask a research question below to start an investigation.</span>
       </div>
     );
   }
@@ -570,7 +565,7 @@ export function UnifiedChatResearchWorkspace({
             findings={findings}
             report={report}
             phase={phase}
-            researchSessionId={researchSessionId}
+            researchSessionId={researchSessionId ?? ""}
             tenantId={tenantId}
             sessionIsOwner={sessionIsOwner}
             isTracked={isTracked}

@@ -241,7 +241,23 @@ export async function detectPresentationExportIntent(args: {
     tenantId: args.tenantId,
   });
 
-  const meta = resolvePresentationExportAction(args.chatType, classification);
+  let meta = resolvePresentationExportAction(args.chatType, classification);
+
+  // Obvious slide-deck asks on research should not depend solely on the classifier
+  // (API failures / low confidence would otherwise skip the deferred PPT card).
+  if (args.chatType === "research" && !meta.wantsPresentationExport) {
+    meta = {
+      prefilterHit: true,
+      wantsPresentationExport: true,
+      mode: "create",
+      action: "export_research_report",
+      confidence: CONFIDENCE_THRESHOLD,
+      researchTopic:
+        classification.researchTopic?.trim() ||
+        fallbackResearchTopicFromMessage(args.message),
+    };
+  }
+
   if (
     classification.researchTopic &&
     args.chatType === "research" &&

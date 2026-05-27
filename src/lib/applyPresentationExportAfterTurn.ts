@@ -11,7 +11,11 @@ import {
   resolvePresentationExportTargetMessage,
 } from "@/lib/pptMessageResolver";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
-import { dispatchOpenWorkbenchPptEditor } from "@/lib/workbench/workbenchChatHandoff";
+import { presentationExportPrefilter } from "@/lib/presentationExportIntent";
+import {
+  isWorkbenchPresentationChatRequest,
+  requestOpenWorkbenchReportBuilderFromChat,
+} from "@/lib/workbench/workbenchChatHandoff";
 
 export type ApplyPresentationExportArgs = {
   messages: ChatMessage[];
@@ -38,7 +42,35 @@ function attachPptExportToMessage(
 export async function applyPresentationExportAfterTurn(
   args: ApplyPresentationExportArgs,
 ): Promise<ChatMessage[]> {
-  const meta = parsePresentationExportMetadata(args.metadata);
+  let meta = parsePresentationExportMetadata(args.metadata);
+
+  if (
+    !meta?.wantsPresentationExport &&
+    args.chatType === "research" &&
+    presentationExportPrefilter(args.userQuestion ?? "")
+  ) {
+    meta = {
+      prefilterHit: true,
+      wantsPresentationExport: true,
+      mode: "create",
+      action: "export_research_report",
+      confidence: 0.7,
+      deferred: true,
+    };
+  }
+
+  if (
+    args.chatType === "workbench" &&
+    isWorkbenchPresentationChatRequest(args.userQuestion ?? "")
+  ) {
+    requestOpenWorkbenchReportBuilderFromChat({
+      messages: args.messages,
+      assistantMessageId: args.assistantMessageId,
+      userQuestion: args.userQuestion,
+      mode: meta?.mode ?? "create",
+    });
+  }
+
   if (!meta?.wantsPresentationExport) {
     return args.messages;
   }
@@ -47,10 +79,10 @@ export async function applyPresentationExportAfterTurn(
     if (args.onOpenWorkbenchEditor) {
       await args.onOpenWorkbenchEditor();
     } else {
-      dispatchOpenWorkbenchPptEditor({
+      requestOpenWorkbenchReportBuilderFromChat({
         messages: args.messages,
         mode: meta.mode,
-        latestAssistantId: args.assistantMessageId,
+        assistantMessageId: args.assistantMessageId,
         userQuestion: args.userQuestion,
       });
     }
