@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../research/tools.js", () => ({
+  getOpenAIKey: vi
+    .fn()
+    .mockRejectedValue(new Error("OpenAI API key not configured.")),
+}));
+
 import {
+  detectPresentationExportIntent,
   fallbackResearchTopicFromMessage,
   presentationExportPrefilter,
   resolvePresentationExportAction,
@@ -65,9 +73,6 @@ describe("resolvePresentationExportAction", () => {
 
 describe("detectPresentationExportIntent research fallback", () => {
   it("treats prefilter presentation asks as deferred research export when classifier declines", async () => {
-    const { detectPresentationExportIntent } = await import(
-      "./presentationExportIntent.js"
-    );
     const meta = await detectPresentationExportIntent({
       message:
         "Can you make me a presentation of loan officer scorecard: volume, tiers, and performance outliers",
