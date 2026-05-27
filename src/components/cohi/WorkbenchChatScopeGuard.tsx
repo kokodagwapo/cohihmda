@@ -398,8 +398,9 @@ export function useWorkbenchChatScopeGuard(args: UseWorkbenchChatScopeGuardArgs)
       <AlertDialog
         open={newCanvasOpen}
         onOpenChange={(open) => {
-          if (!open && pendingSendRef.current) dismissNewCanvas();
-          else setNewCanvasOpen(open);
+          // Only open via Radix; close through confirm/dismiss actions so route
+          // transitions do not clear pendingSend before the user chooses.
+          if (open) setNewCanvasOpen(true);
         }}
       >
         <AlertDialogContent data-testid="workbench-new-canvas-intent-dialog">
