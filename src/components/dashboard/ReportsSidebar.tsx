@@ -1219,6 +1219,15 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   <button onClick={() => { navigate('/workbench/distributions'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">Communications Center</button>
                 </div>
                 )}
+
+                <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", isPathActive('/hmda') && "bg-slate-100 dark:bg-slate-800/60")}>
+                  <button onClick={() => { navigate('/hmda'); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                    <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isPathActive('/hmda') ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                      <FileText className={cn("w-4 h-4", isPathActive('/hmda') ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                    </div>
+                  </button>
+                  <button onClick={() => { navigate('/hmda'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">HMDA Data</button>
+                </div>
               </div>
               </>
               )}
@@ -1876,6 +1885,37 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             </Tooltip>
           )}
           </>
+          )}
+
+          {/* HMDA Data */}
+          {isExpanded ? (
+            <div
+              style={{ width: '100%', padding: '12px 10px', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer', backgroundColor: isPathActive('/hmda') ? (isDarkMode ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.06)') : 'transparent' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isPathActive('/hmda') ? (isDarkMode ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.06)') : (isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'); }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = isPathActive('/hmda') ? (isDarkMode ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.06)') : 'transparent'; }}
+              onClick={() => navigate('/hmda')}
+            >
+              <button onClick={(e) => { e.stopPropagation(); navigate('/hmda'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                <FileText size={18} style={{ color: isPathActive('/hmda') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
+              </button>
+              <button onClick={() => navigate('/hmda')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>HMDA Data</button>
+            </div>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  style={{ width: '100%', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer', backgroundColor: isPathActive('/hmda') ? (isDarkMode ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.06)') : 'transparent' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isPathActive('/hmda') ? (isDarkMode ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.06)') : (isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'); }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = isPathActive('/hmda') ? (isDarkMode ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.06)') : 'transparent'; }}
+                  onClick={() => navigate('/hmda')}
+                >
+                  <button onClick={(e) => { e.stopPropagation(); navigate('/hmda'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                    <FileText size={18} style={{ color: isPathActive('/hmda') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
+                  </button>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="right">HMDA Data</TooltipContent>
+            </Tooltip>
           )}
         </div>
         </SidebarContent>

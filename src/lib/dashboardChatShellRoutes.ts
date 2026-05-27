@@ -6,6 +6,7 @@
 /** Layouts that use DashboardLayout but must not show the chat band. */
 export const UNIFIED_CHAT_SHELL_EXCLUDED_PATHS = new Set([
   "/workbench/distributions",
+  "/hmda",
 ]);
 
 export function isUnifiedChatShellExcluded(pathname: string): boolean {
