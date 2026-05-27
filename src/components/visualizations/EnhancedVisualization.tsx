@@ -29,7 +29,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Table,
   TableBody,
@@ -519,6 +518,8 @@ interface DrilldownTableProps {
   onDrilldown: (item: any, nextLevel: string) => void;
   onBack?: () => void;
   breadcrumbs?: string[];
+  /** Narrow chat/sidebar layout – tighter max height for scroll viewport */
+  compact?: boolean;
 }
 
 const DrilldownTable: React.FC<DrilldownTableProps> = ({ 
@@ -526,7 +527,8 @@ const DrilldownTable: React.FC<DrilldownTableProps> = ({
   currentLevel, 
   onDrilldown, 
   onBack,
-  breadcrumbs = []
+  breadcrumbs = [],
+  compact = false,
 }) => {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
@@ -592,9 +594,14 @@ const DrilldownTable: React.FC<DrilldownTableProps> = ({
         </div>
       )}
       
-      {/* Table */}
-      <div className="rounded-xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden shadow-lg bg-white dark:bg-slate-900">
-        <ScrollArea className="max-h-[400px]">
+      {/* Table – native overflow (not Radix ScrollArea) so wheel/touch scroll works in chat */}
+      <div className="rounded-xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden shadow-lg bg-white dark:bg-slate-900 min-w-0">
+        <div
+          className={cn(
+            "min-h-0 overflow-auto overscroll-contain",
+            compact ? "max-h-[min(360px,45vh)]" : "max-h-[min(400px,55vh)]",
+          )}
+        >
           <Table>
             <TableHeader className="bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-800/80 sticky top-0 z-10 border-b-2 border-slate-200 dark:border-slate-700">
               <TableRow>
@@ -687,6 +694,7 @@ const DrilldownTable: React.FC<DrilldownTableProps> = ({
                                 data={row._children}
                                 currentLevel={currentLevel}
                                 onDrilldown={onDrilldown}
+                                compact={compact}
                               />
                             </div>
                           </TableCell>
@@ -698,7 +706,7 @@ const DrilldownTable: React.FC<DrilldownTableProps> = ({
               </AnimatePresence>
             </TableBody>
           </Table>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   );
@@ -1136,6 +1144,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             onDrilldown={handleDrilldown}
             onBack={drilldownStack.length > 0 ? handleBack : undefined}
             breadcrumbs={drilldownStack}
+            compact={compact}
           />
         );
       
@@ -1193,10 +1202,12 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
     >
       <div
         className={cn(
-          "rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900/50 shadow-sm",
+          "rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900/50 shadow-sm min-w-0",
           config.type === "kpi-grid" || config.type === "kpi"
             ? "overflow-x-auto overflow-y-visible"
-            : "overflow-x-hidden overflow-y-visible"
+            : config.type === "table" || config.type === "drilldown-table"
+              ? "overflow-hidden"
+              : "overflow-x-hidden overflow-y-visible"
         )}
       >
         {/* Header – minimal */}
@@ -1215,12 +1226,14 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             : "flex flex-col lg:flex-row lg:gap-6"
           : ""
         }>
-          <div className={showInsights && config.insights?.length
-            ? compact
-              ? "flex-1 min-w-0 min-h-[180px] p-3"
-              : "flex-1 min-w-0 min-h-[220px] sm:min-h-[260px] p-4 sm:p-5 lg:p-5"
-            : compact ? "p-3" : "p-4 sm:p-5"
-          }>
+          <div className={cn(
+            showInsights && config.insights?.length
+              ? compact
+                ? "flex-1 min-w-0 min-h-[180px] p-3"
+                : "flex-1 min-w-0 min-h-[220px] sm:min-h-[260px] p-4 sm:p-5 lg:p-5"
+              : compact ? "p-3" : "p-4 sm:p-5",
+            (config.type === "table" || config.type === "drilldown-table") && "min-h-0",
+          )}>
             {renderChart}
           </div>
 

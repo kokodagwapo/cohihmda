@@ -3,6 +3,7 @@
  */
 
 import type { NavigateFunction } from "react-router-dom";
+import type { ReportDefinition } from "@/types/reportTypes";
 import type { WidgetAction } from "@/types/widgetActions";
 import { suppressNextWorkbenchScopePrompt } from "@/lib/workbench/workbenchChatScopeSync";
 import type { UnifiedChatType } from "@/lib/unifiedChatClient";
@@ -253,6 +254,7 @@ export function describeWorkbenchActionsApplied(
 
 const DRAFT_TAB_STORAGE_KEY = "cohi_workbench_draft_tabs";
 const PENDING_ACTIONS_STORAGE_KEY = "cohi_workbench_pending_actions";
+const CHAT_PPT_SEED_STORAGE_KEY = "cohi_chat_ppt_seed";
 const ACTIVE_DRAFT_SCOPE_KEY = "cohi_workbench_active_draft";
 const NAV_BOUND_KEY = "cohi_workbench_nav_bound";
 /** One-shot: open unified shell in split (side) layout after workbench chat submit. */
@@ -625,6 +627,56 @@ export function clearPendingWorkbenchActions(draftScopeId: string): void {
     window.sessionStorage.setItem(PENDING_ACTIONS_STORAGE_KEY, JSON.stringify(map));
   } catch {
     /* ignore */
+  }
+}
+
+type ChatPptSeedEntry = {
+  definition: ReportDefinition;
+  createdAt: number;
+};
+
+function readChatPptSeedMap(): Record<string, ChatPptSeedEntry> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.sessionStorage.getItem(CHAT_PPT_SEED_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, ChatPptSeedEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeChatPptSeedMap(map: Record<string, ChatPptSeedEntry>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(CHAT_PPT_SEED_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Stash a Report Builder definition for a canvas opened from chat "Edit in PPT Editor". */
+export function stashChatPptSeed(
+  canvasId: string,
+  definition: ReportDefinition,
+): void {
+  if (typeof window === "undefined" || !canvasId) return;
+  const map = readChatPptSeedMap();
+  map[canvasId] = { definition, createdAt: Date.now() };
+  writeChatPptSeedMap(map);
+}
+
+/** Consume and remove a chat-origin PPT seed for the given canvas (one-shot). */
+export function consumeChatPptSeed(canvasId: string): ReportDefinition | null {
+  if (typeof window === "undefined" || !canvasId) return null;
+  try {
+    const map = readChatPptSeedMap();
+    const entry = map[canvasId];
+    if (!entry?.definition) return null;
+    delete map[canvasId];
+    writeChatPptSeedMap(map);
+    return entry.definition;
+  } catch {
+    return null;
   }
 }
 
