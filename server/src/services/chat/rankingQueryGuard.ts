@@ -14,7 +14,18 @@ export const RANKING_DEFAULT_LIMIT = 10;
 const TOP_PATTERN = /\b(?:top|best|highest|leading)\s+(\d{1,2})\b/i;
 const BOTTOM_PATTERN = /\b(?:bottom|worst|lowest)\s+(\d{1,2})\b/i;
 
+/** Platform tier/scorecard phrasing — not generic top-N ranking. */
+const PLATFORM_TIER_EXCLUSION =
+  /\b(top[\s-]?tier|second[\s-]?tier|bottom[\s-]?tier|tier(?:ed)?\s+(?:lo|loan officer|los|processor|underwriter)|tts\b|top[\s-]?tiering\s+score|scorecard\s+tier|pareto\s+tier)\b/i;
+
+export function isPlatformTierRankingExclusion(question: string): boolean {
+  return PLATFORM_TIER_EXCLUSION.test(question);
+}
+
 export function detectRankingIntent(question: string): RankingIntent | null {
+  if (isPlatformTierRankingExclusion(question)) {
+    return null;
+  }
   const q = question.toLowerCase();
   const topMatch = q.match(TOP_PATTERN);
   if (topMatch) {

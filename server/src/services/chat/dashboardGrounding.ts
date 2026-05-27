@@ -25,6 +25,26 @@ export function resolveModeHandoffContext(
   return readModeHandoffContext(body);
 }
 
+/** Map client routes to human-readable dashboard labels for chat steering. */
+export function resolveChatRouteGroundingLabel(
+  route?: string | null,
+): string | undefined {
+  if (!route) return undefined;
+  const map: Record<string, string> = {
+    "/sales-scorecard": "Sales Scorecard (LO tiers / TTS)",
+    "/sales-scorecard-overview": "Sales Scorecard Overview",
+    "/operations-scorecard": "Operations Scorecard",
+    "/performance/toptiering-comparison": "Top Tiering Comparison",
+    "/top-tiering-comparison": "Top Tiering Comparison",
+    "/company-scorecard": "Company Scorecard",
+    "/pipeline-analysis": "Pipeline Analysis",
+    "/workflow-conversion": "Workflow Conversion",
+    "/leaderboard": "Leaderboard",
+    "/business-overview": "Business Overview",
+  };
+  return map[route];
+}
+
 export function readDashboardGroundingHandoff(
   body: UnifiedChatRequestBody,
 ): ModeHandoffContextPayload | null {

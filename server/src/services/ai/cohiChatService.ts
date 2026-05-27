@@ -58,6 +58,13 @@ import {
   logRankingGuardTrace,
   type RankingIntent,
 } from "../chat/rankingQueryGuard.js";
+import {
+  buildPlatformIntentSteeringBlock,
+  detectPlatformIntent,
+  platformIntentNavigationHints,
+  type PlatformIntent,
+} from "../chat/platformIntentRouter.js";
+import { resolveChatRouteGroundingLabel } from "../chat/dashboardGrounding.js";
 
 // ============================================================================
 // Types
@@ -75,6 +82,8 @@ export interface ChatContext {
   uploadOnlyMode?: boolean;
   uploadSchemaContext?: string;
   datasetUploadIds?: string[];
+  /** Client page route (e.g. /sales-scorecard) for dashboard-aware routing. */
+  pageRoute?: string | null;
 }
 
 export interface UserPermissions {
@@ -615,11 +624,13 @@ function buildHeuristicRankingLoQuery(
 
 function buildHeuristicDataQuery(
   question: string,
-  accessFilter?: LoanAccessFilter | null
+  accessFilter?: LoanAccessFilter | null,
+  platformIntent?: PlatformIntent | null,
 ): GeneratedQuery | null {
-  const rankingIntent = isRankingGuardEnabled()
-    ? detectRankingIntent(question)
-    : null;
+  const rankingIntent =
+    isRankingGuardEnabled() && !platformIntent?.suppressRankingGuard
+      ? detectRankingIntent(question)
+      : null;
   if (rankingIntent) {
     const loRanking = buildHeuristicRankingLoQuery(
       question,
@@ -698,6 +709,10 @@ async function generateQuery(
   context: ChatContext,
   conversationHistory: CohiChatMessage[] = []
 ): Promise<GeneratedQuery | null> {
+  const platformIntent = context.uploadOnlyMode
+    ? null
+    : detectPlatformIntent(question, context.pageRoute ?? null);
+
   try {
     const apiKey = await getOpenAIKey(context.tenantId);
 
@@ -748,7 +763,11 @@ async function generateQuery(
 
     const heuristicFallback = context.uploadOnlyMode
       ? null
-      : buildHeuristicDataQuery(question, context.userAccessFilter);
+      : buildHeuristicDataQuery(
+          question,
+          context.userAccessFilter,
+          platformIntent,
+        );
 
     // Check if this was determined to not be a data query
     if (parsed.isDataQuery === false) {
@@ -785,7 +804,7 @@ async function generateQuery(
       chartConfig: parsed.chartConfig || {},
     };
 
-    if (isRankingGuardEnabled()) {
+    if (isRankingGuardEnabled() && !platformIntent?.suppressRankingGuard) {
       const intent = detectRankingIntent(question);
       if (intent) {
         generated.sql = applyRankingSqlGuard(generated.sql, intent);
@@ -804,7 +823,11 @@ async function generateQuery(
   } catch (error: any) {
     const heuristicFallback = context.uploadOnlyMode
       ? null
-      : buildHeuristicDataQuery(question, context.userAccessFilter);
+      : buildHeuristicDataQuery(
+          question,
+          context.userAccessFilter,
+          platformIntent,
+        );
     if (heuristicFallback) {
       console.warn(
         "[CohiChat] Query generation failed for deterministic data question; using heuristic fallback query."
@@ -1488,6 +1511,7 @@ interface GatheredContext {
   ragContext: RAGContext;
   insightMetrics?: Record<string, any>;
   platformBusinessContext?: string;
+  platformIntent?: PlatformIntent | null;
 }
 
 function enforceCatalogBackedNavigationCopy(
@@ -1550,8 +1574,17 @@ function stripSourceAttribution(rawMessage: string): string {
 
 function buildPostAnswerNavigationHints(
   question: string,
-  hasDataQueryResult: boolean
+  hasDataQueryResult: boolean,
+  platformIntent?: PlatformIntent | null,
 ): { label: string; path: string }[] | undefined {
+  const platformHints = platformIntentNavigationHints(platformIntent ?? null);
+  if (platformHints.length > 0) {
+    return sanitizeNavigationHints([
+      ...platformHints,
+      { label: "Research Lab (deeper analysis)", path: "/research" },
+    ]);
+  }
+
   if (!hasDataQueryResult) return undefined;
   const q = question.toLowerCase();
 
@@ -1568,7 +1601,8 @@ function buildPostAnswerNavigationHints(
 
 function buildRecommendedNavigationHints(
   question: string,
-  hasDataQueryResult: boolean
+  hasDataQueryResult: boolean,
+  platformIntent?: PlatformIntent | null,
 ): { label: string; path: string }[] {
   const merged: { label: string; path: string }[] = [];
   const push = (items?: { label: string; path: string }[] | null) => {
@@ -1578,7 +1612,7 @@ function buildRecommendedNavigationHints(
 
   const nav = resolveNavigationAnswer(question);
   push(nav?.hints);
-  push(buildPostAnswerNavigationHints(question, hasDataQueryResult));
+  push(buildPostAnswerNavigationHints(question, hasDataQueryResult, platformIntent));
 
   // Always provide stable next-step destinations.
   push([
@@ -1687,6 +1721,10 @@ async function gatherAllContext(
 ): Promise<GatheredContext> {
   console.log(`[CohiChat] Gathering context for: "${question}"`);
 
+  const platformIntent = context.uploadOnlyMode
+    ? null
+    : detectPlatformIntent(question, context.pageRoute ?? null);
+
   const includeRag =
     opts?.includeRag !== false && !context.uploadOnlyMode;
   const includePlatformBusinessContext = !context.uploadOnlyMode;
@@ -1733,9 +1771,10 @@ async function gatherAllContext(
 
   let dataQueryResult: GatheredContext["dataQueryResult"] = undefined;
 
-  const rankingIntent = isRankingGuardEnabled()
-    ? detectRankingIntent(question)
-    : null;
+  const rankingIntent =
+    isRankingGuardEnabled() && !platformIntent?.suppressRankingGuard
+      ? detectRankingIntent(question)
+      : null;
 
   // If we got a valid query, try to execute it (with one auto-retry on failure)
   if (queryConfig?.sql) {
@@ -1752,7 +1791,11 @@ async function gatherAllContext(
         : context;
     const heuristicFallback = context.uploadOnlyMode
       ? null
-      : buildHeuristicDataQuery(question, context.userAccessFilter);
+      : buildHeuristicDataQuery(
+          question,
+          context.userAccessFilter,
+          platformIntent,
+        );
     try {
       const result = await executeQuery(
         effectiveConfig.sql,
@@ -1889,11 +1932,27 @@ async function gatherAllContext(
     } chunks, Insights: ${!!insightMetrics}`
   );
 
+  const routeLabel = context.pageRoute
+    ? resolveChatRouteGroundingLabel(context.pageRoute)
+    : undefined;
+  const routeSteering = routeLabel
+    ? `## Current page context\nUser is viewing **${routeLabel}** (${context.pageRoute}). Prefer metrics and navigation aligned with this dashboard.`
+    : undefined;
+  const intentSteering = buildPlatformIntentSteeringBlock(platformIntent);
+  const mergedPlatformContext = [
+    platformBusinessContext,
+    routeSteering,
+    intentSteering,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
   return {
     dataQueryResult,
     ragContext,
     insightMetrics,
-    platformBusinessContext,
+    platformBusinessContext: mergedPlatformContext || platformBusinessContext,
+    platformIntent,
   };
 }
 
@@ -1909,7 +1968,8 @@ async function generateUnifiedResponse(
   const apiKey = await getOpenAIKey(context.tenantId);
   const recommendedHints = buildRecommendedNavigationHints(
     question,
-    !!gathered.dataQueryResult
+    !!gathered.dataQueryResult,
+    gathered.platformIntent,
   );
 
   // Deterministic no-rows handling for executed SQL:
@@ -2045,9 +2105,10 @@ async function generateUnifiedResponse(
   let data: any[] | undefined;
 
   if (gathered.dataQueryResult) {
-    const rankingIntent = isRankingGuardEnabled()
-      ? detectRankingIntent(question)
-      : null;
+    const rankingIntent =
+      isRankingGuardEnabled() && !gathered.platformIntent?.suppressRankingGuard
+        ? detectRankingIntent(question)
+        : null;
     const fullRows = gathered.dataQueryResult.formattedData;
     visualization = applyVisualizationReadabilityGuard(
       buildVisualizationConfig(fullRows, gathered.dataQueryResult.query),
@@ -2141,6 +2202,28 @@ export async function processCohiQuestion(
     }
 
     if (!context.uploadOnlyMode) {
+      const platformIntent = detectPlatformIntent(
+        question,
+        context.pageRoute ?? null,
+      );
+      if (
+        platformIntent?.kind === "ambiguous_tier_vs_ranking" &&
+        platformIntent.clarificationQuestion
+      ) {
+        return {
+          message: platformIntent.clarificationQuestion,
+          navigationHints: sanitizeNavigationHints([
+            ...platformIntentNavigationHints(platformIntent),
+            { label: "Sales Scorecard", path: "/sales-scorecard" },
+            { label: "Leaderboard", path: "/leaderboard" },
+          ]),
+          suggestedQuestions: [
+            "Who are my top tier loan officers on the Sales Scorecard?",
+            "Top 10 loan officers by funded volume this quarter",
+          ],
+        };
+      }
+
       const expandedNav = expandEffectiveQuestionForNavigation(
         question,
         conversationHistory.map((m) => ({ role: m.role, content: m.content })),
@@ -2221,6 +2304,29 @@ export async function processCohiQuestionStreaming(
   }
 
   if (!context.uploadOnlyMode) {
+    const platformIntent = detectPlatformIntent(
+      question,
+      context.pageRoute ?? null,
+    );
+    if (
+      platformIntent?.kind === "ambiguous_tier_vs_ranking" &&
+      platformIntent.clarificationQuestion
+    ) {
+      options?.onTextDelta?.(platformIntent.clarificationQuestion);
+      return {
+        message: platformIntent.clarificationQuestion,
+        navigationHints: sanitizeNavigationHints([
+          ...platformIntentNavigationHints(platformIntent),
+          { label: "Sales Scorecard", path: "/sales-scorecard" },
+          { label: "Leaderboard", path: "/leaderboard" },
+        ]),
+        suggestedQuestions: [
+          "Who are my top tier loan officers on the Sales Scorecard?",
+          "Top 10 loan officers by funded volume this quarter",
+        ],
+      };
+    }
+
     const expandedNav = expandEffectiveQuestionForNavigation(
       question,
       conversationHistory.map((m) => ({ role: m.role, content: m.content })),
@@ -2239,7 +2345,11 @@ export async function processCohiQuestionStreaming(
       options?.onTextDelta?.(nav.message);
       return {
         message: nav.message,
-        navigationHints: buildRecommendedNavigationHints(expandedNav, false),
+        navigationHints: buildRecommendedNavigationHints(
+          expandedNav,
+          false,
+          platformIntent,
+        ),
         suggestedQuestions: nav.suggestedQuestions,
       };
     }

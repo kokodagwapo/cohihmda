@@ -51,7 +51,9 @@ export async function planMetricSpec(
 
 **Rules:**
 - For "compare pull-through by branch this quarter" → metricIds ["pull_through_rate"], pullThroughSegment "branch", window "this_quarter", comparison "segment"
-- For a single KPI snapshot (e.g. "active loans") → one metric id, no dimensions, window as appropriate
+- For a single KPI snapshot (e.g. "active loans") → one metric id, no dimensions, window must be "all_time" (snapshot metrics ignore date windows)
+- NEVER use active_loans or active_volume in multi-window comparisons — they are current-state snapshots only
+- Tier / scorecard / "top tier LO" questions are NOT representable as catalog SQL — set unsupported: true and explain to use Sales Scorecard
 - If the request is not representable with the catalog above, set "unsupported": true and "unsupportedReason" with a short reason.
 
 **Allowed metric ids for this request:** ${selected.join(", ")}

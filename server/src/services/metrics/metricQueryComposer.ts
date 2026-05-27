@@ -16,6 +16,10 @@ import {
   type PullThroughSegment,
   type PullThroughWindow,
 } from "./canonicalMetrics.js";
+import {
+  isSnapshotMetricId,
+  validateMetricSpecWindows,
+} from "./metricSemantics.js";
 
 export interface ComposerResult {
   sql: string;
@@ -110,7 +114,7 @@ export function composeMetricSql(
   spec: MetricSpec,
   accessFilter?: LoanAccessFilter | null
 ): ComposerResult {
-  const warnings: string[] = [];
+  const warnings: string[] = [...validateMetricSpecWindows(spec)];
   if (spec.unsupported) {
     throw new Error(spec.unsupportedReason || "unsupported_spec");
   }
@@ -126,8 +130,12 @@ export function composeMetricSql(
       ? { start: spec.customRange.start, end: spec.customRange.end }
       : undefined
   );
-  const windowLabel =
-    spec.window === "custom" && spec.customRange
+  const snapshotOnly =
+    resolvedMetricIds.length > 0 &&
+    resolvedMetricIds.every((id) => isSnapshotMetricId(id));
+  const windowLabel = snapshotOnly
+    ? "snapshot (as of today)"
+    : spec.window === "custom" && spec.customRange
       ? `${spec.customRange.start}–${spec.customRange.end}`
       : spec.window ?? "all_time";
 

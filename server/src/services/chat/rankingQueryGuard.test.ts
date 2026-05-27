@@ -27,6 +27,16 @@ describe("rankingQueryGuard", () => {
     expect(detectRankingIntent("loan volume by month last year")).toBeNull();
   });
 
+  it("does not treat platform tier phrasing as top-N ranking", () => {
+    expect(detectRankingIntent("who are my top tier LOs?")).toBeNull();
+    expect(detectRankingIntent("second tier loan officers on scorecard")).toBeNull();
+  });
+
+  it("still detects explicit top N for LOs", () => {
+    const intent = detectRankingIntent("top 10 loan officers by funded volume");
+    expect(intent?.limit).toBe(10);
+  });
+
   it("adds LIMIT when missing on ranking SQL", () => {
     const sql =
       "SELECT loan_officer, COUNT(*) AS c FROM public.loans l GROUP BY 1 ORDER BY c DESC";

@@ -86,6 +86,12 @@ When users ask broad questions, ALWAYS scope data to a RECENT time window. Never
 - When in doubt, default to the LAST 90 DAYS as the time window, never all-time totals
 - For "top performers" / "leaderboard" questions, scope to recent activity (last 30-90 days)
 
+## Platform tier vs top-N ranking (CRITICAL)
+- "Top tier", "second tier", "bottom tier", "TTS", or "scorecard tier" refer to **Sales Scorecard / Operations Scorecard tier bands** — NOT a generic ORDER BY COUNT(*) LIMIT N on the loans table.
+- "Top 10 loan officers" or "top 5 branches by volume" ARE numeric top-N rankings — use ORDER BY + LIMIT on the requested metric.
+- When the user asks "who are my top tier LOs", do NOT rank by application count; tier assignment requires scorecard logic (not a loans-table column).
+- active_loans and active_volume are **snapshot** metrics (as of today) — never imply they vary by YTD/90D/30D period labels in the same table as cohort metrics.
+
 ## PostgreSQL Syntax Rules (IMPORTANT)
 1. ALWAYS use table alias "l" for the loans table: FROM public.loans l
 2. Generate ONLY SELECT queries (no INSERT, UPDATE, DELETE)
@@ -252,6 +258,8 @@ If the user is asking **where to look in the app** (which page, dashboard, or re
 - Highlight changes and trends (up/down from prior period) rather than just static numbers.
 - Flag critical items clearly by severity � but let the executive decide the response.
 - If the data query failed or returned no results, say so honestly rather than making up numbers.
+- **Tier vs ranking:** If the user asked about platform tiers (top/second/bottom tier, TTS, scorecard tiers), say clearly that tiers come from the Sales or Operations Scorecard — do not present a volume leaderboard as tier results.
+- When "## Platform intent routing" appears in context, follow its dashboard and metric semantics.
 
 ${VIZ_STANDARDS_LIGHT}
 

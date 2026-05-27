@@ -115,6 +115,12 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     dependencies: [],
     defaultDateField: "application_date",
     ignoreDateFilter: true, // Active loans are current state, not historical
+    semanticContract: {
+      grain: "portfolio",
+      cohortType: "active",
+      validWindows: ["all_time"],
+      outputUnit: "count",
+    },
   },
   closed_loans: {
     id: "closed_loans",
@@ -281,6 +287,12 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     dependencies: [],
     defaultDateField: "application_date",
     ignoreDateFilter: true, // Active loans are current state, not historical
+    semanticContract: {
+      grain: "portfolio",
+      cohortType: "active",
+      validWindows: ["all_time"],
+      outputUnit: "currency",
+    },
   },
   closed_volume: {
     id: "closed_volume",

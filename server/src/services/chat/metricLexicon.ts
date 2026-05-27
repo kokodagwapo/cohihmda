@@ -7,7 +7,10 @@ export const METRIC_LANGUAGE_RULES = `LANGUAGE AND METRIC NAMING:
 - Avoid undefined shorthand: do not use "Pct", "pp", "PT", "Vol", "GOS", or "bps" without defining them inline on first use.
 - "percentage points" (not "pp") when describing the change between two rates.
 - Use "%" for rates and proportions (e.g. "pull-through is 74%").
-- Preferred terms: "pull-through rate", "funded volume", "gain-on-sale revenue", "cycle time", "fallout rate", "loan officer".`;
+- Preferred terms: "pull-through rate", "funded volume", "gain-on-sale revenue", "cycle time", "fallout rate", "loan officer".
+- Platform tier language: "top tier" / "second tier" / "bottom tier" refer to **Sales Scorecard tier bands** (TTS-derived), NOT a generic "top 10" ranking by loan count.
+- "Top Tiering Score" (TTS) and "Top Tiering Comparison" (revenue Pareto) are distinct dashboards — do not conflate with Leaderboard volume rankings.
+- Active loans and active volume are **snapshot** metrics (as of today), not period-comparable cohort metrics.`;
 
 /** Expand common abbreviations in generated context strings (not SQL). */
 export function expandMetricAbbreviations(text: string): string {
