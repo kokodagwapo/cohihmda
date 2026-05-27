@@ -203,7 +203,10 @@ export class UnifiedChatClient {
     return res.conversations ?? [];
   }
 
-  async getConversation(id: string): Promise<{
+  async getConversation(
+    id: string,
+    options?: { bustCache?: boolean },
+  ): Promise<{
     id: string;
     title: string;
     scope: UnifiedChatScope;
@@ -225,7 +228,12 @@ export class UnifiedChatClient {
     }[];
   }> {
     const path = withTenant(`/api/chat/v1/conversations/${id}`, await this.tid());
-    return api.request(path);
+    return api.request(
+      path,
+      options?.bustCache
+        ? { headers: { "Cache-Control": "no-cache" } }
+        : {},
+    );
   }
 
   async linkConversationDatasets(
@@ -467,6 +475,8 @@ export class UnifiedChatClient {
         }
       }
     }
+
+    invalidateUnifiedChatConversationCache();
 
     return {
       conversationId,

@@ -384,8 +384,10 @@ export function shouldConfirmNewCanvasBeforeSend(
   message: string,
   options?: { firstTurnAfterNewChat?: boolean; canvasHasContent?: boolean },
 ): boolean {
+  // Starters like "Build an executive dashboard…" only need confirmation when they
+  // would reuse a populated canvas — not on landing / empty new tabs.
   if (detectGreenfieldWorkbenchPrompt(message)) {
-    return true;
+    return options?.canvasHasContent === true;
   }
   if (options?.firstTurnAfterNewChat && options.canvasHasContent) {
     const normalized = message.trim().toLowerCase();

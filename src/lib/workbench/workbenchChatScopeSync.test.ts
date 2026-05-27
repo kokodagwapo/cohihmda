@@ -66,6 +66,21 @@ describe("workbenchChatScopeSync", () => {
     ).toBe(false);
   });
 
+  it("shouldConfirmNewCanvasBeforeSend skips greenfield starters on empty canvas", () => {
+    expect(
+      shouldConfirmNewCanvasBeforeSend(
+        "Prepare a board-ready overview of this month's performance",
+        { canvasHasContent: false },
+      ),
+    ).toBe(false);
+    expect(
+      shouldConfirmNewCanvasBeforeSend(
+        "Build an executive dashboard with funded volume, pull-through, and cycle time KPIs",
+        { canvasHasContent: true },
+      ),
+    ).toBe(true);
+  });
+
   it("workbenchScopeMatchesActiveContext treats canvas and canvas-tab draft as same tab", () => {
     const ctx = buildActiveContextFromTab({
       tabId: "canvas-uuid",

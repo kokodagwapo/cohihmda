@@ -406,6 +406,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     messages: ChatMessage[];
     until: number;
   } | null>(null);
+  /** Chat / research / insight_builder — survive loadSession races on slow envs. */
+  const globalPinnedTranscriptRef = useRef<{
+    conversationId: string;
+    messages: ChatMessage[];
+    until: number;
+  } | null>(null);
+  /** Client optimistic id → server conversation id while a turn is in flight. */
+  const conversationIdAliasRef = useRef<Map<string, string>>(new Map());
   const loadSessionGenerationRef = useRef(0);
   /** Set from research stream metadata before poll-mode stream closes. */
   const activeResearchSessionIdRef = useRef<string | null>(null);
@@ -459,6 +467,48 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     [stripWorkbenchLoadingFlags],
   );
 
+  const pinGlobalTranscript = useCallback(
+    (conversationId: string, transcript: ChatMessage[]) => {
+      if (!conversationId || transcript.length === 0) return;
+      const cleaned = transcript.map((m) => {
+        if (m.role !== "assistant" || !m.isLoading) return m;
+        return { ...m, isLoading: false };
+      });
+      globalPinnedTranscriptRef.current = {
+        conversationId,
+        messages: cleaned,
+        until: Date.now() + 120_000,
+      };
+    },
+    [],
+  );
+
+  const conversationIdsForActiveThread = useCallback(
+    (targetSessionId: string): Set<string> => {
+      const ids = new Set<string>();
+      if (targetSessionId) ids.add(targetSessionId);
+      for (const id of [
+        sessionIdRef.current,
+        viewingSessionRef.current,
+        activeStreamConversationRef.current,
+      ]) {
+        if (id) ids.add(id);
+      }
+      for (const [clientId, serverId] of conversationIdAliasRef.current) {
+        if (ids.has(clientId)) ids.add(serverId);
+        if (ids.has(serverId)) ids.add(clientId);
+      }
+      return ids;
+    },
+    [],
+  );
+
+  const isConversationActive = useCallback(
+    (targetSessionId: string) =>
+      conversationIdsForActiveThread(targetSessionId).has(targetSessionId),
+    [conversationIdsForActiveThread],
+  );
+
   /** Recover transcript if scope sync cleared messages while the thread is still active. */
   useEffect(() => {
     if (chatType !== "workbench" || messages.length > 0) return;
@@ -471,6 +521,30 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       viewingSessionRef.current ??
       activeStreamConversationRef.current;
     if (activeId && activeId !== pinned.conversationId) return;
+    setMessages(pinned.messages);
+    setSessionId(pinned.conversationId);
+    viewingSessionRef.current = pinned.conversationId;
+    sessionIdRef.current = pinned.conversationId;
+  }, [messages.length, chatType]);
+
+  /** Recover global chat transcript if loadSession cleared the pane mid-turn. */
+  useEffect(() => {
+    if (chatType === "workbench" || messages.length > 0) return;
+    const pinned = globalPinnedTranscriptRef.current;
+    if (!pinned || Date.now() > pinned.until || pinned.messages.length === 0) {
+      return;
+    }
+    const activeId =
+      sessionIdRef.current ??
+      viewingSessionRef.current ??
+      activeStreamConversationRef.current;
+    if (activeId && activeId !== pinned.conversationId) {
+      const aliases = conversationIdAliasRef.current;
+      const matchesAlias =
+        aliases.get(activeId) === pinned.conversationId ||
+        aliases.get(pinned.conversationId) === activeId;
+      if (!matchesAlias) return;
+    }
     setMessages(pinned.messages);
     setSessionId(pinned.conversationId);
     viewingSessionRef.current = pinned.conversationId;
@@ -543,6 +617,30 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     [applyMessagesForStream],
   );
 
+  /**
+   * Replace the streaming placeholder with the final assistant turn (global chat types).
+   * Uses setMessages as well as applyMessagesForStream so the UI clears "Analyzing…"
+   * even when stream scope refs were cleared by a concurrent loadSession.
+   */
+  const finalizeGlobalAssistantMessage = useCallback(
+    (
+      conversationId: string,
+      assistantMessageId: string,
+      assistantMessage: ChatMessage,
+    ): ChatMessage[] => {
+      const updater = (prev: ChatMessage[]) =>
+        prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m));
+      applyMessagesForStream(conversationId, updater);
+      let next: ChatMessage[] = [];
+      setMessages((prev) => {
+        next = updater(prev);
+        return next;
+      });
+      return next;
+    },
+    [applyMessagesForStream],
+  );
+
   /** Align client stream id with server conversation id when they diverge (legacy resume). */
   const reconcileStreamConversationId = useCallback(
     (clientStreamId: string, serverConversationId: string) => {
@@ -552,6 +650,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         sessionIdRef.current = resolved;
         return resolved;
       }
+      conversationIdAliasRef.current.set(clientStreamId, resolved);
+      conversationIdAliasRef.current.set(resolved, clientStreamId);
       activeStreamConversationRef.current = resolved;
       viewingSessionRef.current = resolved;
       sessionIdRef.current = resolved;
@@ -1443,9 +1543,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               insightBuilderPhase: parsed.insightBuilderPhase,
               visualizationArtifactId: parsed.visualizationArtifactId,
             };
-            applyMessagesForStream(resolvedConversationId, (prev) =>
-              prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
+            const messagesAfterTurn = finalizeGlobalAssistantMessage(
+              resolvedConversationId,
+              assistantMessageId,
+              assistantMessage,
             );
+            if (messagesAfterTurn.length > 0) {
+              pinGlobalTranscript(resolvedConversationId, messagesAfterTurn);
+            }
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
@@ -1596,6 +1701,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       setLoadingForStream,
       workbenchSavedCanvasId,
       resetWorkbenchChatSession,
+      finalizeGlobalAssistantMessage,
+      pinGlobalTranscript,
+      reconcileStreamConversationId,
+      bindResearchSessionAfterStream,
+      finalizeWorkbenchAssistantMessage,
+      tryDeliverWorkbenchWidgetActions,
+      setWorkbenchChatScopeRef,
+      pinWorkbenchTranscript,
+      runPresentationExportAfterTurn,
     ]
   );
 
@@ -1858,18 +1972,18 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               insightBuilderPhase: parsed.insightBuilderPhase,
               visualizationArtifactId: parsed.visualizationArtifactId,
             };
-            const applyFinal = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
-              if (streamConversationId) {
-                applyMessagesForStream(streamConversationId, updater);
-              } else {
-                setMessages(updater);
-              }
-            };
-            applyFinal((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId ? assistantMessage : m,
-              ),
+            const resolvedRefineId = reconcileStreamConversationId(
+              streamConversationId ?? conversationId,
+              conversationId,
             );
+            const messagesAfterRefine = finalizeGlobalAssistantMessage(
+              resolvedRefineId,
+              assistantMessageId,
+              assistantMessage,
+            );
+            if (messagesAfterRefine.length > 0) {
+              pinGlobalTranscript(resolvedRefineId, messagesAfterRefine);
+            }
             if (parsed.suggestedQuestions?.length) {
               setSuggestedQuestions(parsed.suggestedQuestions);
             }
@@ -1880,7 +1994,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 researchSessionId,
               );
             }
-            if (streamConversationId) endRefineRun(streamConversationId);
+            if (resolvedRefineId) endRefineRun(resolvedRefineId);
           }
         } else {
           const endpoint = effectiveTenantId
@@ -2001,11 +2115,17 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       setWorkbenchChatScopeRef,
       pinWorkbenchTranscript,
       finalizeWorkbenchAssistantMessage,
+      finalizeGlobalAssistantMessage,
+      pinGlobalTranscript,
+      reconcileStreamConversationId,
+      bindResearchSessionAfterStream,
     ]
   );
   const clearMessages = useCallback(() => {
     setMessages([]);
     viewingSessionRef.current = null;
+    globalPinnedTranscriptRef.current = null;
+    conversationIdAliasRef.current.clear();
     setSessionId(null);
     setLegacyRef(null);
     setConversationForkLinks(null);
@@ -2257,20 +2377,26 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       scope?: { type: string; id?: string };
     }> => {
       const generation = ++loadSessionGenerationRef.current;
-      const isActiveThread =
-        viewingSessionRef.current === targetSessionId ||
-        sessionIdRef.current === targetSessionId ||
-        activeStreamConversationRef.current === targetSessionId;
+      const isActiveThread = isConversationActive(targetSessionId);
       const inMemoryMessages = messagesRef.current;
       const pinnedTranscript =
         workbenchPinnedTranscriptRef.current &&
         Date.now() < workbenchPinnedTranscriptRef.current.until &&
-        workbenchPinnedTranscriptRef.current.conversationId === targetSessionId
+        (workbenchPinnedTranscriptRef.current.conversationId === targetSessionId ||
+          isActiveThread)
           ? workbenchPinnedTranscriptRef.current
+          : null;
+      const globalPinned =
+        globalPinnedTranscriptRef.current &&
+        Date.now() < globalPinnedTranscriptRef.current.until &&
+        (globalPinnedTranscriptRef.current.conversationId === targetSessionId ||
+          isActiveThread)
+          ? globalPinnedTranscriptRef.current
           : null;
       const preserveInMemoryOnFailure =
         (isActiveThread && inMemoryMessages.length > 0) ||
-        (!!pinnedTranscript && pinnedTranscript.messages.length > 0);
+        (!!pinnedTranscript && pinnedTranscript.messages.length > 0) ||
+        (!!globalPinned && globalPinned.messages.length > 0);
       const canvasSavePreserve =
         workbenchCanvasSavePreserveRef.current &&
         Date.now() < workbenchCanvasSavePreserveRef.current.until &&
@@ -2280,8 +2406,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         !preserveInMemoryOnFailure &&
         !canvasSavePreserve &&
         !pinnedTranscript &&
-        !isActiveThread &&
-        sessionId !== targetSessionId
+        !globalPinned &&
+        !isActiveThread
       ) {
         setMessages([]);
       }
@@ -2290,7 +2416,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         const effectiveTenantId = await getEffectiveTenantId();
         if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
           const client = createUnifiedChatClient(tenantId ?? effectiveTenantId);
-          const row = await client.getConversation(targetSessionId);
+          const row = await client.getConversation(targetSessionId, {
+            bustCache: preserveInMemoryOnFailure || isActiveThread,
+          });
           if (generation !== loadSessionGenerationRef.current) {
             return { datasetUploadIds: [] };
           }
@@ -2429,10 +2557,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           }
           if (
             messagesToApply.length === 0 &&
-            (preserveInMemoryOnFailure || canvasSavePreserve || pinnedTranscript)
+            (preserveInMemoryOnFailure || canvasSavePreserve || pinnedTranscript || globalPinned)
           ) {
-            if (inMemoryMessages.length === 0 && pinnedTranscript) {
+            if (inMemoryMessages.length > 0) {
+              setMessages(inMemoryMessages);
+            } else if (pinnedTranscript) {
               setMessages(pinnedTranscript.messages);
+            } else if (globalPinned) {
+              setMessages(globalPinned.messages);
             }
             setSessionId(targetSessionId);
             viewingSessionRef.current = targetSessionId;
@@ -2443,7 +2575,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               scope: rowScope,
             };
           }
-          setMessages(messagesToApply);
+          if (
+            messagesToApply.length > 0 ||
+            !preserveInMemoryOnFailure
+          ) {
+            setMessages(messagesToApply);
+          }
           if (loadedChatType === "workbench" && messagesToApply.length > 0) {
             pinWorkbenchTranscript(targetSessionId, messagesToApply);
           }
@@ -2523,9 +2660,18 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         return { datasetUploadIds: [], chatType };
       } catch (error) {
         console.error("[CohiChat] Failed to load session:", error);
-        if (preserveInMemoryOnFailure || canvasSavePreserve || pinnedTranscript) {
-          if (inMemoryMessages.length === 0 && pinnedTranscript) {
+        if (
+          preserveInMemoryOnFailure ||
+          canvasSavePreserve ||
+          pinnedTranscript ||
+          globalPinned
+        ) {
+          if (inMemoryMessages.length > 0) {
+            setMessages(inMemoryMessages);
+          } else if (pinnedTranscript) {
             setMessages(pinnedTranscript.messages);
+          } else if (globalPinned) {
+            setMessages(globalPinned.messages);
           }
           viewingSessionRef.current = targetSessionId;
           sessionIdRef.current = targetSessionId;
@@ -2542,9 +2688,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       getEffectiveTenantId,
       tenantId,
       chatType,
-      sessionId,
       setWorkbenchChatScopeRef,
       pinWorkbenchTranscript,
+      isConversationActive,
     ],
   );
 
@@ -2843,6 +2989,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const newSession = useCallback(async () => {
     workbenchCanvasSavePreserveRef.current = null;
     workbenchPinnedTranscriptRef.current = null;
+    globalPinnedTranscriptRef.current = null;
+    conversationIdAliasRef.current.clear();
     clearMessages();
     viewingSessionRef.current = null;
     setSessionId(null);

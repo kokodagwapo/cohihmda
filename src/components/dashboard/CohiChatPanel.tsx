@@ -1359,12 +1359,10 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       const hasWorkbenchTranscript = messages.some(
         (m) => m.role === "assistant" && !!m.content?.trim(),
       );
-      if (
-        detail.conversationId === currentSessionId &&
+      const hasInMemoryTranscript =
         messages.length > 0 &&
-        detail.chatType === "workbench" &&
-        hasWorkbenchTranscript
-      ) {
+        (detail.chatType !== "workbench" || hasWorkbenchTranscript);
+      if (detail.conversationId === currentSessionId && hasInMemoryTranscript) {
         return;
       }
       const chatType = detail.chatType ?? "chat";
@@ -2745,7 +2743,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 )}
               >
                 <UnifiedChatResearchWorkspace
-                  key={legacyRef ?? currentSessionId ?? "research-empty"}
+                  key={currentSessionId ?? legacyRef ?? "research-empty"}
                   researchSessionId={legacyRef}
                   tenantId={tenantId}
                   messages={messages}
