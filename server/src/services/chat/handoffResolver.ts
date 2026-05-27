@@ -12,6 +12,7 @@ import {
   truncateCanvasMarkdown,
   type CanvasStateSnapshot,
 } from "./canvasContextBuilder.js";
+import { METRIC_LANGUAGE_RULES } from "./metricLexicon.js";
 
 const MAX_CANVAS_MARKDOWN = 8000;
 const MAX_IB_PREFIX_CHARS = 2000;
@@ -44,6 +45,7 @@ function canvasSteeringDirective(
     markdown,
     "Treat this board as the subject of the investigation when the user refers to 'this dashboard', 'these widgets', or similar.",
     "Prefer widgets and metrics already on the canvas before inventing new SQL.",
+    METRIC_LANGUAGE_RULES,
   ].join("\n");
 }
 

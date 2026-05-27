@@ -2862,7 +2862,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Pull-Through Rate",
         value: fmtPct(ytdPT),
         direction: "positive",
-        context: `vs ${fmtPct(baseline36mPT)} trailing 36M baseline (+${ptDelta.toFixed(1)}pp)`,
+        context: `vs ${fmtPct(baseline36mPT)} trailing 36M baseline (+${ptDelta.toFixed(1)} percentage points)`,
         magnitude: ptDelta >= 5 ? "major" : "moderate",
       });
     } else if (ytdPT < 50 || ptDelta < -5) {
@@ -2871,7 +2871,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Pull-Through Rate",
         value: fmtPct(ytdPT),
         direction: "negative",
-        context: `vs ${fmtPct(baseline36mPT)} trailing 36M baseline (${ptDelta.toFixed(1)}pp)`,
+        context: `vs ${fmtPct(baseline36mPT)} trailing 36M baseline (${ptDelta.toFixed(1)} percentage points)`,
         magnitude: ptDelta < -10 ? "major" : "moderate",
       });
     }
@@ -2896,7 +2896,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Fallout Rate",
         value: fmtPct(ytdFallout),
         direction: "critical",
-        context: `vs ${fmtPct(baselineFallout)} trailing 36M baseline (+${falloutDelta.toFixed(1)}pp)`,
+        context: `vs ${fmtPct(baselineFallout)} trailing 36M baseline (+${falloutDelta.toFixed(1)} percentage points)`,
         magnitude: "major",
       });
     } else if (falloutDelta > 3) {
@@ -2905,7 +2905,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Fallout Rate",
         value: fmtPct(ytdFallout),
         direction: "negative",
-        context: `vs ${fmtPct(baselineFallout)} trailing 36M baseline (+${falloutDelta.toFixed(1)}pp)`,
+        context: `vs ${fmtPct(baselineFallout)} trailing 36M baseline (+${falloutDelta.toFixed(1)} percentage points)`,
         magnitude: "moderate",
       });
     } else if (falloutDelta < -3) {
@@ -2914,7 +2914,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Fallout Rate",
         value: fmtPct(ytdFallout),
         direction: "positive",
-        context: `vs ${fmtPct(baselineFallout)} trailing 36M baseline (${falloutDelta.toFixed(1)}pp improvement)`,
+        context: `vs ${fmtPct(baselineFallout)} trailing 36M baseline (${falloutDelta.toFixed(1)} percentage points improvement)`,
         magnitude: "moderate",
       });
     } else {
@@ -2923,7 +2923,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Fallout Rate",
         value: fmtPct(ytdFallout),
         direction: "neutral",
-        context: `in line with ${fmtPct(baselineFallout)} trailing 36M baseline (${falloutDelta > 0 ? "+" : ""}${falloutDelta.toFixed(1)}pp)`,
+        context: `in line with ${fmtPct(baselineFallout)} trailing 36M baseline (${falloutDelta > 0 ? "+" : ""}${falloutDelta.toFixed(1)} percentage points)`,
         magnitude: "minor",
       });
     }
@@ -3008,7 +3008,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "12M Pull-Through Trend",
         value: fmtPct(trailing12mPT),
         direction: pt12Delta > 0 ? "positive" : "negative",
-        context: `vs ${fmtPct(prior12mPT)} prior 12M (${pt12Delta > 0 ? "+" : ""}${pt12Delta.toFixed(1)}pp)`,
+        context: `vs ${fmtPct(prior12mPT)} prior 12M (${pt12Delta > 0 ? "+" : ""}${pt12Delta.toFixed(1)} percentage points)`,
         magnitude: Math.abs(pt12Delta) >= 5 ? "major" : "moderate",
       });
     }
@@ -3110,7 +3110,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Risk Pocket Deterioration",
         value: `${pocket.product} / FICO ${pocket.ficoBand} / DTI ${pocket.dtiBand}`,
         direction: "critical",
-        context: `fallout ${fmtPct(pocket.baselineFalloutRate)} -> ${fmtPct(pocket.currentFalloutRate)} (+${pocket.deltaPercent.toFixed(1)}pp), ${pocket.affectedLoans} loans`,
+        context: `fallout ${fmtPct(pocket.baselineFalloutRate)} -> ${fmtPct(pocket.currentFalloutRate)} (+${pocket.deltaPercent.toFixed(1)} percentage points), ${pocket.affectedLoans} loans`,
         magnitude: "major",
       });
     } else if (pocket.deltaPercent >= 5) {
@@ -3119,7 +3119,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Risk Pocket Deterioration",
         value: `${pocket.product} / FICO ${pocket.ficoBand} / DTI ${pocket.dtiBand}`,
         direction: "negative",
-        context: `fallout ${fmtPct(pocket.baselineFalloutRate)} -> ${fmtPct(pocket.currentFalloutRate)} (+${pocket.deltaPercent.toFixed(1)}pp), ${pocket.affectedLoans} loans`,
+        context: `fallout ${fmtPct(pocket.baselineFalloutRate)} -> ${fmtPct(pocket.currentFalloutRate)} (+${pocket.deltaPercent.toFixed(1)} percentage points), ${pocket.affectedLoans} loans`,
         magnitude: "moderate",
       });
     }
@@ -3272,7 +3272,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
           metric: `Product: ${prod.productType}`,
           value: `${fmtPct(prod.pullThroughRate)} PT, ${prod.funded} funded, ${fmt$(prod.fundedVolume)}`,
           direction: "positive",
-          context: `+${ptDiff.toFixed(1)}pp above portfolio avg`,
+          context: `+${ptDiff.toFixed(1)} percentage points above portfolio average`,
           magnitude: ptDiff >= 20 ? "major" : "moderate",
         });
       } else if (ptDiff <= -10) {
@@ -3281,7 +3281,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
           metric: `Product: ${prod.productType}`,
           value: `${fmtPct(prod.pullThroughRate)} PT, ${prod.funded} funded, ${fmt$(prod.fundedVolume)}`,
           direction: "negative",
-          context: `${ptDiff.toFixed(1)}pp below portfolio avg`,
+          context: `${ptDiff.toFixed(1)} percentage points below portfolio average`,
           magnitude: ptDiff <= -20 ? "major" : "moderate",
         });
       }
@@ -3322,7 +3322,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
           metric: `High Volume, Low Conversion: ${officer.name}`,
           value: `${officer.units} units funded YTD, ${fmt$(officer.revenue)} rev, but only ${fmtPct(officer.pullThrough)} PT`,
           direction: "negative",
-          context: `Top revenue tier but PT is ${officer.pullThrough < portfolioPT ? `${(portfolioPT - officer.pullThrough).toFixed(1)}pp below portfolio avg (${fmtPct(portfolioPT)})` : "below 50% threshold"}. ${officer.lostOpportunityUnits} withdrawn, ${officer.deniedUnits} denied. Detail should show loans WHERE funding_date is in YTD range for this officer.`,
+          context: `Top revenue tier but PT is ${officer.pullThrough < portfolioPT ? `${(portfolioPT - officer.pullThrough).toFixed(1)} percentage points below portfolio average (${fmtPct(portfolioPT)})` : "below 50% threshold"}. ${officer.lostOpportunityUnits} withdrawn, ${officer.deniedUnits} denied. Detail should show loans WHERE funding_date is in YTD range for this officer.`,
           magnitude: "major",
         });
       }
@@ -3436,7 +3436,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
             metric: "Headcount-Production Gap (Bottom Tier)",
             value: `${gap.headcountPct}% of headcount but only ${gap.revenuePct}% of revenue`,
             direction: "negative",
-            context: `${gap.unitsPct}% of units. Gap: ${gap.gap}pp`,
+            context: `${gap.unitsPct}% of units. Gap: ${gap.gap} percentage points`,
             magnitude: gap.headcountPct - gap.revenuePct >= 35 ? "major" : "moderate",
           });
         }
@@ -3447,7 +3447,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
             metric: "Key-Person Risk (Top Tier)",
             value: `${gap.headcountPct}% of headcount generates ${gap.revenuePct}% of revenue`,
             direction: "negative",
-            context: `Small number of top producers carry majority of revenue. Gap: ${gap.gap}pp`,
+            context: `Small number of top producers carry majority of revenue. Gap: ${gap.gap} percentage points`,
             magnitude: "major",
           });
         }
@@ -3464,7 +3464,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
             metric: "Bottom Tier vs Company Avg PT",
             value: `Bottom tier PT ${fmtPct(tierAvgs.bottom.avgPullThrough)} vs company avg ${fmtPct(ca.avgPullThrough)}`,
             direction: "negative",
-            context: `${ptGap.toFixed(1)}pp below company average`,
+            context: `${ptGap.toFixed(1)} percentage points below company average`,
             magnitude: ptGap >= 15 ? "major" : "moderate",
           });
         }
@@ -3801,7 +3801,7 @@ export function computeSignals(metrics: InsightMetricsPayload): Signal[] {
         metric: "Pull-Through YoY Change",
         value: `${fmtPct(snaps.ytd.pullThroughRate)} YTD`,
         direction: ptYoyDelta > 0 ? "positive" : "negative",
-        context: `vs ${fmtPct(snaps.priorYtd.pullThroughRate)} prior YTD (${ptYoyDelta > 0 ? "+" : ""}${ptYoyDelta.toFixed(1)}pp)`,
+        context: `vs ${fmtPct(snaps.priorYtd.pullThroughRate)} prior YTD (${ptYoyDelta > 0 ? "+" : ""}${ptYoyDelta.toFixed(1)} percentage points)`,
         magnitude: Math.abs(ptYoyDelta) >= 5 ? "major" : "moderate",
       });
     }

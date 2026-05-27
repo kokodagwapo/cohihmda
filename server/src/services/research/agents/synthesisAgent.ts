@@ -10,6 +10,7 @@ import { callLLM, type LLMMessage } from "../tools.js";
 import type { ResearchPlan } from "./plannerAgent.js";
 import type { Finding, EvidenceItemSql, EvidenceItemRegistryWidget } from "./dataAnalystAgent.js";
 import { isSqlEvidenceItem } from "./dataAnalystAgent.js";
+import { METRIC_LANGUAGE_RULES } from "../../chat/metricLexicon.js";
 
 // ============================================================================
 // Types
@@ -91,8 +92,7 @@ Your output is a JSON object:
 }
 
 LANGUAGE AND FORMATTING RULES:
-- Never write "pp" or "p.p." to mean percentage points. Write "ppts" or spell it out: "percentage points". Example: "pull-through fell 12 percentage points" not "fell 12pp".
-- Use "%" for rates and proportions (e.g. "pull-through is 74%"). Use "percentage points" or "ppts" only when describing the change between two rates (e.g. "improved 8 ppts YoY").
+${METRIC_LANGUAGE_RULES}
 
 RULES:
 - DATA BUILD requests: When the user asked for a specific output (a table, a breakdown, "show me X"), set directAnswer to a 1-2 sentence response. The finding that contains the user's requested table MUST be the basis for the rank-1 insight.

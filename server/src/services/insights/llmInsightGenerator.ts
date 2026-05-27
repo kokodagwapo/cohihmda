@@ -28,6 +28,7 @@ import {
   fetchHistoricalPatternContext,
   fetchKnowledgeContextForInsights,
 } from "./insightMetricsCollector.js";
+import { METRIC_LANGUAGE_RULES } from "../chat/metricLexicon.js";
 import { hydrateInsightDetails } from "./insightDetailHydrator.js";
 import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
 import { getSchemaForTenant } from "../ai/schemaContextService.js";
@@ -621,7 +622,7 @@ function promptFmtSnap(label: string, cur: PeriodSnapshot, prior?: PeriodSnapsho
     parts.push(
       `  vs Prior: Vol ${promptFmt$(prior.fundedVolume)}→${promptFmt$(cur.fundedVolume)} (${volDelta > 0 ? "+" : ""}${promptFmtPct(volDelta)})` +
       ` | Units ${prior.fundedCount}→${cur.fundedCount} (${fundedCountDelta > 0 ? "+" : ""}${promptFmtPct(fundedCountDelta)})` +
-      ` | PT ${promptFmtPct(prior.pullThroughRate)}→${promptFmtPct(cur.pullThroughRate)} (${ptDelta > 0 ? "+" : ""}${ptDelta.toFixed(1)}pp)` +
+      ` | PT ${promptFmtPct(prior.pullThroughRate)}→${promptFmtPct(cur.pullThroughRate)} (${ptDelta > 0 ? "+" : ""}${ptDelta.toFixed(1)} percentage points)` +
       ` | Cycle ${prior.avgCycleTime}d→${cur.avgCycleTime}d (${cycleDelta > 0 ? "+" : ""}${cycleDelta}d)`
     );
   }
@@ -710,7 +711,7 @@ IMPORTANT: Use this data to identify which product types are underperforming. Co
 ${metrics.riskCrossTab.deteriorating.length > 0
   ? `Top deteriorating risk pockets vs 36-month baseline:
 ${metrics.riskCrossTab.deteriorating.map(d =>
-    `- ${d.product} / FICO ${d.ficoBand} / DTI ${d.dtiBand}: Fallout ${promptFmtPct(d.baselineFalloutRate)} -> ${promptFmtPct(d.currentFalloutRate)} (+${d.deltaPercent}pp), ${d.affectedLoans} loans affected`
+    `- ${d.product} / FICO ${d.ficoBand} / DTI ${d.dtiBand}: Fallout ${promptFmtPct(d.baselineFalloutRate)} -> ${promptFmtPct(d.currentFalloutRate)} (+${d.deltaPercent} percentage points), ${d.affectedLoans} loans affected`
   ).join("\n")}
 
 IMPORTANT: These are the specific risk pockets where performance has worsened most vs the long-term baseline. Use these to generate precise diagnostic insights.`
@@ -869,7 +870,7 @@ When prior-period base is small (revenue < $25K, units ≤ 2), report ABSOLUTE c
           parts.push("Headcount vs Production Gap:");
           for (const gap of agg.headcountProductionGap) {
             const tierLabel = gap.tier === "top" ? "Top" : gap.tier === "second" ? "Second" : "Bottom";
-            parts.push(`  ${tierLabel} tier: ${gap.headcountPct}% of headcount, ${gap.revenuePct}% of revenue, ${gap.unitsPct}% of units (gap: ${gap.gap > 0 ? "+" : ""}${gap.gap}pp)`);
+            parts.push(`  ${tierLabel} tier: ${gap.headcountPct}% of headcount, ${gap.revenuePct}% of revenue, ${gap.unitsPct}% of units (gap: ${gap.gap > 0 ? "+" : ""}${gap.gap} percentage points)`);
           }
         }
         if (agg.tierTrends.length > 0) {
@@ -1109,6 +1110,7 @@ function buildDomainPrompt(domainId: InsightDomainId, metrics: InsightMetricsPay
   return `Analyze these mortgage business metrics. Your focus domain is: ${domainConfig.label}.
 Generate ${domainConfig.candidateTarget} high-quality insights specifically about ${domainConfig.label}.
 Only output insights supported by the data below. If a metric is 0 or N/A, do not generate an insight about it.
+${METRIC_LANGUAGE_RULES}
 
 ${shared}
 
@@ -1131,7 +1133,8 @@ ${shared}
 
 ${sections}
 
-Generate insights for your designated category now. Only output insights supported by this data. If a metric is 0 or N/A, do not generate an insight about it.`;
+Generate insights for your designated category now. Only output insights supported by this data. If a metric is 0 or N/A, do not generate an insight about it.
+${METRIC_LANGUAGE_RULES}`;
 }
 
 // ============================================================================

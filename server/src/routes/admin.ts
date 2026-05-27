@@ -1219,9 +1219,9 @@ router.post(
     }
 
     const schema = z.object({
-      email: z.string().email(),
+      email: z.string().trim().toLowerCase().email(),
       password: z.string().min(6).optional(),
-      full_name: z.string().optional(),
+      full_name: z.string().trim().optional(),
       persona: z
         .enum([
           "tenant_admin",
@@ -1231,9 +1231,9 @@ router.post(
         .optional(),
       loan_scope: z.enum(["all", "encompass", "manual", "none"]).optional(),
     });
-    
+
     const validated = schema.parse(req.body);
-    const normalizedEmail = validated.email.trim().toLowerCase();
+    const normalizedEmail = validated.email;
     const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
     if (!useCognitoInvite && !validated.password) {
       return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });

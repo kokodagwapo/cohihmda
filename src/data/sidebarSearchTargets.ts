@@ -47,11 +47,12 @@ function toSidebarTarget(
   return null;
 }
 
-export async function fetchSidebarSearchTargets(): Promise<
-  SidebarRouteSearchTarget[]
-> {
+export async function fetchSidebarSearchTargets(
+  tenantId?: string | null,
+): Promise<SidebarRouteSearchTarget[]> {
+  const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
   const resp = await api.request<NavigationTargetsResponse>(
-    "/api/cohi-chat/navigation-targets",
+    `/api/cohi-chat/navigation-targets${qs}`,
     { method: "GET" },
   );
   const targets = Array.isArray(resp?.targets) ? resp.targets : [];
