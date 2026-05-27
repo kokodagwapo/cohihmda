@@ -40,6 +40,8 @@ import {
   resolveDatasetUploadIdsForRequest,
   resolveUploadSchemaContext,
 } from "../research/uploadConversationService.js";
+import { routePresentationExportIntent } from "./pptIntentRouter.js";
+import type { PresentationExportMetadata } from "./presentationExportIntent.js";
 
 export type UnifiedChatType = UnifiedConversationChatType;
 
@@ -432,6 +434,82 @@ export async function processUnifiedChatMessage(
   let metadata: Record<string, unknown>;
   let legacySource: string | null = null;
 
+  let presentationExport: PresentationExportMetadata | null = null;
+  try {
+    presentationExport = await routePresentationExportIntent({
+      message: body.message.trim(),
+      chatType,
+      history: body.history,
+      tenantId: tenantId ?? undefined,
+    });
+  } catch (err: unknown) {
+    console.warn(
+      "[unifiedChatOrchestrator] presentation export intent failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  const convertOnlyVizExport =
+    presentationExport?.wantsPresentationExport &&
+    presentationExport.action === "export_viz" &&
+    presentationExport.mode === "convert" &&
+    chatType === "chat";
+
+  const convertOnlyWorkbenchEditor =
+    presentationExport?.wantsPresentationExport &&
+    presentationExport.action === "open_workbench_editor" &&
+    presentationExport.mode === "convert" &&
+    (chatType === "workbench" || shouldUseWorkbench(body));
+
+  if (convertOnlyWorkbenchEditor) {
+    blocks = [
+      {
+        type: "text",
+        markdown: "Opening the PowerPoint Editor with your last result…",
+      },
+    ];
+    metadata = {
+      promptHash: bundle.bundleHash,
+      chatType,
+      policyDecisionId: policy.decisionId,
+      route: "workbench",
+      presentationExport,
+      contextManifest: baseContextManifest(body, []),
+    };
+    return {
+      conversationId,
+      turn: { id: turnId, blocks },
+      metadata,
+      legacyRef,
+      legacySource: "cohi_chat",
+    };
+  }
+
+  if (convertOnlyVizExport) {
+    blocks = [
+      {
+        type: "text",
+        markdown:
+          "I'll prepare a PowerPoint from your last chart. Use **Download** on the card below.",
+      },
+    ];
+    metadata = {
+      promptHash: bundle.bundleHash,
+      chatType,
+      policyDecisionId: policy.decisionId,
+      route: "global",
+      presentationExport,
+      contextManifest: baseContextManifest(body, []),
+    };
+    return {
+      conversationId,
+      turn: { id: turnId, blocks },
+      metadata,
+      legacyRef,
+      legacySource: "cohi_chat",
+    };
+  }
+
   if (chatType === "research") {
     const research = await runUnifiedResearchTurn({
       req,
@@ -487,6 +565,10 @@ export async function processUnifiedChatMessage(
     blocks = global.blocks;
     metadata = { ...global.metadata, chatType, policyDecisionId: policy.decisionId };
     legacySource = "cohi_chat";
+  }
+
+  if (presentationExport) {
+    metadata = { ...metadata, presentationExport };
   }
 
   return {

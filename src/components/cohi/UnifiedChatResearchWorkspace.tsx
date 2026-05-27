@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChatMessage } from "@/hooks/useCohiChat";
 import { flushSync } from "react-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useResearchSession } from "@/hooks/useResearchSession";
@@ -44,7 +45,6 @@ import { exportResearchReportAsPpt } from "@/utils/exportUtils";
 import { useResearchInsightTracking } from "@/hooks/useResearchInsightTracking";
 import { useOptionalCohiChatSession } from "@/contexts/CohiChatSessionContext";
 import { RESEARCH_SHELL_EXPAND_EVENT } from "@/lib/unifiedChatEnvelope";
-import type { ChatMessage } from "@/hooks/useCohiChat";
 
 export interface UnifiedChatResearchWorkspaceProps {
   researchSessionId?: string | null;
@@ -109,6 +109,7 @@ export function UnifiedChatResearchWorkspace({
   const [workbenchPayload, setWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
   const reportContainerRef = useRef<HTMLDivElement>(null);
   const [exportPreparing, setExportPreparing] = useState(false);
+  const deferredPptFulfilledRef = useRef(false);
   const { isTracked, onToggleTrack } = useResearchInsightTracking(
     tenantId,
     researchSessionId,
@@ -152,10 +153,12 @@ export function UnifiedChatResearchWorkspace({
       setSessionHydrating(false);
       setActiveTab("report");
       setSelectedFindingId(null);
+      deferredPptFulfilledRef.current = false;
       return;
     }
     setSessionHydrating(true);
     reset();
+    deferredPptFulfilledRef.current = false;
     void refreshSession(researchSessionId).finally(() => setSessionHydrating(false));
   }, [researchSessionId, reset, refreshSession]);
 
@@ -241,6 +244,59 @@ export function UnifiedChatResearchWorkspace({
     const firstUser = messages.find((m) => m.role === "user")?.content?.trim();
     return firstUser || undefined;
   }, [messages, researchSessionId, sessions]);
+
+  const hasDeferredPptBuilding = useMemo(
+    () =>
+      messages.some(
+        (m) =>
+          m.role === "assistant" &&
+          m.pptExport?.exportKind === "research_report" &&
+          m.pptExport.status === "building",
+      ),
+    [messages],
+  );
+
+  const researchPptSlideCount = useMemo(() => {
+    if (!reportReady) return 0;
+    return buildResearchReportPptModel({
+      title: reportExportTitle,
+      understory: reportUnderstory,
+      report,
+      findings,
+      primaryFinding,
+    }).length;
+  }, [
+    reportReady,
+    reportExportTitle,
+    reportUnderstory,
+    report,
+    findings,
+    primaryFinding,
+  ]);
+
+  useEffect(() => {
+    if (
+      !researchSessionId ||
+      !reportReady ||
+      !hasDeferredPptBuilding ||
+      deferredPptFulfilledRef.current
+    ) {
+      return;
+    }
+    deferredPptFulfilledRef.current = true;
+    chatSession?.fulfillDeferredResearchPptExport?.({
+      title: reportExportTitle,
+      slideCount: researchPptSlideCount,
+    });
+    setActiveTab("report");
+  }, [
+    researchSessionId,
+    reportReady,
+    hasDeferredPptBuilding,
+    chatSession,
+    reportExportTitle,
+    researchPptSlideCount,
+  ]);
 
   const handleStructuredResearchPpt = useCallback(async () => {
     const slides = buildResearchReportPptModel({
@@ -530,6 +586,10 @@ export function UnifiedChatResearchWorkspace({
             }
             reportContainerRef={reportContainerRef}
             forceEvidenceOpen={exportPreparing}
+            researchPptExportTitle={reportExportTitle}
+            researchPptSlideCount={researchPptSlideCount}
+            onDownloadResearchPpt={handleStructuredResearchPpt}
+            researchPptDownloadBusy={exportPreparing}
           />
         </TabsContent>
       </Tabs>

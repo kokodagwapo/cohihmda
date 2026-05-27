@@ -112,6 +112,8 @@ export interface ResearchSession {
   widgetContext?: ResearchWidgetContext;
   /** Unified chat fork carry-over (in-memory; used by deep planner). */
   priorChatCarryOver?: string;
+  /** NL ask: run investigation first, then client offers report PPT when complete. */
+  pendingPresentationExport?: boolean;
 }
 
 export interface ResearchAccessPrincipal {
@@ -424,6 +426,11 @@ export async function loadSession(
       sharedWithUserIds: Array.isArray(row.shared_with_user_ids) ? row.shared_with_user_ids : [],
       uploadIds: Array.isArray(row.upload_ids) ? row.upload_ids : [],
       widgetContext,
+      pendingPresentationExport: Array.isArray(row.events)
+        ? row.events.some(
+            (e: { type?: string }) => e?.type === "presentation_export_pending",
+          )
+        : false,
     };
 
     sessions.set(session.id, session);

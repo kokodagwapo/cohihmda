@@ -18,6 +18,7 @@ import {
   runFollowUp,
   getSession,
   loadSession,
+  saveSession,
   isSessionRunning,
   type ResearchMode,
   type SSEEvent,
@@ -35,6 +36,11 @@ import { researchArtifactBlock } from "./unifiedResearchChat.js";
 import { assertSqlAllowedByPolicy } from "./sqlAndMetricsRouter.js";
 import type { PolicyDecision } from "./unifiedChatPolicy.js";
 import { RESEARCH_SHELL_EXPAND_METADATA } from "./researchShellMetadata.js";
+import { routePresentationExportIntent } from "./pptIntentRouter.js";
+import {
+  fallbackResearchTopicFromMessage,
+  type PresentationExportMetadata,
+} from "./presentationExportIntent.js";
 
 export const RESEARCH_POLL_MODE_METADATA_KEY = "researchPollMode";
 
@@ -47,6 +53,7 @@ export interface UnifiedResearchStreamArgs {
   legacyRef?: string | null;
   deepAnalysis?: boolean;
   uploadIds?: string[];
+  history?: { role: string; content: string }[];
   policy: PolicyDecision;
   carryOver?: CarryOverContextPayload | null;
   modeHandoff?: ReturnType<typeof readModeHandoffContext>;
@@ -120,6 +127,75 @@ export async function runUnifiedResearchStream(
     });
   }
 
+  let presentationExport: PresentationExportMetadata | null = null;
+  try {
+    presentationExport = await routePresentationExportIntent({
+      message: args.message.trim(),
+      chatType: "research",
+      history: args.history,
+      tenantId,
+    });
+  } catch (err: unknown) {
+    console.warn(
+      "[unifiedResearchStream] presentation intent failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  if (presentationExport?.wantsPresentationExport) {
+    const hasExportableReport =
+      session.phase === "complete" &&
+      (session.findings.length > 0 || !!session.report);
+    if (hasExportableReport) {
+      return emitResearchPresentationExportStream(
+        args,
+        session,
+        sessionId,
+        presentationExport,
+        { handoffManifest },
+      );
+    }
+
+    const researchTopic =
+      presentationExport.researchTopic?.trim() ||
+      fallbackResearchTopicFromMessage(args.message.trim());
+    if (researchTopic.length >= 8) {
+      session.topic = researchTopic;
+    }
+    session.pendingPresentationExport = true;
+    if (
+      !session.events.some((e) => e.type === "presentation_export_pending")
+    ) {
+      session.events.push({
+        type: "presentation_export_pending",
+        data: { requestedAt: Date.now() },
+      } as SSEEvent);
+    }
+    try {
+      await saveSession(session, tenantPool);
+    } catch (err: unknown) {
+      console.warn(
+        "[unifiedResearchStream] save pending PPT flag:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    const topicLabel = session.topic || researchTopic;
+    const deferredExport: PresentationExportMetadata = {
+      ...presentationExport,
+      deferred: true,
+      researchTopic: session.topic,
+    };
+
+    kickResearchPipelineInBackground(args, session, sessionId, tenantPool);
+
+    return emitResearchPollStream(args, session, sessionId, {
+      handoffManifest,
+      markdownOverride: `Research investigation started for: **${topicLabel}**. When the report is ready, a PowerPoint download will appear below.`,
+      presentationExport: deferredExport,
+    });
+  }
+
   kickResearchPipelineInBackground(args, session, sessionId, tenantPool);
 
   return emitResearchPollStream(args, session, sessionId, { handoffManifest });
@@ -173,6 +249,24 @@ export function buildResearchPollModeMarkdown(
   return `Research investigation started for: **${topic}**. Open the Research workspace to view timeline, findings, and report as they are ready.`;
 }
 
+function emitResearchPresentationExportStream(
+  args: UnifiedResearchStreamArgs,
+  session: ResearchSession,
+  sessionId: string,
+  presentationExport: PresentationExportMetadata,
+  options?: {
+    handoffManifest?: { tier: string; included: boolean; truncated: boolean }[];
+  },
+): UnifiedResearchStreamResult {
+  const markdown =
+    "Your research report is ready to export as PowerPoint. Use **Download** on the card below when you're ready.";
+  return emitResearchPollStream(args, session, sessionId, {
+    handoffManifest: options?.handoffManifest,
+    markdownOverride: markdown,
+    presentationExport,
+  });
+}
+
 function emitResearchPollStream(
   args: UnifiedResearchStreamArgs,
   session: ResearchSession,
@@ -180,12 +274,15 @@ function emitResearchPollStream(
   options?: {
     pipelineError?: string;
     handoffManifest?: { tier: string; included: boolean; truncated: boolean }[];
+    markdownOverride?: string;
+    presentationExport?: PresentationExportMetadata;
   },
 ): UnifiedResearchStreamResult {
   setupSseHeaders(args.res);
   const emit = makeEmitter(args.res);
 
-  const markdown = buildResearchPollModeMarkdown(session, args.message);
+  const markdown =
+    options?.markdownOverride ?? buildResearchPollModeMarkdown(session, args.message);
   const finalTextBlock: UnifiedBlock = { type: "text", markdown };
   const artifactBlock = researchArtifactBlock(sessionId, session.phase);
   const pollMetadata = {
@@ -194,6 +291,9 @@ function emitResearchPollStream(
     phase: session.phase,
     [RESEARCH_POLL_MODE_METADATA_KEY]: true,
     ...RESEARCH_SHELL_EXPAND_METADATA,
+    ...(options?.presentationExport
+      ? { presentationExport: options.presentationExport }
+      : {}),
     contextManifest: [
       { tier: "identity", included: true, truncated: false },
       { tier: "research_pipeline", included: true, truncated: false },
@@ -268,6 +368,9 @@ function emitResearchPollStream(
       phase: session.phase,
       [RESEARCH_POLL_MODE_METADATA_KEY]: true,
       ...RESEARCH_SHELL_EXPAND_METADATA,
+      ...(options?.presentationExport
+        ? { presentationExport: options.presentationExport }
+        : {}),
     },
     legacyRef: sessionId,
   };

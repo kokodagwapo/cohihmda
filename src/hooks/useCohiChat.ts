@@ -12,6 +12,11 @@ import {
   parseWorkbenchUnifiedEnvelope,
   type UnifiedChatBlock,
 } from "@/lib/unifiedChatEnvelope";
+import {
+  enrichVizPresentationExportsOnLoad,
+  hydratePresentationExportsOnLoad,
+  type LoadedTurnPresentationMeta,
+} from "@/lib/hydratePresentationExportOnLoad";
 import { serializeWidgetCatalog } from "@/utils/widgetCatalogSerializer";
 import type { WidgetAction, CanvasStateSnapshot } from "@/types/widgetActions";
 import {
@@ -250,6 +255,8 @@ export interface ChatMessage {
   workbenchActionsAppliedCount?: number;
   /** suggest_dashboard actions awaiting user choice (add pre-built vs custom). */
   workbenchPendingActions?: WidgetAction[];
+  /** NL presentation export card (global / research). */
+  pptExport?: import("@/lib/presentationExportTypes").ChatMessagePptExport;
 }
 
 export interface CohiChatResponse {
@@ -274,6 +281,10 @@ export interface ChatSession {
   createdAt: string;
 }
 
+export interface PresentationExportHandlers {
+  onOpenWorkbenchEditor?: () => void | Promise<void>;
+}
+
 export interface UseCohiChatOptions {
   tenantId?: string;
   enabled?: boolean;
@@ -282,6 +293,8 @@ export interface UseCohiChatOptions {
   chatType?: UnifiedChatType;
   /** Research-only: deep analysis toggle (§4.2). */
   researchDeepAnalysis?: boolean;
+  /** NL PowerPoint / slides export (workbench editor, research report, viz deck). */
+  presentationExportHandlers?: PresentationExportHandlers;
 }
 
 function emptyWorkbenchCanvasState(): CanvasStateSnapshot {
@@ -355,6 +368,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     onError,
     chatType = "chat",
     researchDeepAnalysis = false,
+    presentationExportHandlers,
   } = options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -398,6 +412,37 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     ) => {
       if (viewingSessionRef.current !== streamConversationId) return;
       setMessages(updater);
+    },
+    [],
+  );
+
+  /** When deferred research PPT completes, show the download card (status building → ready). */
+  const fulfillDeferredResearchPptExport = useCallback(
+    (opts?: { title?: string; slideCount?: number }) => {
+      setMessages((prev) => {
+        const target = [...prev]
+          .reverse()
+          .find(
+            (m) =>
+              m.role === "assistant" &&
+              m.pptExport?.exportKind === "research_report" &&
+              m.pptExport.status === "building",
+          );
+        if (!target?.pptExport) return prev;
+        return prev.map((m) =>
+          m.id === target.id
+            ? {
+                ...m,
+                pptExport: {
+                  ...m.pptExport!,
+                  status: "ready" as const,
+                  title: opts?.title ?? m.pptExport!.title,
+                  slideCount: opts?.slideCount ?? m.pptExport!.slideCount,
+                },
+              }
+            : m,
+        );
+      });
     },
     [],
   );
@@ -702,6 +747,36 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     [],
   );
 
+  const runPresentationExportAfterTurn = useCallback(
+    async (
+      conversationId: string,
+      assistantMessageId: string,
+      metadata: Record<string, unknown> | undefined,
+      userQuestion: string,
+      activeChatType: UnifiedChatType,
+    ) => {
+      let snapshot: ChatMessage[] = [];
+      applyMessagesForStream(conversationId, (prev) => {
+        snapshot = prev;
+        return prev;
+      });
+      const updated = await import("@/lib/applyPresentationExportAfterTurn").then(
+        (m) =>
+          m.applyPresentationExportAfterTurn({
+            messages: snapshot,
+            assistantMessageId,
+            chatType: activeChatType,
+            metadata,
+            userQuestion,
+            onOpenWorkbenchEditor:
+              presentationExportHandlers?.onOpenWorkbenchEditor,
+          }),
+      );
+      applyMessagesForStream(conversationId, () => updated);
+    },
+    [applyMessagesForStream, presentationExportHandlers],
+  );
+
   const bindResearchSessionAfterStream = useCallback(
     async (
       client: ReturnType<typeof createUnifiedChatClient>,
@@ -927,7 +1002,8 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               : activeSessionId!;
             beginStreamRun(streamConversationId);
 
-            const { conversationId, parsed } = await sendUnifiedWorkbenchStream({
+            const { conversationId, parsed, streamMetadata } =
+              await sendUnifiedWorkbenchStream({
               client,
               message: effectiveQuestion,
               conversationId: streamConversationId,
@@ -995,6 +1071,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               if (links) setConversationForkLinks(links);
             });
             endStreamRun(streamConversationId);
+            void runPresentationExportAfterTurn(
+              streamConversationId,
+              assistantMessageId,
+              streamMetadata,
+              effectiveQuestion,
+              "workbench",
+            );
           } else {
             const ibOpts = options?.insightBuilder;
             let ibDraft = ibOpts?.draft;
@@ -1018,8 +1101,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               chatType,
               workbenchCanvasId: workbenchSavedCanvasId,
             });
-            const { conversationId, parsed, researchPollMode, researchSessionId } =
-              await sendUnifiedGlobalStream({
+            const {
+              conversationId,
+              parsed,
+              researchPollMode,
+              researchSessionId,
+              streamMetadata,
+            } = await sendUnifiedGlobalStream({
               client,
               message: effectiveQuestion,
               chatType,
@@ -1101,6 +1189,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               });
             }
             endStreamRun(streamConversationId);
+            void runPresentationExportAfterTurn(
+              streamConversationId,
+              assistantMessageId,
+              streamMetadata,
+              effectiveQuestion,
+              chatType,
+            );
           }
         } else {
           setIsLoading(true);
@@ -1913,12 +2008,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             metadata?: Record<string, unknown>;
             at?: string;
           }>;
+          const presentationMetaTurns: LoadedTurnPresentationMeta[] = [];
           const loadedMessages: ChatMessage[] = raw
             .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m, i) => {
+              const messageId = `loaded-${i}`;
               if (m.role === "user") {
                 return {
-                  id: `loaded-${i}`,
+                  id: messageId,
                   role: "user" as const,
                   content: m.content ?? "",
                   timestamp: new Date(m.at ?? Date.now()),
@@ -1928,20 +2025,26 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
               if (loadedChatType === "workbench") {
                 const wb = parseWorkbenchUnifiedEnvelope({
                   conversationId: targetSessionId,
-                  turn: { id: `loaded-${i}`, blocks },
+                  turn: { id: messageId, blocks },
                   metadata: m.metadata,
                 });
                 return {
-                  id: `loaded-${i}`,
+                  id: messageId,
                   role: "assistant" as const,
                   content: wb.message,
                   timestamp: new Date(m.at ?? Date.now()),
                   workbenchActions: wb.actions,
                 };
               }
+              if (m.metadata) {
+                presentationMetaTurns.push({
+                  assistantMessageId: messageId,
+                  metadata: m.metadata,
+                });
+              }
               const parsed = parseGlobalFromBlocks(blocks, m.metadata);
               return {
-                id: `loaded-${i}`,
+                id: messageId,
                 role: "assistant" as const,
                 content: parsed.message,
                 visualization: parsed.visualization as
@@ -1956,10 +2059,24 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                 visualizationArtifactId: parsed.visualizationArtifactId,
               };
             });
+          const hydratedMessages = hydratePresentationExportsOnLoad(
+            loadedMessages,
+            presentationMetaTurns,
+          );
           if (generation !== loadSessionGenerationRef.current) {
             return { datasetUploadIds: [] };
           }
-          setMessages(loadedMessages);
+          setMessages(hydratedMessages);
+          if (presentationMetaTurns.length > 0 && loadedChatType !== "workbench") {
+            void enrichVizPresentationExportsOnLoad(
+              hydratedMessages,
+              presentationMetaTurns,
+              loadedChatType,
+            ).then((enriched) => {
+              if (generation !== loadSessionGenerationRef.current) return;
+              setMessages(enriched);
+            });
+          }
           setSessionId(targetSessionId);
           viewingSessionRef.current = targetSessionId;
           setLegacyRef(row.legacy_ref ?? null);
@@ -1987,17 +2104,40 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           return { datasetUploadIds: [] };
         }
 
-        const loadedMessages: ChatMessage[] = response.messages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          timestamp: new Date(m.createdAt),
-          visualization: m.metadata?.visualization,
-          sqlQuery: m.metadata?.sqlQuery,
-          sources: m.metadata?.sources,
-        }));
+        const presentationMetaTurns: LoadedTurnPresentationMeta[] = [];
+        const baseMessages: ChatMessage[] = response.messages.map((m) => {
+          if (m.role === "assistant" && m.metadata) {
+            presentationMetaTurns.push({
+              assistantMessageId: m.id,
+              metadata: m.metadata,
+            });
+          }
+          return {
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.createdAt),
+            visualization: m.metadata?.visualization,
+            sqlQuery: m.metadata?.sqlQuery,
+            sources: m.metadata?.sources,
+          };
+        });
+        const loadedMessages = hydratePresentationExportsOnLoad(
+          baseMessages,
+          presentationMetaTurns,
+        );
 
         setMessages(loadedMessages);
+        if (presentationMetaTurns.length > 0) {
+          void enrichVizPresentationExportsOnLoad(
+            loadedMessages,
+            presentationMetaTurns,
+            chatType,
+          ).then((enriched) => {
+            if (generation !== loadSessionGenerationRef.current) return;
+            setMessages(enriched);
+          });
+        }
         setSessionId(targetSessionId);
         setSuggestedQuestions(defaultSuggestionsForChatType(chatType));
         return { datasetUploadIds: [], chatType };
@@ -2345,5 +2485,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     resolveScopeMismatchActions,
     pinWorkbenchChatScope,
     applyWorkbenchDashboardSuggestion,
+    fulfillDeferredResearchPptExport,
   };
 }
