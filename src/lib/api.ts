@@ -654,10 +654,26 @@ export class ApiClient {
           this.forceLogoutAndRedirect();
         }
 
+        const validationDetail =
+          Array.isArray(errorData.details) && errorData.details.length > 0
+            ? errorData.details
+                .map((detail: { path?: unknown[]; message?: string }) => {
+                  const field = Array.isArray(detail.path)
+                    ? detail.path.join(".")
+                    : "field";
+                  return detail.message
+                    ? `${field}: ${detail.message}`
+                    : field;
+                })
+                .join("; ")
+            : null;
+
         throw new Error(
-          errorData.message
-            ? `${errorData.error || "Request failed"}: ${errorData.message}`
-            : errorData.error || "Request failed"
+          validationDetail
+            ? `${errorData.error || "Request failed"}: ${validationDetail}`
+            : errorData.message
+              ? `${errorData.error || "Request failed"}: ${errorData.message}`
+              : errorData.error || "Request failed"
         );
       }
 

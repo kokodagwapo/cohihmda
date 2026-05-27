@@ -52,11 +52,17 @@ async function buildChatContextForStream(
 ): Promise<ChatContext> {
   const tenantId = req.tenantContext?.tenantId || req.tenantId;
   if (!tenantId) throw new Error("No tenant context available");
+  const pageRoute =
+    requestBody?.location?.route ??
+    requestBody?.context?.dashboardGrounding?.route ??
+    null;
+
   const base: ChatContext = {
     userId: req.userId!,
     tenantId,
     userRole: req.userRole || "user",
     userEmail: req.userEmail,
+    pageRoute: pageRoute ?? undefined,
   };
   if (!requestBody) return base;
   const tenantPool = await tenantDbManager.getTenantPool(tenantId);

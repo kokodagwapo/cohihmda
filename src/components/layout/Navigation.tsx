@@ -468,14 +468,20 @@ export function Navigation(
     }
   }, [user]);
 
+  const effectiveTenantId = selectedTenantId || user?.tenant_id || null;
+
   useEffect(() => {
     let alive = true;
     if (!isAuthenticated) {
       setSidebarSearchTargets([]);
       return;
     }
+    if (!effectiveTenantId) {
+      setSidebarSearchTargets([]);
+      return;
+    }
 
-    fetchSidebarSearchTargets()
+    fetchSidebarSearchTargets(effectiveTenantId)
       .then((targets) => {
         if (alive) setSidebarSearchTargets(targets);
       })
@@ -487,7 +493,7 @@ export function Navigation(
     return () => {
       alive = false;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, effectiveTenantId]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {

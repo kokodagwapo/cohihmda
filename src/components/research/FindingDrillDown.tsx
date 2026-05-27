@@ -98,6 +98,7 @@ import {
   shouldShowResearchSqlLineageLink,
 } from "@/lib/researchVisualizationLineage";
 import { ResearchSourceDashboardLink } from "@/components/research/ResearchSourceDashboardLink";
+import { detectSnapshotColumnsInTimeframeTable } from "@/lib/research/snapshotMetricTableHint";
 import {
   agentFormatToFieldFormat,
   buildSqlEvidenceExportData,
@@ -106,7 +107,7 @@ import {
   inferFormat,
   inferFormatFromValue,
 } from "@/lib/researchEvidenceExport";
-import { evidenceToChartConfig } from "@/lib/researchChartConfig";
+import { evidenceToChartConfig, parseNumeric } from "@/lib/researchChartConfig";
 
 async function exportResearchElement(
   action: "pdf" | "ppt",
@@ -412,8 +413,22 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
   const gridCols = { display: "grid" as const, gridTemplateColumns: `repeat(${evidence.fields.length}, minmax(80px, 1fr))` };
   const canLoadMore = totalFiltered > visibleRowCount;
 
+  const snapshotColumns = useMemo(
+    () => detectSnapshotColumnsInTimeframeTable(evidence.fields, evidence.rows),
+    [evidence.fields, evidence.rows],
+  );
+
   return (
     <div className="space-y-2">
+      {snapshotColumns.length > 0 && (
+        <p className="text-xs text-muted-foreground rounded-md border border-amber-200/60 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-800/40 px-2.5 py-2">
+          <strong>Snapshot metrics:</strong>{" "}
+          {snapshotColumns.map(humanizeKey).join(", ")} show the same value for
+          each period because they reflect the <strong>current pipeline as of
+          today</strong>, not a historical cohort. Compare windowed metrics
+          (applications, funded, pull-through) across periods instead.
+        </p>
+      )}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <Badge variant="outline" className="text-xs">Query {index + 1}</Badge>
@@ -1097,7 +1112,7 @@ export function AutoChart({
           {grid}
           <XAxis dataKey="range" tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: tickFontSize }} width={40} axisLine={false} tickLine={false} />
-          <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={(v: any) => [v, "Count"]} />
+          <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={(v: number) => [v, "Count"]} />
           <Bar dataKey="count" fill={SINGLE_SERIES_COLOR} radius={[2, 2, 0, 0]} />
         </BarChart>
       </AutoChartShell>
@@ -1107,8 +1122,8 @@ export function AutoChart({
   // ── Scatter chart ─────────────────────────────────────────────────────────
   if (chartType === 'scatter') {
     const hint = evidence.chartHint;
-    const xScatterKey = hint?.xKey ?? fields[0];
-    const yScatterKey = hint?.yKey ?? hint?.y2Key ?? numericFields[1] ?? numericFields[0];
+    const xScatterKey = hint?.xKey ?? xKey;
+    const yScatterKey = hint?.yKey ?? hint?.y2Key ?? yKey;
     const scatterData = data
       .map((d) => ({ x: parseNumeric(d[xScatterKey]), y: parseNumeric(d[yScatterKey]) }))
       .filter((p) => !isNaN(p.x) && !isNaN(p.y));

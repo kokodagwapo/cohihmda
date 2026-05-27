@@ -36,7 +36,7 @@ import {
   readCarryOverContext,
   prependCarryOverToHistory,
 } from "../services/chat/chatConversationFork.js";
-import { readModeHandoffContext } from "../services/chat/modeHandoff.js";
+import { resolveModeHandoffContext } from "../services/chat/dashboardGrounding.js";
 import { resolveInsightBuilderStructuralHandoff } from "../services/chat/handoffResolver.js";
 import {
   listUnifiedChatFolders,
@@ -908,7 +908,7 @@ async function handleInsightBuilderStream(
 
   const conversationId = body.conversationId ?? randomUUID();
   const turnId = randomUUID();
-  const modeHandoff = readModeHandoffContext(body);
+  const modeHandoff = resolveModeHandoffContext(body);
   const ibStructural = resolveInsightBuilderStructuralHandoff(modeHandoff);
   const baseHistory = body.history ?? [];
   const history =
@@ -1033,7 +1033,7 @@ async function handleResearchStream(
       history: body.history,
       policy,
       carryOver: readCarryOverContext(body),
-      modeHandoff: readModeHandoffContext(body),
+      modeHandoff: resolveModeHandoffContext(body),
     });
   } catch (err: any) {
     if (!res.headersSent) {

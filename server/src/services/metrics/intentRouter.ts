@@ -9,6 +9,9 @@ const PT_TERMS = /pull[\s-]?through|pullthrough|funded\s*\/|conversion/i;
 const VOL_TERMS = /volume|units|loan count|how many loans/i;
 const REV_TERMS = /revenue|margin|income|basis/i;
 const TT_TERMS = /turn[\s-]?time|cycle|days to|speed/i;
+const TIER_TERMS =
+  /top[\s-]?tier|second[\s-]?tier|bottom[\s-]?tier|\btts\b|scorecard|tiering|pareto/i;
+const PIPELINE_TERMS = /pipeline health|active pipeline|stale active/i;
 
 export function selectRelevantMetricIds(question: string, max = 14): string[] {
   const q = question.toLowerCase();
@@ -26,6 +29,10 @@ export function selectRelevantMetricIds(question: string, max = 14): string[] {
     if (def.category === "turn_time" && TT_TERMS.test(q)) score += 3;
     if (def.category === "status" && /\bactive\b|\blocked\b|\bclosed\b/i.test(q))
       score += 2;
+    if (TIER_TERMS.test(q) && id === "active_loans") score -= 3;
+    if (TIER_TERMS.test(q) && def.category === "pull_through") score += 1;
+    if (PIPELINE_TERMS.test(q) && id === "active_loans") score += 4;
+    if (PIPELINE_TERMS.test(q) && def.category === "pull_through") score += 3;
     scored.push({ id, score });
   }
 

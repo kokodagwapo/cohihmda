@@ -99,6 +99,18 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
             route: { type: "string" },
           },
         },
+        dashboardGrounding: {
+          type: "object",
+          description:
+            "Direct-entry dashboard/canvas snapshot when user did not switch modes from workbench.",
+          properties: {
+            canvasState: { type: "object" },
+            canvasTitle: { type: "string" },
+            widgetCatalog: { type: "string" },
+            canvasId: { type: "string" },
+            route: { type: "string" },
+          },
+        },
       },
       additionalProperties: true,
     },

@@ -402,7 +402,7 @@ function rawLabel(v: unknown): string {
   return s.length > 22 ? s.substring(0, 19) + "…" : s;
 }
 
-function parseNumeric(v: unknown): number {
+export function parseNumeric(v: unknown): number {
   if (v == null) return 0;
   if (typeof v === "number") return v;
   return parseFloat(String(v).replace(/[$,%]/g, "")) || 0;

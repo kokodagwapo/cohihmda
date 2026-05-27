@@ -87,6 +87,14 @@ export interface UnifiedChatRequestBody {
     };
     /** Structural cross-mode handoff (e.g. workbench canvas on mode switch). */
     modeHandoffContext?: ModeHandoffContextPayload;
+    /** Direct-entry dashboard/canvas grounding when no explicit mode handoff. */
+    dashboardGrounding?: {
+      canvasState?: Record<string, unknown>;
+      canvasTitle?: string;
+      widgetCatalog?: string;
+      canvasId?: string;
+      route?: string;
+    };
   };
   history?: { role: "user" | "assistant"; content: string }[];
   options?: {

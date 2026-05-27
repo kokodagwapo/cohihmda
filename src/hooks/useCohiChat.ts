@@ -91,6 +91,7 @@ import {
   resolveGlobalStreamRouting,
   type ModeHandoffContext,
 } from "@/lib/chat/modeHandoff";
+import { buildDashboardGroundingContext } from "@/lib/chat/dashboardGrounding";
 import { insightBuilderApproveClientMessageId } from "@/lib/insightBuilderApproveIdempotency";
 import {
   notifyOptimisticUnifiedChatConversation,
@@ -846,6 +847,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setHasPendingForkCarryOver(false);
       }
       const modeHandoff = consumeModeHandoff();
+      const dashboardGrounding =
+        !modeHandoff &&
+        (chatType === "research" || chatType === "insight_builder")
+          ? buildDashboardGroundingContext()
+          : null;
       const priorMessages = forceNew ? [] : messages;
       const activeSessionId = forceNew ? null : sessionId;
 
@@ -1121,6 +1127,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
                     : {}),
                 ...(carryOver ? { carryOverContext: carryOver } : {}),
                 ...(modeHandoff ? { modeHandoffContext: modeHandoff } : {}),
+                ...(dashboardGrounding
+                  ? { dashboardGrounding }
+                  : {}),
               },
               insightBuilder:
                 chatType === "insight_builder" && ibOpts?.action

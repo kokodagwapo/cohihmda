@@ -68,6 +68,7 @@ RULES:
 - If a user topic is provided and this is an investigation, at least 2-3 questions should focus on that topic; the rest can be broader
 - If no topic is provided, cover a mix of: pipeline health, conversion rates, personnel performance, risk patterns, and time trends
 - Consider multiple time windows: YTD, rolling 90D, rolling 30D, trailing 12M
+- For broad pipeline + conversion investigations, split into separate questions: (1) windowed conversion performance by period, (2) current pipeline snapshot (active loans, stale share) shown once — not repeated per period row
 - For conversion metrics (pull-through, fallout, funded rate): be aware that mortgage cycle times often exceed 30 days. A 30D application cohort will contain many loans still in-process, making conversion rates unreliable. Prefer 90D or YTD windows for these metrics unless the investigation specifically needs short-window sensitivity. When planning 30D conversion analysis, include a cycle-time check so the analyst can contextualize the results.
 - Focus on questions that can reveal actionable patterns, not just descriptive statistics
 - NEVER suggest queries that modify data

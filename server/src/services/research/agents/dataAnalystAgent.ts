@@ -23,10 +23,12 @@ import {
 import { pool as managementPool } from "../../../config/managementDatabase.js";
 import type { InvestigationQuestion } from "./plannerAgent.js";
 import { VIZ_STANDARDS_MEDIUM } from "../../../config/visualizationStandards.js";
+import { METRIC_LANGUAGE_RULES } from "../../chat/metricLexicon.js";
 import type { ResearchWidgetContext } from "../../../types/researchWidgetContext.js";
 import type { LoanAccessFilter } from "../../userLoanAccessService.js";
 import { safeParseMetricSpec } from "../../metrics/metricSpec.js";
 import { composeMetricSql } from "../../metrics/metricQueryComposer.js";
+import { validateMetricSpecWindows } from "../../metrics/metricSemantics.js";
 
 // ============================================================================
 // Types
@@ -200,8 +202,7 @@ You operate in a loop:
 4. DECIDE: Either formulate a follow-up query (if more data is needed) or produce your final finding
 
 LANGUAGE AND FORMATTING RULES:
-- Never write "pp" or "p.p." to mean percentage points. Write "ppts" or spell it out: "percentage points". Example: "pull-through fell 12 percentage points" not "fell 12pp".
-- Use "%" for rates and proportions (e.g. "pull-through is 74%"). Use "percentage points" or "ppts" only when describing the change between two rates (e.g. "improved 8 ppts YoY").
+${METRIC_LANGUAGE_RULES}
 
 RULES:
 - Prefer **metricSpec** (canonical MetricSpec JSON matching server catalog metrics) for standard KPIs instead of writing raw SQL — the server composes deterministic, access-aware SQL. Use raw SQL for exploratory analysis or non-catalog fields.
@@ -219,6 +220,12 @@ RULES:
   - Revenue: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100 (when rate > 100, else use 25bps default)
 - Result set size: you may return up to 1000 rows. The UI uses lazy loading and virtualization, so large result sets are fine. For pipelines or cohorts larger than 1000, aggregate in your query (e.g. by status, by personnel, by month) rather than returning raw rows.
 - Use multiple time windows for comparison: YTD, rolling 90D, rolling 30D, prior 90D
+
+MULTI-TIMEFRAME TABLE RULES (CRITICAL):
+- **Windowed metrics** (applications, funded, pull-through, fallout, funded volume, cycle time) belong in per-period comparison rows (YTD vs 90D vs 30D vs prior 90D).
+- **Snapshot metrics** (active_loans, active_volume, and stale-active counts/rates) are **current pipeline as of today** — they do NOT change by period label. Never repeat identical snapshot values on every timeframe row.
+- For investigations covering both conversion and pipeline health: produce (1) a timeframe comparison table with windowed metrics only, and (2) a separate single-row "Pipeline snapshot (as of today)" table for active/stale metrics.
+- When using metricSpec for active_loans or active_volume, use window "all_time" only; do not issue four metricSpec calls differing only by window for snapshot metrics.
 - Include NULL handling: COALESCE, NULLIF where appropriate
 - When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
 - When action is "query", include a chartHint object to guide visualization (see VISUALIZATION GUIDANCE below).
@@ -675,11 +682,32 @@ export async function runDataAnalystAgent(
       if (parsed.metricSpec != null && typeof parsed.metricSpec === "object") {
         const sp = safeParseMetricSpec(parsed.metricSpec);
         if (sp.success && !sp.data.unsupported) {
+          const specWarnings = validateMetricSpecWindows(sp.data);
+          if (specWarnings.length > 0) {
+            conversationHistory.push(
+              { role: "assistant", content: raw },
+              {
+                role: "user",
+                content:
+                  `MetricSpec semantic issue:\n${specWarnings.join("\n")}\n\n` +
+                  `Revise: use window "all_time" for snapshot metrics (active_loans, active_volume) and show them in a separate single-row "Pipeline snapshot (as of today)" table — not repeated on each timeframe row.`,
+              },
+            );
+            continue;
+          }
           try {
             const composed = composeMetricSql(sp.data, loanAccessFilter ?? null);
             execSql = composed.sql;
             execParams = composed.params;
             composedIncludedAccess = true;
+            if (composed.warnings.length > 0) {
+              onStep({
+                iteration,
+                type: "analysis",
+                content: composed.warnings.join(" "),
+                timestamp: Date.now(),
+              });
+            }
           } catch (err: any) {
             onStep({
               iteration,

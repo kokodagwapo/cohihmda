@@ -10,6 +10,7 @@ import pg from "pg";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { getSchemaForTenant, getFallbackSchemaContext } from "../ai/schemaContextService.js";
 import { METRICS_CATALOG, type MetricDefinition } from "../metrics/metricsService.js";
+import { formatMetricDefinitionsForResearch } from "../metrics/metricSemantics.js";
 import { decryptAPIKeys } from "../encryption.js";
 import { getKnowledgeContext as sharedGetKnowledgeContext } from "../ai/ragRetrieval.js";
 import { logLLMUsage } from "../llmUsageTracker.js";
@@ -174,17 +175,7 @@ export async function getSchemaContext(tenantId: string): Promise<string> {
 // ============================================================================
 
 export function getMetricDefinitions(): string {
-  const lines: string[] = ["## Canonical Metric Definitions\n"];
-  for (const [id, def] of Object.entries(METRICS_CATALOG)) {
-    lines.push(`### ${def.name} (${id})`);
-    lines.push(`- Description: ${def.description}`);
-    lines.push(`- Category: ${def.category}`);
-    lines.push(`- SQL: ${def.sqlQuery.trim()}`);
-    lines.push(`- Date field: ${def.defaultDateField}`);
-    if (def.ignoreDateFilter) lines.push(`- Note: Not date-filtered (current snapshot)`);
-    lines.push("");
-  }
-  return lines.join("\n");
+  return formatMetricDefinitionsForResearch();
 }
 
 // ============================================================================

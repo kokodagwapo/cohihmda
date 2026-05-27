@@ -50,6 +50,21 @@ import {
   injectLoanAccessForLoansAlias,
   mergeLoanAccessWithParameterizedSql,
 } from "../metrics/accessEnforcer.js";
+import { METRIC_LANGUAGE_RULES } from "../chat/metricLexicon.js";
+import {
+  applyRankingSqlGuard,
+  detectRankingIntent,
+  isRankingGuardEnabled,
+  logRankingGuardTrace,
+  type RankingIntent,
+} from "../chat/rankingQueryGuard.js";
+import {
+  buildPlatformIntentSteeringBlock,
+  detectPlatformIntent,
+  platformIntentNavigationHints,
+  type PlatformIntent,
+} from "../chat/platformIntentRouter.js";
+import { resolveChatRouteGroundingLabel } from "../chat/dashboardGrounding.js";
 
 // ============================================================================
 // Types
@@ -67,6 +82,8 @@ export interface ChatContext {
   uploadOnlyMode?: boolean;
   uploadSchemaContext?: string;
   datasetUploadIds?: string[];
+  /** Client page route (e.g. /sales-scorecard) for dashboard-aware routing. */
+  pageRoute?: string | null;
 }
 
 export interface UserPermissions {
@@ -111,7 +128,10 @@ export interface VisualizationConfig {
     | "treemap"
     | "pivot";
   title: string;
+  subtitle?: string;
   data: any[];
+  /** Full result set when chart data was trimmed for readability */
+  fullData?: any[];
   xKey?: string;
   yKey?: string;
   yKeys?: string[]; // For multi-series charts
@@ -547,10 +567,79 @@ interface GeneratedQuery {
   accessFilterApplied?: boolean;
 }
 
+function buildHeuristicRankingLoQuery(
+  question: string,
+  intent: RankingIntent,
+  accessFilter?: LoanAccessFilter | null,
+): GeneratedQuery | null {
+  const q = question.toLowerCase();
+  if (!/\b(loan officers?|los?|officers?)\b/.test(q)) return null;
+
+  let dateClause = "l.application_date >= DATE_TRUNC('month', CURRENT_DATE)";
+  if (/\b(last|past)\s+30\s+days\b/.test(q)) {
+    dateClause = "l.application_date >= CURRENT_DATE - INTERVAL '30 days'";
+  } else if (/\bytd\b|\byear to date\b/.test(q)) {
+    dateClause = "EXTRACT(YEAR FROM l.application_date) = EXTRACT(YEAR FROM CURRENT_DATE)";
+  } else if (/\bthis quarter\b|\bqtd\b/.test(q)) {
+    dateClause = "l.application_date >= DATE_TRUNC('quarter', CURRENT_DATE)";
+  }
+
+  const orderDir = intent.kind === "bottom" ? "ASC" : "DESC";
+  const limit = intent.limit;
+  let sql = `
+    SELECT COALESCE(NULLIF(TRIM(l.loan_officer), ''), 'Unknown') AS loan_officer,
+           COUNT(*)::int AS loan_count
+    FROM public.loans l
+    WHERE ${dateClause}
+      AND l.application_date IS NOT NULL
+    GROUP BY 1
+    ORDER BY loan_count ${orderDir}
+    LIMIT ${limit}
+  `;
+  let params: unknown[] = [];
+  if (accessFilter?.sql) {
+    const merged = mergeLoanAccessWithParameterizedSql(sql, params, accessFilter);
+    sql = merged.sql;
+    params = merged.params;
+  }
+
+  const windowLabel = /\bthis month\b|\bmtd\b/.test(q)
+    ? "this month"
+    : "selected period";
+  return {
+    sql,
+    params,
+    explanation: `Top ${limit} loan officers by active application count for ${windowLabel}.`,
+    visualizationType: "horizontal_bar",
+    chartConfig: {
+      title: `Top ${limit} loan officers — ${windowLabel}`,
+      xKey: "loan_officer",
+      yKey: "loan_count",
+      xLabel: "Loan officer",
+      yLabel: "Loan count",
+    },
+    accessFilterApplied: !!accessFilter?.sql,
+  };
+}
+
 function buildHeuristicDataQuery(
   question: string,
-  accessFilter?: LoanAccessFilter | null
+  accessFilter?: LoanAccessFilter | null,
+  platformIntent?: PlatformIntent | null,
 ): GeneratedQuery | null {
+  const rankingIntent =
+    isRankingGuardEnabled() && !platformIntent?.suppressRankingGuard
+      ? detectRankingIntent(question)
+      : null;
+  if (rankingIntent) {
+    const loRanking = buildHeuristicRankingLoQuery(
+      question,
+      rankingIntent,
+      accessFilter,
+    );
+    if (loRanking) return loRanking;
+  }
+
   const q = question.toLowerCase();
 
   const asksPullThrough = hasPullThroughKeyword(q);
@@ -620,6 +709,10 @@ async function generateQuery(
   context: ChatContext,
   conversationHistory: CohiChatMessage[] = []
 ): Promise<GeneratedQuery | null> {
+  const platformIntent = context.uploadOnlyMode
+    ? null
+    : detectPlatformIntent(question, context.pageRoute ?? null);
+
   try {
     const apiKey = await getOpenAIKey(context.tenantId);
 
@@ -670,7 +763,11 @@ async function generateQuery(
 
     const heuristicFallback = context.uploadOnlyMode
       ? null
-      : buildHeuristicDataQuery(question, context.userAccessFilter);
+      : buildHeuristicDataQuery(
+          question,
+          context.userAccessFilter,
+          platformIntent,
+        );
 
     // Check if this was determined to not be a data query
     if (parsed.isDataQuery === false) {
@@ -699,17 +796,38 @@ async function generateQuery(
       return null;
     }
 
-    return {
+    let generated: GeneratedQuery = {
       sql: parsed.sql,
       params: parsed.params || [],
       explanation: parsed.explanation,
       visualizationType: parsed.visualizationType || "table",
       chartConfig: parsed.chartConfig || {},
     };
+
+    if (isRankingGuardEnabled() && !platformIntent?.suppressRankingGuard) {
+      const intent = detectRankingIntent(question);
+      if (intent) {
+        generated.sql = applyRankingSqlGuard(generated.sql, intent);
+        if (!/\bLIMIT\s+\d+/i.test(generated.sql)) {
+          const rankingHeuristic = buildHeuristicRankingLoQuery(
+            question,
+            intent,
+            context.userAccessFilter,
+          );
+          if (rankingHeuristic) return rankingHeuristic;
+        }
+      }
+    }
+
+    return generated;
   } catch (error: any) {
     const heuristicFallback = context.uploadOnlyMode
       ? null
-      : buildHeuristicDataQuery(question, context.userAccessFilter);
+      : buildHeuristicDataQuery(
+          question,
+          context.userAccessFilter,
+          platformIntent,
+        );
     if (heuristicFallback) {
       console.warn(
         "[CohiChat] Query generation failed for deterministic data question; using heuristic fallback query."
@@ -1126,6 +1244,47 @@ function buildVisualizationConfig(
   }
 }
 
+const CHART_READABILITY_MAX = 25;
+
+/** Trim oversized category charts while preserving full data for export. */
+export function applyVisualizationReadabilityGuard(
+  config: VisualizationConfig,
+  options?: { rankingIntent?: RankingIntent | null; maxCategories?: number },
+): VisualizationConfig {
+  const max =
+    options?.rankingIntent?.limit ??
+    options?.maxCategories ??
+    CHART_READABILITY_MAX;
+  const data = config.data ?? [];
+  if (
+    data.length <= max ||
+    !["bar", "horizontal_bar", "stacked_bar", "grouped_bar"].includes(
+      config.type,
+    )
+  ) {
+    return config;
+  }
+
+  const valueKey =
+    config.yKey ??
+    config.valueKey ??
+    Object.keys(data[0] ?? {}).find((k) => typeof data[0]?.[k] === "number");
+  let sorted = [...data];
+  if (valueKey) {
+    sorted.sort(
+      (a, b) => (Number(b[valueKey]) || 0) - (Number(a[valueKey]) || 0),
+    );
+  }
+  const trimmed = sorted.slice(0, max);
+  const subtitle = `Showing top ${trimmed.length} of ${data.length}`;
+  return {
+    ...config,
+    data: trimmed,
+    fullData: data,
+    subtitle: config.subtitle ? `${config.subtitle} · ${subtitle}` : subtitle,
+  };
+}
+
 // ============================================================================
 // Insight Metrics (for open-ended questions)
 // ============================================================================
@@ -1352,6 +1511,7 @@ interface GatheredContext {
   ragContext: RAGContext;
   insightMetrics?: Record<string, any>;
   platformBusinessContext?: string;
+  platformIntent?: PlatformIntent | null;
 }
 
 function enforceCatalogBackedNavigationCopy(
@@ -1414,8 +1574,17 @@ function stripSourceAttribution(rawMessage: string): string {
 
 function buildPostAnswerNavigationHints(
   question: string,
-  hasDataQueryResult: boolean
+  hasDataQueryResult: boolean,
+  platformIntent?: PlatformIntent | null,
 ): { label: string; path: string }[] | undefined {
+  const platformHints = platformIntentNavigationHints(platformIntent ?? null);
+  if (platformHints.length > 0) {
+    return sanitizeNavigationHints([
+      ...platformHints,
+      { label: "Research Lab (deeper analysis)", path: "/research" },
+    ]);
+  }
+
   if (!hasDataQueryResult) return undefined;
   const q = question.toLowerCase();
 
@@ -1432,7 +1601,8 @@ function buildPostAnswerNavigationHints(
 
 function buildRecommendedNavigationHints(
   question: string,
-  hasDataQueryResult: boolean
+  hasDataQueryResult: boolean,
+  platformIntent?: PlatformIntent | null,
 ): { label: string; path: string }[] {
   const merged: { label: string; path: string }[] = [];
   const push = (items?: { label: string; path: string }[] | null) => {
@@ -1442,7 +1612,7 @@ function buildRecommendedNavigationHints(
 
   const nav = resolveNavigationAnswer(question);
   push(nav?.hints);
-  push(buildPostAnswerNavigationHints(question, hasDataQueryResult));
+  push(buildPostAnswerNavigationHints(question, hasDataQueryResult, platformIntent));
 
   // Always provide stable next-step destinations.
   push([
@@ -1551,6 +1721,10 @@ async function gatherAllContext(
 ): Promise<GatheredContext> {
   console.log(`[CohiChat] Gathering context for: "${question}"`);
 
+  const platformIntent = context.uploadOnlyMode
+    ? null
+    : detectPlatformIntent(question, context.pageRoute ?? null);
+
   const includeRag =
     opts?.includeRag !== false && !context.uploadOnlyMode;
   const includePlatformBusinessContext = !context.uploadOnlyMode;
@@ -1597,23 +1771,58 @@ async function gatherAllContext(
 
   let dataQueryResult: GatheredContext["dataQueryResult"] = undefined;
 
+  const rankingIntent =
+    isRankingGuardEnabled() && !platformIntent?.suppressRankingGuard
+      ? detectRankingIntent(question)
+      : null;
+
   // If we got a valid query, try to execute it (with one auto-retry on failure)
   if (queryConfig?.sql) {
-    const effectiveConfig = queryConfig;
+    let effectiveConfig = queryConfig;
+    if (rankingIntent && effectiveConfig.sql) {
+      const guardedSql = applyRankingSqlGuard(effectiveConfig.sql, rankingIntent);
+      if (guardedSql !== effectiveConfig.sql) {
+        effectiveConfig = { ...effectiveConfig, sql: guardedSql };
+      }
+    }
     const contextForQuery = (cfg: GeneratedQuery): ChatContext =>
       cfg.accessFilterApplied
         ? { ...context, userAccessFilter: null }
         : context;
     const heuristicFallback = context.uploadOnlyMode
       ? null
-      : buildHeuristicDataQuery(question, context.userAccessFilter);
+      : buildHeuristicDataQuery(
+          question,
+          context.userAccessFilter,
+          platformIntent,
+        );
     try {
       const result = await executeQuery(
         effectiveConfig.sql,
         effectiveConfig.params,
         contextForQuery(effectiveConfig)
       );
-      const formattedPrimaryData = formatDataRows(result.rows);
+      let formattedPrimaryData = formatDataRows(result.rows);
+      if (rankingIntent && formattedPrimaryData.length > rankingIntent.limit) {
+        const valueKey =
+          effectiveConfig.chartConfig.yKey ??
+          Object.keys(formattedPrimaryData[0] ?? {}).find(
+            (k) => typeof formattedPrimaryData[0]?.[k] === "number",
+          );
+        if (valueKey) {
+          formattedPrimaryData = [...formattedPrimaryData].sort(
+            (a, b) =>
+              (Number(b[valueKey]) || 0) - (Number(a[valueKey]) || 0),
+          );
+        }
+        formattedPrimaryData = formattedPrimaryData.slice(0, rankingIntent.limit);
+      }
+      logRankingGuardTrace(
+        question,
+        rankingIntent,
+        effectiveConfig.sql,
+        formattedPrimaryData.length,
+      );
       dataQueryResult = {
         query: effectiveConfig,
         result,
@@ -1723,11 +1932,27 @@ async function gatherAllContext(
     } chunks, Insights: ${!!insightMetrics}`
   );
 
+  const routeLabel = context.pageRoute
+    ? resolveChatRouteGroundingLabel(context.pageRoute)
+    : undefined;
+  const routeSteering = routeLabel
+    ? `## Current page context\nUser is viewing **${routeLabel}** (${context.pageRoute}). Prefer metrics and navigation aligned with this dashboard.`
+    : undefined;
+  const intentSteering = buildPlatformIntentSteeringBlock(platformIntent);
+  const mergedPlatformContext = [
+    platformBusinessContext,
+    routeSteering,
+    intentSteering,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
   return {
     dataQueryResult,
     ragContext,
     insightMetrics,
-    platformBusinessContext,
+    platformBusinessContext: mergedPlatformContext || platformBusinessContext,
+    platformIntent,
   };
 }
 
@@ -1743,7 +1968,8 @@ async function generateUnifiedResponse(
   const apiKey = await getOpenAIKey(context.tenantId);
   const recommendedHints = buildRecommendedNavigationHints(
     question,
-    !!gathered.dataQueryResult
+    !!gathered.dataQueryResult,
+    gathered.platformIntent,
   );
 
   // Deterministic no-rows handling for executed SQL:
@@ -1853,11 +2079,11 @@ async function generateUnifiedResponse(
   const promptConfig = await getPromptConfig("cohi_chat.response");
 
   // Build the system prompt with variable substitution
-  const systemPrompt = buildPrompt(promptConfig.system_prompt, {
+  const systemPrompt = `${buildPrompt(promptConfig.system_prompt, {
     combinedContext: hasAnyContext
       ? contextParts.join("\n\n")
       : "No specific context available for this query.",
-  });
+  })}\n\n${METRIC_LANGUAGE_RULES}`;
 
   const messages: OpenAIChatMessage[] = [
     { role: "system", content: systemPrompt },
@@ -1879,11 +2105,16 @@ async function generateUnifiedResponse(
   let data: any[] | undefined;
 
   if (gathered.dataQueryResult) {
-    visualization = buildVisualizationConfig(
-      gathered.dataQueryResult.formattedData,
-      gathered.dataQueryResult.query
+    const rankingIntent =
+      isRankingGuardEnabled() && !gathered.platformIntent?.suppressRankingGuard
+        ? detectRankingIntent(question)
+        : null;
+    const fullRows = gathered.dataQueryResult.formattedData;
+    visualization = applyVisualizationReadabilityGuard(
+      buildVisualizationConfig(fullRows, gathered.dataQueryResult.query),
+      { rankingIntent },
     );
-    data = gathered.dataQueryResult.formattedData;
+    data = visualization.fullData ?? fullRows;
   }
 
   // Keep message grounded to canonical dashboards only.
@@ -1971,6 +2202,28 @@ export async function processCohiQuestion(
     }
 
     if (!context.uploadOnlyMode) {
+      const platformIntent = detectPlatformIntent(
+        question,
+        context.pageRoute ?? null,
+      );
+      if (
+        platformIntent?.kind === "ambiguous_tier_vs_ranking" &&
+        platformIntent.clarificationQuestion
+      ) {
+        return {
+          message: platformIntent.clarificationQuestion,
+          navigationHints: sanitizeNavigationHints([
+            ...platformIntentNavigationHints(platformIntent),
+            { label: "Sales Scorecard", path: "/sales-scorecard" },
+            { label: "Leaderboard", path: "/leaderboard" },
+          ]),
+          suggestedQuestions: [
+            "Who are my top tier loan officers on the Sales Scorecard?",
+            "Top 10 loan officers by funded volume this quarter",
+          ],
+        };
+      }
+
       const expandedNav = expandEffectiveQuestionForNavigation(
         question,
         conversationHistory.map((m) => ({ role: m.role, content: m.content })),
@@ -2051,6 +2304,29 @@ export async function processCohiQuestionStreaming(
   }
 
   if (!context.uploadOnlyMode) {
+    const platformIntent = detectPlatformIntent(
+      question,
+      context.pageRoute ?? null,
+    );
+    if (
+      platformIntent?.kind === "ambiguous_tier_vs_ranking" &&
+      platformIntent.clarificationQuestion
+    ) {
+      options?.onTextDelta?.(platformIntent.clarificationQuestion);
+      return {
+        message: platformIntent.clarificationQuestion,
+        navigationHints: sanitizeNavigationHints([
+          ...platformIntentNavigationHints(platformIntent),
+          { label: "Sales Scorecard", path: "/sales-scorecard" },
+          { label: "Leaderboard", path: "/leaderboard" },
+        ]),
+        suggestedQuestions: [
+          "Who are my top tier loan officers on the Sales Scorecard?",
+          "Top 10 loan officers by funded volume this quarter",
+        ],
+      };
+    }
+
     const expandedNav = expandEffectiveQuestionForNavigation(
       question,
       conversationHistory.map((m) => ({ role: m.role, content: m.content })),
@@ -2069,7 +2345,11 @@ export async function processCohiQuestionStreaming(
       options?.onTextDelta?.(nav.message);
       return {
         message: nav.message,
-        navigationHints: buildRecommendedNavigationHints(expandedNav, false),
+        navigationHints: buildRecommendedNavigationHints(
+          expandedNav,
+          false,
+          platformIntent,
+        ),
         suggestedQuestions: nav.suggestedQuestions,
       };
     }

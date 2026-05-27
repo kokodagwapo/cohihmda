@@ -328,6 +328,8 @@ const getMessageStyling = (content: string): EnhancedMessage => {
 };
 
 import { renderMarkdownText } from "@/utils/renderMarkdown";
+import { normalizeAssistantMarkdown } from "@/lib/normalizeAssistantMarkdown";
+import { applyChartReadabilityGuard } from "@/lib/chartReadability";
 
 // ============================================================================
 // Animated KPI Card
@@ -3313,7 +3315,9 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   const [showSql, setShowSql] = useState(false);
 
   // Don't parse content - render as markdown to preserve structure
-  const messageContent = message.content;
+  const messageContent = isUser
+    ? message.content
+    : normalizeAssistantMarkdown(message.content);
 
   return (
     <div
@@ -3510,10 +3514,14 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
               (() => {
                 const effectiveType = (vizTypeOverride ??
                   message.visualization!.type) as any;
-                const vizConfig = {
+                const baseViz = {
                   ...message.visualization!,
                   type: effectiveType,
                 };
+                const readability = applyChartReadabilityGuard(
+                  baseViz as EnhancedVisualizationConfig,
+                );
+                const vizConfig = readability.config;
                 return (
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
@@ -3532,7 +3540,9 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                         config={{
                           type: effectiveType,
                           title: vizConfig.title || "Data Analysis",
-                          subtitle: "Click on data points to drill down",
+                          subtitle:
+                            vizConfig.subtitle ??
+                            "Click on data points to drill down",
                           data: vizConfig.data || [],
                           xKey: vizConfig.xKey || vizConfig.nameKey,
                           yKey: vizConfig.yKey || vizConfig.valueKey,

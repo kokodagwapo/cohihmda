@@ -319,9 +319,19 @@ export function UserManagementSection() {
         return;
       }
       
+      const normalizedEmail = formData.email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        toast({
+          title: 'Validation Error',
+          description: 'Enter a valid email address (for example, name@company.com).',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       const body: Record<string, unknown> = {
-        email: formData.email,
-        full_name: formData.full_name,
+        email: normalizedEmail,
+        full_name: formData.full_name.trim() || undefined,
         persona: formData.persona,
         loan_scope:
           formData.persona === 'tenant_user'
