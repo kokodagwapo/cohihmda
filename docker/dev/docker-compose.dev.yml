@@ -55,6 +55,7 @@ services:
       - DB_NAME=${DB_NAME:-coheus}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_SSL=${DB_SSL:-false}
       - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS:-100}
       - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
       - REDIS_HOST=redis
@@ -69,6 +70,17 @@ services:
       - TENANT_DEFAULT_ID=${TENANT_DEFAULT_ID:-}
       - MAX_TENANTS=${MAX_TENANTS:-100}
       - TENANT_RESOURCE_QUOTAS_ENABLED=${TENANT_RESOURCE_QUOTAS_ENABLED:-false}
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
+      - COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET:-}
+      - COGNITO_REGION=${COGNITO_REGION:-us-east-2}
+      - COGNITO_DOMAIN=${COGNITO_DOMAIN:-}
+      - COGNITO_PASSWORD_AUTH=${COGNITO_PASSWORD_AUTH:-true}
+      - COGNITO_SKIP_MFA_PREFLIGHT=${COGNITO_SKIP_MFA_PREFLIGHT:-true}
+      - LOCAL_DEV_PASSWORD_AUTH=${LOCAL_DEV_PASSWORD_AUTH:-true}
+      - AWS_REGION=${AWS_REGION:-us-east-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,11 +109,13 @@ services:
     volumes:
       - ../../src:/app/src
       - ../../public:/app/public
+      - ../../scripts:/app/scripts
       - ../../index.html:/app/index.html
       - ../../vite.config.ts:/app/vite.config.ts
       - ../../tsconfig.json:/app/tsconfig.json
       - ../../tsconfig.app.json:/app/tsconfig.app.json
       - ../../package.json:/app/package.json
+      - ../../../dist:/dist-hmda-embed:ro
       - /app/node_modules
     networks:
       - coheus-dev-network

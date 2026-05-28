@@ -9,6 +9,7 @@
 import { Router } from "express";
 import pg from "pg";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { authLimiter } from "../middleware/rateLimiter.js";
 import {
@@ -89,6 +90,22 @@ function normalizeEmailInput(email: string): string {
   return email.trim();
 }
 
+function resolveDbSsl(host: string): false | { rejectUnauthorized: boolean } {
+  const dbSslEnv = (process.env.DB_SSL || "").trim().toLowerCase();
+  const isLocalHost =
+    host === "127.0.0.1" ||
+    host === "localhost" ||
+    host === "postgres" ||
+    host.endsWith(".local");
+  const sslEnabled =
+    dbSslEnv === "true" || dbSslEnv === "1" || dbSslEnv === "on"
+      ? true
+      : dbSslEnv === "false" || dbSslEnv === "0" || dbSslEnv === "off"
+        ? false
+        : !isLocalHost;
+  return sslEnabled ? { rejectUnauthorized: false } : false;
+}
+
 function getManagementPool(): pg.Pool {
   if (!managementPool) {
     const dbHost = (process.env.DB_HOST || "localhost").trim();
@@ -101,10 +118,7 @@ function getManagementPool(): pg.Pool {
       database: process.env.MANAGEMENT_DB_NAME || "coheus_management",
       user: process.env.DB_USER || "postgres",
       password: process.env.DB_PASSWORD || "postgres",
-      ssl:
-        rawHost !== "127.0.0.1" && rawHost !== "localhost"
-          ? { rejectUnauthorized: false }
-          : false,
+      ssl: resolveDbSsl(rawHost),
       max: 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
@@ -144,17 +158,15 @@ async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
 
     const tenant = result.rows[0];
     const dbHost = tenant.database_host || "127.0.0.1";
+    const resolvedHost = dbHost === "localhost" ? "127.0.0.1" : dbHost;
 
     const pool = new Pool({
-      host: dbHost === "localhost" ? "127.0.0.1" : dbHost,
+      host: resolvedHost,
       port: tenant.database_port || 5432,
       database: tenant.database_name,
       user: tenant.database_user || process.env.DB_USER || "postgres",
       password: process.env.DB_PASSWORD || "postgres", // TODO: Decrypt tenant password
-      ssl:
-        dbHost !== "127.0.0.1" && dbHost !== "localhost"
-          ? { rejectUnauthorized: false }
-          : false,
+      ssl: resolveDbSsl(resolvedHost),
       max: 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
@@ -405,9 +417,61 @@ async function issueAppToken(
   return { token };
 }
 
+function isLocalDevPasswordAuthEnabled(): boolean {
+  return (
+    process.env.NODE_ENV === "development" &&
+    process.env.LOCAL_DEV_PASSWORD_AUTH === "true"
+  );
+}
+
+type LocalAuthCandidate = AuthUser & {
+  encrypted_password?: string;
+  failed_login_attempts?: number;
+  locked_until?: Date | null;
+};
+
+function isAccountLocked(user: LocalAuthCandidate): boolean {
+  return Boolean(
+    user.locked_until && new Date(user.locked_until) > new Date(),
+  );
+}
+
+async function authenticateWithLocalPassword(
+  email: string,
+  password: string,
+  tenantSlug?: string,
+): Promise<
+  | { ok: true; user: AuthUser; isSuperAdmin: boolean }
+  | { ok: false; reason: "not_found" | "invalid_password" | "locked" | "inactive" }
+> {
+  const superAdmin = await findSuperAdmin(email);
+  if (superAdmin) {
+    if (!superAdmin.is_active) return { ok: false, reason: "inactive" };
+    if (isAccountLocked(superAdmin)) return { ok: false, reason: "locked" };
+    if (!superAdmin.encrypted_password) return { ok: false, reason: "not_found" };
+    const valid = await bcrypt.compare(password, superAdmin.encrypted_password);
+    return valid
+      ? { ok: true, user: superAdmin, isSuperAdmin: true }
+      : { ok: false, reason: "invalid_password" };
+  }
+
+  const tenantUser = await findTenantUser(email, tenantSlug);
+  if (tenantUser) {
+    if (!tenantUser.is_active) return { ok: false, reason: "inactive" };
+    if (isAccountLocked(tenantUser)) return { ok: false, reason: "locked" };
+    if (!tenantUser.encrypted_password) return { ok: false, reason: "not_found" };
+    const valid = await bcrypt.compare(password, tenantUser.encrypted_password);
+    return valid
+      ? { ok: true, user: tenantUser, isSuperAdmin: false }
+      : { ok: false, reason: "invalid_password" };
+  }
+
+  return { ok: false, reason: "not_found" };
+}
+
 /**
  * Sign In
- * Cognito-only sign in path.
+ * Cognito sign-in with optional local DB password fallback for Docker/local dev.
  */
 router.post("/signin", authLimiter, async (req, res) => {
   try {
@@ -422,7 +486,50 @@ router.post("/signin", authLimiter, async (req, res) => {
       cognitoEmail,
       tenantSlug: normalizedTenantSlug || "auto-detect",
       useCognito: cognitoAuth.isCognitoAuthEnabled(),
+      localDevPasswordAuth: isLocalDevPasswordAuthEnabled(),
     });
+
+    if (isLocalDevPasswordAuthEnabled()) {
+      const localResult = await authenticateWithLocalPassword(
+        submittedEmail,
+        password,
+        normalizedTenantSlug,
+      );
+
+      if (localResult.ok) {
+        const { token } = await issueAppToken(
+          localResult.user,
+          localResult.isSuperAdmin,
+          req,
+        );
+        logInfo("[Auth] Local dev sign in successful", { email: submittedEmail });
+        return res.json({
+          user: buildUserResponse(localResult.user, localResult.isSuperAdmin),
+          token,
+        });
+      }
+
+      if (
+        localResult.reason === "invalid_password" ||
+        localResult.reason === "locked" ||
+        localResult.reason === "inactive"
+      ) {
+        await logFailedLogin({
+          email: submittedEmail,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          failureReason: localResult.reason,
+        }).catch(() => {});
+
+        if (localResult.reason === "locked") {
+          return res.status(423).json({ error: "Account is temporarily locked" });
+        }
+        if (localResult.reason === "inactive") {
+          return res.status(403).json({ error: "Account is inactive" });
+        }
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+    }
 
     // Fail closed: this deployment requires Cognito as the only auth source.
     if (!cognitoAuth.isCognitoAuthEnabled()) {
