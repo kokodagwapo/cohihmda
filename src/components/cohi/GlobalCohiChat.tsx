@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
 import { CohiChatPanel } from '@/components/dashboard/CohiChatPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTenantStore } from '@/stores/tenantStore';
@@ -8,7 +7,6 @@ import { isUnifiedChatClientEnabled } from '@/lib/unifiedChatEnvelope';
 export function GlobalCohiChat() {
   const { isAuthenticated, user } = useAuth();
   const { selectedTenantId } = useTenantStore();
-  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
@@ -25,12 +23,6 @@ export function GlobalCohiChat() {
   if (!isAuthenticated) return null;
 
   if (isUnifiedChatClientEnabled()) {
-    return null;
-  }
-
-  // HMDA page has its own embedded UI; keep top area clean.
-  // Covers /hmda, /hmda/, and any future nested HMDA routes.
-  if (location.pathname === '/hmda' || location.pathname.startsWith('/hmda/')) {
     return null;
   }
 
