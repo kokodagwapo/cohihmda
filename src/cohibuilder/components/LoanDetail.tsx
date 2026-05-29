@@ -305,7 +305,7 @@ export default function LoanDetail({ loanId, onBack, onViewRisk, onViewHeloc }: 
         <img 
           src={loan.propertyImage} 
           alt="Property" 
-          className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-20 group-hover:scale-[1.03] transition-transform duration-[1400ms]"
+          className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-20 group-hover:scale-[1.03] transition-transform duration-1400"
           referrerPolicy="no-referrer"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-white/95 via-white/55 to-white/10 dark:from-slate-950/95 dark:via-slate-900/55" />

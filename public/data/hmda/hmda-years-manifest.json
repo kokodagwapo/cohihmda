@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-05-29T13:34:04.566Z",
-  "anchorYear": 2024,
+  "generatedAt": "2026-05-29T20:32:56.599Z",
+  "anchorYear": 2025,
   "larDetailMaxYear": 2025,
   "lenderYears": [
     "2025",
@@ -56,7 +56,7 @@
     },
     "2024": {
       "lenders": true,
-      "lenderCount": 4893,
+      "lenderCount": 4908,
       "geo": true,
       "geoFallbackYear": null,
       "countyMetrics": true,
@@ -64,7 +64,7 @@
       "tractFallbackYear": null,
       "products": true,
       "larDetail": 2024,
-      "paginatedPages": false,
+      "paginatedPages": true,
       "partial": false
     },
     "2025": {

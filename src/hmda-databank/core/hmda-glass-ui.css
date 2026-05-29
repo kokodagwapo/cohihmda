@@ -620,7 +620,6 @@
   letter-spacing: 0.01em;
   color: rgba(100, 116, 139, 0.88);
 }
-  display: none !important;
 
 .hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-card--clean {
   background: rgba(15, 23, 42, 0.58) !important;
@@ -1282,13 +1281,17 @@
 }
 
 .hmda-geo-hover-card {
-  background-color: rgba(255, 255, 255, 0.34) !important;
-  background-image: var(--hmda-iris-shimmer) !important;
-  border: 1px solid rgba(255, 255, 255, 0.52) !important;
+  background-color: rgba(255, 255, 255, 0.52) !important;
+  background-image: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.58) 0%,
+    rgba(248, 250, 252, 0.46) 100%
+  ) !important;
+  border: 1px solid rgba(255, 255, 255, 0.42) !important;
   border-radius: 22px !important;
   box-shadow: var(--hmda-ds-glass-shadow) !important;
-  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
-  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  backdrop-filter: blur(20px) saturate(1.35) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.35) !important;
 }
 
 .hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card {
@@ -1320,6 +1323,11 @@
 .hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__footnote,
 .hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__footnote {
   color: rgba(255, 255, 255, 0.68) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__stat-src,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__stat-src {
+  color: rgba(255, 255, 255, 0.62) !important;
 }
 
 .hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__subtitle,
@@ -1446,6 +1454,10 @@
 .hmda-geo-hover-card__stat-v {
   font-size: 13px !important;
   font-weight: 700 !important;
+}
+
+.hmda-geo-hover-card__stat-src {
+  color: #64748b !important;
 }
 
 .hmda-geo-hover-card__income {
@@ -4014,12 +4026,12 @@
 
 /* ── Compare lenders modal — same clean shell as grid cards ─────────── */
 .hmda-premium-exec.hmda-route-shell .hmda-modal-compare-panel--clean {
-  background: var(--hmda-glass-card-bg) !important;
-  border: none !important;
+  background: #fff !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
   border-radius: var(--hmda-glass-radius-lg) !important;
   box-shadow: var(--hmda-glass-card-shadow-outer) !important;
-  backdrop-filter: blur(20px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .hmda-premium-exec.hmda-route-shell .hmda-modal-compare-panel--clean.hmda-compare-fs-light {

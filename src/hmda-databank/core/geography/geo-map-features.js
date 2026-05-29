@@ -141,6 +141,8 @@ export function buildStatesWithMetrics(
           floodRisk,
           wildfireRisk,
           compositeRisk,
+          diversityScore: row?.diversityScore ?? null,
+          minorityShare:  row?.minorityShare  ?? null,
         },
         stateDisposition,
       ),

@@ -71,7 +71,7 @@ export default function GeoHoverCard({
 }) {
   const [statsOpen, setStatsOpen] = useState(true)
   const [lendersOpen, setLendersOpen] = useState(false)
-  const [tractsOpen, setTractsOpen] = useState(true)
+  const [tractsOpen, setTractsOpen] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
   const active = liveHover || hover
 
@@ -285,6 +285,53 @@ export default function GeoHoverCard({
               )
             })()}
 
+            {hover.topCensusTracts?.length ? (
+              <section className="hmda-geo-hover-card__tracts">
+                <button
+                  type="button"
+                  className="hmda-geo-hover-card__lenders-toggle"
+                  aria-expanded={tractsOpen}
+                  onMouseDown={stopPropagationOnly}
+                  onClick={toggleSection(setTractsOpen)}
+                >
+                  <HoverIconWell Icon={TRACTS_SECTION_ICON.Icon} tone={TRACTS_SECTION_ICON.tone} size="sm" />
+                  <span className="hmda-geo-hover-card__lenders-toggle-text">
+                    <span className="hmda-geo-hover-card__lenders-toggle-label">
+                      Top {hover.topCensusTracts.length} census tracts
+                    </span>
+                    <span className="hmda-geo-hover-card__lenders-toggle-hint">
+                      {hover.kind === 'county' ? 'By originated loan count in county' : 'Statewide HMDA drilldown'}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    size={16}
+                    strokeWidth={2.25}
+                    className={`hmda-geo-hover-card__lenders-chevron${tractsOpen ? ' is-open' : ''}`}
+                    aria-hidden
+                  />
+                </button>
+
+                {tractsOpen ? (
+                  <ol className="hmda-geo-hover-card__tract-list">
+                    {hover.topCensusTracts.map((t, idx) => (
+                      <li key={`${t.countyFips}-${t.censusTract}`}>
+                        <span className="hmda-geo-hover-card__lender-rank">{idx + 1}</span>
+                        <div className="hmda-geo-hover-card__lender-main">
+                          <span className="hmda-geo-hover-card__lender-name">{formatTractLabel(t.censusTract)}</span>
+                          <span className="hmda-geo-hover-card__lender-meta">
+                            {t.countyName}
+                            {hover.kind === 'state' ? ` · ${t.countyFips?.slice(-3) || ''}` : ''}
+                            {' · '}
+                            {t.units.toLocaleString()} loans · {fmtLenderVol(t.volume)}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </section>
+            ) : null}
+
             {hover.lines?.length ? (
               <section className="hmda-geo-hover-card__tracts">
                 <button
@@ -333,53 +380,6 @@ export default function GeoHoverCard({
 
             {hover.tractAttribution ? (
               <p className="hmda-geo-hover-card__tract-note">{hover.tractAttribution}</p>
-            ) : null}
-
-            {hover.topCensusTracts?.length ? (
-              <section className="hmda-geo-hover-card__tracts">
-                <button
-                  type="button"
-                  className="hmda-geo-hover-card__lenders-toggle"
-                  aria-expanded={tractsOpen}
-                  onMouseDown={stopPropagationOnly}
-                  onClick={toggleSection(setTractsOpen)}
-                >
-                  <HoverIconWell Icon={TRACTS_SECTION_ICON.Icon} tone={TRACTS_SECTION_ICON.tone} size="sm" />
-                  <span className="hmda-geo-hover-card__lenders-toggle-text">
-                    <span className="hmda-geo-hover-card__lenders-toggle-label">
-                      Top {hover.topCensusTracts.length} census tracts
-                    </span>
-                    <span className="hmda-geo-hover-card__lenders-toggle-hint">
-                      {hover.kind === 'county' ? 'By originated loan count in county' : 'Statewide HMDA drilldown'}
-                    </span>
-                  </span>
-                  <ChevronDown
-                    size={16}
-                    strokeWidth={2.25}
-                    className={`hmda-geo-hover-card__lenders-chevron${tractsOpen ? ' is-open' : ''}`}
-                    aria-hidden
-                  />
-                </button>
-
-                {tractsOpen ? (
-                  <ol className="hmda-geo-hover-card__tract-list">
-                    {hover.topCensusTracts.map((t, idx) => (
-                      <li key={`${t.countyFips}-${t.censusTract}`}>
-                        <span className="hmda-geo-hover-card__lender-rank">{idx + 1}</span>
-                        <div className="hmda-geo-hover-card__lender-main">
-                          <span className="hmda-geo-hover-card__lender-name">{formatTractLabel(t.censusTract)}</span>
-                          <span className="hmda-geo-hover-card__lender-meta">
-                            {t.countyName}
-                            {hover.kind === 'state' ? ` · ${t.countyFips?.slice(-3) || ''}` : ''}
-                            {' · '}
-                            {t.units.toLocaleString()} loans · {fmtLenderVol(t.volume)}
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                ) : null}
-              </section>
             ) : null}
 
             {hover.topLenders?.length ? (

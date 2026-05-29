@@ -1,0 +1,27 @@
+{
+  "exportedAt": "2026-05-29T20:08:43.607Z",
+  "dataYear": 2024,
+  "recordCount": 4908,
+  "etag": "2026-05-29T20:08:43.607Z",
+  "prodCounts": {
+    "all": 4908,
+    "Conventional": 4900,
+    "FHA": 1274,
+    "VA": 1243,
+    "USDA": 866,
+    "Non-QM": 3,
+    "Jumbo": 246,
+    "HELOC": 0,
+    "Construction": 3
+  },
+  "channelCounts": {
+    "all": 4908,
+    "retail": 0,
+    "wholesale": 0,
+    "correspondent": 0
+  },
+  "source": "static JSON",
+  "pageSize": 20,
+  "totalPages": 246,
+  "pagesPath": "data/hmda/hmda-lenders-2024-pages"
+}

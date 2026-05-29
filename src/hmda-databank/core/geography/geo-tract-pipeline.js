@@ -14,37 +14,23 @@ import {
 
 /** @type {Worker | null} */
 let worker = null
-/** @type {Map<string, Promise<object | null>>} */
-const fetchCache = new Map()
-/** @type {string[]} LRU order for tract JSON cache keys */
-const fetchCacheOrder = []
-const TRACT_CACHE_MAX = 5
+/** Simple LRU cache for parsed state tract JSON (max 5 resolved FeatureCollections in memory). */
+const FETCH_CACHE_MAX = 5
+const fetchCache = new Map() // key → Promise<object|null>
+const fetchCacheOrder = [] // insertion-order keys for LRU eviction
 
-const MAX_LENDER_TRACT_STATES = 14
-const STATE_FETCH_CONCURRENCY = 4
-/** Full state tract JSON only when zoom ≥ this (unless state explicitly selected). */
-export const STATE_TRACT_MIN_ZOOM = 6.8
-/** Lender compare: lower concurrency to avoid main-thread pile-up. */
-const LENDER_TRACT_FETCH_CONCURRENCY = 2
-
-function cacheTractFetch(relativePath, promiseFactory) {
-  if (fetchCache.has(relativePath)) {
-    const idx = fetchCacheOrder.indexOf(relativePath)
-    if (idx >= 0) {
-      fetchCacheOrder.splice(idx, 1)
-      fetchCacheOrder.push(relativePath)
-    }
-    return fetchCache.get(relativePath)
-  }
-  const p = promiseFactory()
-  fetchCache.set(relativePath, p)
-  fetchCacheOrder.push(relativePath)
-  while (fetchCacheOrder.length > TRACT_CACHE_MAX) {
+function cachePut(key, promise) {
+  if (fetchCache.has(key)) return
+  fetchCache.set(key, promise)
+  fetchCacheOrder.push(key)
+  if (fetchCacheOrder.length > FETCH_CACHE_MAX) {
     const evict = fetchCacheOrder.shift()
-    if (evict) fetchCache.delete(evict)
+    fetchCache.delete(evict)
   }
-  return p
 }
+
+const MAX_LENDER_TRACT_STATES = 8  // was 14 — reduces concurrent multi-state fetches
+const STATE_FETCH_CONCURRENCY = 2  // was 4 — less main-thread parse contention
 
 async function mapWithConcurrency(items, fn, concurrency = STATE_FETCH_CONCURRENCY) {
   const results = new Array(items.length)
@@ -179,30 +165,30 @@ async function availableTractYears() {
   return manifestYears
 }
 
-/** Map panel year to nearest prebuilt tract asset year (2025 panel → 2024 tracts). */
+/** Map panel year to nearest prebuilt tract asset year (never a newer filing year). */
 async function resolveTractAssetYear(panelYear) {
   const want = String(panelYear || '2024')
   const years = await availableTractYears()
   if (years.includes(want)) return want
+
   const pref = Number(want)
   const notAfter = years.filter((y) => Number(y) <= pref).sort((a, b) => Number(b) - Number(a))
-  return notAfter[0] || years[0] || '2024'
+  if (notAfter[0]) return notAfter[0]
+
+  // Manifest may lag behind on-disk tiles after a single-year geo rebuild.
+  const direct = await fetchTractJson(`data/geo-map/tracts/${want}/_national-top.json`)
+  if (direct?.features?.length) return want
+
+  return years.sort((a, b) => Number(a) - Number(b))[0] || want
 }
 
 async function fetchTractJson(relativePath) {
-  return cacheTractFetch(relativePath, () =>
-    fetch(publicAssetUrl(relativePath), { cache: 'default' })
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null),
-  )
-}
-
-/** Whether full per-state tract JSON should load (vs national-top sample). */
-export function shouldLoadFullStateTracts({ mapZoom, stateCode, mapSelectedState, lenderTractMode = false }) {
-  if (!stateCode) return false
-  if (mapSelectedState && String(mapSelectedState).toUpperCase() === String(stateCode).toUpperCase()) return true
-  if (lenderTractMode && mapZoom >= 5.5) return true
-  return Number(mapZoom) >= STATE_TRACT_MIN_ZOOM
+  if (fetchCache.has(relativePath)) return fetchCache.get(relativePath)
+  const p = fetch(publicAssetUrl(relativePath), { cache: 'default' })
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+  cachePut(relativePath, p)
+  return p
 }
 
 /** Preload manifest + national sample for a filing year. */
@@ -241,7 +227,7 @@ export async function fetchLenderActiveStateTracts(year, stateBreakdown) {
     const st = String(row.state || '').trim().toUpperCase()
     const fc = await fetchStateTractFeatures(year, st)
     return fc?.features || []
-  }, LENDER_TRACT_FETCH_CONCURRENCY)
+  })
 
   const features = chunks.flat()
   if (!features.length) return null
@@ -276,7 +262,7 @@ export async function fetchLenderBreakdownTracts(year, stateBreakdown, cap = CEN
 
 export function resolveTractCap({ mapZoom, mapSelectedState, inViewport }) {
   if (inViewport) return VIEWPORT_TRACT_DOT_CAP
-  if (mapSelectedState && mapZoom >= 5) return STATE_TRACT_DOT_CAP
+  if (mapSelectedState && mapZoom >= 6.5) return STATE_TRACT_DOT_CAP
   return CENSUS_TRACT_DOT_CAP
 }
 
@@ -295,19 +281,11 @@ export async function buildTractLayerGeoJson(opts) {
   const year = String(opts.year || '2024')
   const mapZoom = Number(opts.mapZoom) || 0
   const stateCode = opts.stateCode ? String(opts.stateCode).toUpperCase() : null
-  const mapSelectedState = opts.mapSelectedState ? String(opts.mapSelectedState).toUpperCase() : null
-  const lenderTractMode = Boolean(opts.lenderTractMode)
   const inViewport = Boolean(opts.bounds) && mapZoom >= 7
   const cap = resolveTractCap({
     mapZoom,
     mapSelectedState: stateCode,
     inViewport,
-  })
-  const loadFullState = shouldLoadFullStateTracts({
-    mapZoom,
-    stateCode,
-    mapSelectedState,
-    lenderTractMode,
   })
 
   const lenderFocusList = Array.isArray(opts.lenderFocusList) && opts.lenderFocusList.length > 0
@@ -353,17 +331,9 @@ export async function buildTractLayerGeoJson(opts) {
     }
     const stateFeaturesMap = {}
     await mapWithConcurrency(statesToLoad, async (st) => {
-      const fc = loadFullState || mapSelectedState === st
-        ? await fetchStateTractFeatures(year, st)
-        : await fetchNationalTractSample(year).then((national) => {
-            if (!national?.features?.length) return null
-            const filtered = national.features.filter(
-              (f) => String(f?.properties?.state || '').trim().toUpperCase() === st,
-            )
-            return filtered.length ? { type: 'FeatureCollection', features: filtered } : null
-          })
+      const fc = await fetchStateTractFeatures(year, st)
       if (fc?.features?.length) stateFeaturesMap[st] = fc.features
-    }, LENDER_TRACT_FETCH_CONCURRENCY)
+    })
 
     const allFeatures = []
     for (const lItem of lenderFocusList) {
@@ -389,11 +359,8 @@ export async function buildTractLayerGeoJson(opts) {
 
     if (!allFeatures.length) return { type: 'FeatureCollection', features: [] }
 
-    const payload = {
-      features: allFeatures,
-      bounds: inViewport ? opts.bounds : null,
-      cap,
-    }
+    // Hard global cap — prevents compare-mode melt with 3+ lenders
+    const payload = { features: allFeatures, bounds: inViewport ? opts.bounds : null, cap: Math.min(3000, cap) }
     try {
       return await workerRequest('FILTER', payload)
     } catch {
@@ -409,14 +376,9 @@ export async function buildTractLayerGeoJson(opts) {
     }
 
     let features = []
-    if (stateCode && loadFullState) {
+    if (stateCode && mapZoom >= 6.5) {
       const fc = await fetchStateTractFeatures(year, stateCode)
       features = fc?.features || []
-    } else if (stateCode && !loadFullState) {
-      const national = await fetchNationalTractSample(year)
-      features = (national?.features || []).filter(
-        (f) => String(f?.properties?.state || '').trim().toUpperCase() === stateCode,
-      )
     } else {
       const fc = await fetchLenderActiveStateTracts(year, lenderBreakdown)
       features = fc?.features || []
@@ -455,17 +417,11 @@ export async function buildTractLayerGeoJson(opts) {
   }
 
   let baseFc = null
-  if (stateCode && loadFullState) {
+  if (stateCode && mapZoom >= 6.5) {
     baseFc = await fetchStateTractFeatures(year, stateCode)
   }
   if (!baseFc?.features?.length) {
     baseFc = await fetchNationalTractSample(year)
-    if (stateCode && baseFc?.features?.length && !loadFullState) {
-      const filtered = baseFc.features.filter(
-        (f) => String(f?.properties?.state || '').trim().toUpperCase() === stateCode,
-      )
-      baseFc = filtered.length ? { type: 'FeatureCollection', features: filtered } : baseFc
-    }
   }
   if (!baseFc?.features?.length) {
     return buildTractLayerLegacyFallback({

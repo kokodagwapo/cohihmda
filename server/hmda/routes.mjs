@@ -166,34 +166,51 @@ export function registerHmdaDataRoutes(app) {
     }
   })
 
-  /** Lender panel — official filers list (replaces 27MB static JSON when API server is running). */
+  /** Lender panel — static JSON when FFIEC unavailable; live filers list otherwise. */
   app.get('/api/hmda/lenders', async (req, res) => {
     try {
-      const requestedYear = parseYearParam(req.query.years, 2024)
+      const requestedYear = parseYearParam(req.query.years, HMDA_DEFAULT_ANCHOR_YEAR)
       const cacheKey = `lenders|${requestedYear}`
       const payload = await dedupe(cacheKey, async () => {
         const window = await resolveHmdaYearWindow(requestedYear, 0, getCache())
-        const effectiveYear = window.available?.includes(requestedYear)
-          ? requestedYear
-          : window.available?.find((y) => Number(y) < requestedYear) || window.available?.[0] || requestedYear
-        const lenders = await buildLendersFromFilers(effectiveYear, getCache())
+        const ffiecServesYear = window.available?.includes(Number(requestedYear))
+        if (ffiecServesYear) {
+          try {
+            const lenders = await buildLendersFromFilers(requestedYear, getCache())
+            return {
+              meta: {
+                source: 'FFIEC HMDA Data Browser API',
+                year: requestedYear,
+                requestedYear,
+                fallbackApplied: false,
+                count: lenders.length,
+                live: true,
+              },
+              lenders,
+            }
+          } catch (e) {
+            console.warn('[HMDA lenders API] FFIEC filers failed, trying static JSON:', e.message)
+          }
+        }
+        const pack = await loadLenderPack(requestedYear)
         return {
           meta: {
-            source: 'FFIEC HMDA Data Browser API',
-            year: effectiveYear,
+            source: pack.meta?.source || 'static JSON',
+            year: requestedYear,
             requestedYear,
-            fallbackApplied: effectiveYear !== requestedYear,
-            count: lenders.length,
-            live: true,
+            exportedAt: pack.meta?.exportedAt || null,
+            fallbackApplied: !ffiecServesYear,
+            count: pack.lenders?.length || 0,
+            live: false,
           },
-          lenders,
+          lenders: pack.lenders || [],
         }
       })
       cacheHeader(res, cacheKey, getCache())
       res.json(payload)
     } catch (e) {
       console.error('[HMDA lenders API]', e.message)
-      res.status(502).json({ error: e.message || 'Failed to load lenders from FFIEC' })
+      res.status(502).json({ error: e.message || 'Failed to load lenders' })
     }
   })
 

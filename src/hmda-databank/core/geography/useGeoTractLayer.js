@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { marketUnitsByStateFromGeoYear } from './geo-map-lender-filter.js'
 import { buildTractLayerGeoJson, preloadTractAssets } from './geo-tract-pipeline.js'
 
-const BOUNDS_DEBOUNCE_MS = 400
+const BOUNDS_DEBOUNCE_MS = 280
 
 /**
  * Async tract GeoJSON for Mapbox — prebuilt per-state assets + worker filter.
@@ -66,8 +66,9 @@ export function useGeoTractLayer({
       return undefined
     }
 
-    const stateCode = mapSelectedState || (mapZoom >= 6.8 ? layerStateCode : null)
+    const stateCode = mapSelectedState || (mapZoom >= 6.5 ? layerStateCode : null)
     const gen = ++genRef.current
+    let cancelled = false
 
     const run = () => {
       const bounds = mapZoom >= 7 ? boundsRef.current : null
@@ -80,8 +81,6 @@ export function useGeoTractLayer({
         year,
         mapZoom,
         stateCode,
-        mapSelectedState,
-        lenderTractMode,
         bounds,
         lenderFocus,
         lenderFocusList: resolvedFocusList,
@@ -91,12 +90,12 @@ export function useGeoTractLayer({
         countyNames: countyFipsNames,
       })
         .then((fc) => {
-          if (genRef.current !== gen) return
+          if (cancelled || genRef.current !== gen) return
           setTractsGeo(fc?.features?.length ? fc : null)
         })
         .catch((err) => {
           console.warn('[HMDA] tract layer load failed:', err?.message || err)
-          if (genRef.current !== gen) return
+          if (cancelled || genRef.current !== gen) return
           setTractsGeo(null)
         })
     }
@@ -108,7 +107,7 @@ export function useGeoTractLayer({
       run()
     }
 
-    return () => clearTimeout(debounceRef.current)
+    return () => { cancelled = true; clearTimeout(debounceRef.current) }
   }, [
     showCensusTracts,
     mapReady,

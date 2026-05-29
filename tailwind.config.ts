@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
   darkMode: ["class"],
@@ -15,6 +16,10 @@ export default {
     extend: {
       fontFamily: {
         sans: ['"Helvetica Neue"', '"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
+      },
+      transitionDuration: {
+        1200: "1200ms",
+        1400: "1400ms",
       },
       colors: {
         border: "hsl(var(--border))",
@@ -127,6 +132,25 @@ export default {
           "0%, 100%": { height: "40%" },
           "50%": { height: "100%" },
         },
+        "sync-panel-glow": {
+          "0%": {
+            boxShadow: "0 0 0 0 rgba(37, 99, 235, 0.45), 0 0 0 0 rgba(37, 99, 235, 0.2)",
+            borderColor: "rgba(37, 99, 235, 0.55)",
+          },
+          "35%": {
+            boxShadow: "0 0 0 3px rgba(37, 99, 235, 0.2), 0 0 28px rgba(37, 99, 235, 0.35)",
+            borderColor: "rgba(37, 99, 235, 0.55)",
+          },
+          "100%": {
+            boxShadow: "0 0 0 0 rgba(37, 99, 235, 0)",
+            borderColor: "hsl(var(--border))",
+          },
+        },
+        "year-card-select": {
+          "0%": { transform: "scale(1)" },
+          "40%": { transform: "scale(1.015)" },
+          "100%": { transform: "scale(1)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -135,8 +159,10 @@ export default {
         "pulse-glow": "pulse-glow 2s ease-in-out infinite",
         "pulse-glow-rose": "pulse-glow-rose 2s ease-in-out infinite",
         "audio-wave": "audio-wave 0.6s ease-in-out infinite",
+        "sync-panel-glow": "sync-panel-glow 1.25s ease-out forwards",
+        "year-card-select": "year-card-select 0.45s ease-out",
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [tailwindcssAnimate],
 } satisfies Config;

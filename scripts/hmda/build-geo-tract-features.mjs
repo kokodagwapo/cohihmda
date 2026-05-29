@@ -153,6 +153,16 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data))
 }
 
+function loadExistingManifest() {
+  const manifestPath = path.join(OUT_ROOT, 'manifest.json')
+  if (!fs.existsSync(manifestPath)) return null
+  try {
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
 function main() {
   const argvYears = process.argv.slice(2).map(Number).filter((y) => y >= 2018 && y <= 2030)
   const drilldown = JSON.parse(fs.readFileSync(DRILLDOWN_PATH, 'utf8'))
@@ -166,12 +176,13 @@ function main() {
     countyNames = JSON.parse(fs.readFileSync(namesPath, 'utf8'))
   }
 
+  const existing = loadExistingManifest()
   const manifest = {
     builtAt: new Date().toISOString(),
     nationalTopCap: NATIONAL_TOP_CAP,
-    years: years.map(String),
+    years: [],
     states: Object.values(FIPS_TO_STATE).sort(),
-    files: {},
+    files: existing?.files && typeof existing.files === 'object' ? { ...existing.files } : {},
   }
 
   for (const year of years) {
@@ -208,6 +219,11 @@ function main() {
     manifest.files[yearKey].nationalTop = nationalTop.length
     console.log(`${yearKey}: ${manifest.states.length} states, national-top ${nationalTop.length}`)
   }
+
+  manifest.years = [...new Set([
+    ...Object.keys(manifest.files).filter((y) => /^\d{4}$/.test(y)),
+    ...(existing?.years || []).map(String),
+  ])].sort((a, b) => Number(b) - Number(a))
 
   writeJson(path.join(OUT_ROOT, 'manifest.json'), manifest)
   console.log('Wrote', path.join(OUT_ROOT, 'manifest.json'))

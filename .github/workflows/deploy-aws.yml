@@ -363,12 +363,12 @@ jobs:
         
       - name: Validate build output
         run: |
-          if [ ! -d "docs" ]; then
-            echo "::error::Build failed: docs/ directory not found"
+          if [ ! -d "dist" ]; then
+            echo "::error::Build failed: dist/ directory not found"
             exit 1
           fi
-          if [ ! -f "docs/index.html" ]; then
-            echo "::error::Build failed: docs/index.html not found"
+          if [ ! -f "dist/index.html" ]; then
+            echo "::error::Build failed: dist/index.html not found"
             exit 1
           fi
           echo "✓ Build output validated"
@@ -439,15 +439,15 @@ jobs:
           echo "✓ S3 bucket exists and is accessible"
           echo ""
           
-          # Check if docs directory exists
-          if [ ! -d "docs" ]; then
-            echo "::error::docs/ directory not found! Build may have failed."
+          # Check if dist directory exists
+          if [ ! -d "dist" ]; then
+            echo "::error::dist/ directory not found! Build may have failed."
             exit 1
           fi
           
           # Check if index.html exists
-          if [ ! -f "docs/index.html" ]; then
-            echo "::error::docs/index.html not found! Build may have failed."
+          if [ ! -f "dist/index.html" ]; then
+            echo "::error::dist/index.html not found! Build may have failed."
             exit 1
           fi
           
@@ -456,7 +456,7 @@ jobs:
           echo "Syncing files to S3..."
           
           # Sync static assets
-          if ! aws s3 sync docs/ "s3://${S3_BUCKET}" \
+          if ! aws s3 sync dist/ "s3://${S3_BUCKET}" \
             --region "${AWS_REGION}" \
             --delete \
             --exclude ".DS_Store" \
@@ -471,7 +471,7 @@ jobs:
           echo "✓ Static assets synced"
           
           # Upload index.html with no cache
-          if ! aws s3 cp docs/index.html "s3://${S3_BUCKET}/index.html" \
+          if ! aws s3 cp dist/index.html "s3://${S3_BUCKET}/index.html" \
             --region "${AWS_REGION}" \
             --content-type "text/html" \
             --cache-control "no-cache, no-store, must-revalidate"; then
@@ -482,8 +482,8 @@ jobs:
           echo "✓ index.html uploaded"
           
           # Upload 404.html with no cache (if exists)
-          if [ -f "docs/404.html" ]; then
-            if ! aws s3 cp docs/404.html "s3://${S3_BUCKET}/404.html" \
+          if [ -f "dist/404.html" ]; then
+            if ! aws s3 cp dist/404.html "s3://${S3_BUCKET}/404.html" \
               --region "${AWS_REGION}" \
               --content-type "text/html" \
               --cache-control "no-cache, no-store, must-revalidate"; then

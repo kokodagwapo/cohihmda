@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source } from '@vis.gl/react-mapbox'
 import mapboxgl from 'mapbox-gl'
 import {
@@ -202,7 +202,7 @@ function bindGeographyAtmosphereZoom(map, getOpts = () => ({})) {
   if (!map || map._hmdaAtmosphereZoomBound) return
   map._hmdaAtmosphereZoomBound = true
   const sync = () => applyGeographyAtmosphere(map, getOpts())
-  map.on('zoomend', sync)
+  map.on('zoom', sync)
   map.on('moveend', sync)
   sync()
 }
@@ -237,17 +237,13 @@ function setupGeographyGlobe(map) {
   }
 }
 
-const MAP_BOUNDS_DEBOUNCE_MS = 320
-
-function HmdaGeographyMapbox({
+export default function HmdaGeographyMapbox({
   geoDrilldownHmda,
   panelYear,
   drilldownYear,
   onDrilldownYearChange,
   geoStateData,
   lenders = [],
-  /** Precomputed disposition from parent — avoids rebuild on unrelated lender array churn. */
-  dispositionSnapshot = null,
   geoMapMetric,
   onGeoMapMetricChange,
   mapSelectedState,
@@ -270,6 +266,15 @@ function HmdaGeographyMapbox({
   mapLenderFocusList = null,
   availableYears = null,
   onInitialMapReady = null,
+  /** Unified lender / geography / address search (from MortgageLenderDashboard). */
+  mapSearchQuery = null,
+  onMapSearchQueryChange = null,
+  showSearchSuggestions = false,
+  onShowSearchSuggestions = null,
+  searchSuggestions = null,
+  onCommitSearch = null,
+  suggestionToQueryValue = null,
+  onClearSearch = null,
 }) {
   const mapRef = useRef(null)
   const wrapRef = useRef(null)
@@ -294,6 +299,10 @@ function HmdaGeographyMapbox({
   const [countyEnrichment, setCountyEnrichment] = useState(null)
   const [showCounties, setShowCounties] = useState(false)
   const [addressQuery, setAddressQuery] = useState('')
+  const unifiedSearch = typeof onCommitSearch === 'function'
+  const searchQuery = unifiedSearch ? (mapSearchQuery ?? '') : addressQuery
+  const setSearchQuery = unifiedSearch ? onMapSearchQueryChange : setAddressQuery
+  const suggestionList = unifiedSearch && Array.isArray(searchSuggestions) ? searchSuggestions : []
   const [geocodeBusy, setGeocodeBusy] = useState(false)
   const [geocodeHint, setGeocodeHint] = useState('')
   const [flyPresetId, setFlyPresetId] = useState('aerial')
@@ -314,10 +323,6 @@ function HmdaGeographyMapbox({
   const [mapTextScale, setMapTextScale] = useState(readGeoMapTextScale)
   const [mapZoom, setMapZoom] = useState(USA_GLOBE_INTRO_VIEW.zoom)
   const [mapBounds, setMapBounds] = useState(null)
-  const mapZoomRef = useRef(mapZoom)
-  const mapBoundsRef = useRef(null)
-  const mapBoundsDebounceRef = useRef(null)
-  const zoomBandRef = useRef(Math.floor(USA_GLOBE_INTRO_VIEW.zoom))
 
   useEffect(() => {
     geoDebugLog('HmdaGeographyMapbox.jsx:mount', 'Map component mounted', { hasGeoData: Boolean(geoDrilldownHmda) }, 'C')
@@ -566,28 +571,19 @@ function HmdaGeographyMapbox({
     }
   }, [showCensusTracts, mapSelectedState, mapZoom])
 
-  const dispositionYear = useMemo(() => {
-    if (dispositionSnapshot?.dispositionYear != null) return dispositionSnapshot.dispositionYear
-    return resolveDispositionYear(lenders, panelYear)
-  }, [dispositionSnapshot, lenders, panelYear])
+  const dispositionYear = useMemo(
+    () => resolveDispositionYear(lenders, panelYear),
+    [lenders, panelYear],
+  )
 
-  const dispositionCtx = useMemo(() => {
-    if (dispositionSnapshot?.byState) {
-      return {
-        byState: dispositionSnapshot.byState,
-        national: dispositionSnapshot.national ?? null,
-        dispositionYear: dispositionSnapshot.dispositionYear ?? dispositionYear,
-      }
-    }
-    if (!Array.isArray(lenders) || lenders.length === 0) {
-      return { byState: {}, national: null, dispositionYear }
-    }
-    return {
+  const dispositionCtx = useMemo(
+    () => ({
       byState: buildDispositionByState(lenders, dispositionYear),
       national: getPanelDisposition(lenders, dispositionYear),
       dispositionYear,
-    }
-  }, [dispositionSnapshot, lenders, dispositionYear])
+    }),
+    [lenders, dispositionYear],
+  )
 
   const lenderMapInsights = mapLenderFocus?.insights?.stateBreakdown?.length
     ? mapLenderFocus.insights
@@ -709,13 +705,13 @@ function HmdaGeographyMapbox({
     }
   }, [mapReady, showBuildings, applyOverlaySync])
 
-  const flyToAddress = useCallback(async () => {
+  const flyToAddress = useCallback(async (queryOverride) => {
     const map = mapRef.current?.getMap?.()
-    if (!map || !accessToken) return
-    const q = addressQuery.trim()
+    if (!map || !accessToken) return false
+    const q = String(queryOverride ?? searchQuery ?? '').trim()
     if (!q) {
-      setGeocodeHint('Enter an address or place')
-      return
+      setGeocodeHint('Enter a lender, place, or address')
+      return false
     }
     setGeocodeBusy(true)
     setGeocodeHint('')
@@ -725,8 +721,8 @@ function HmdaGeographyMapbox({
         c && Number.isFinite(c.lng) && Number.isFinite(c.lat) ? [c.lng, c.lat] : undefined
       const hit = await geocodeAddress(q, accessToken, proximity ? { proximity } : {})
       if (!hit) {
-        setGeocodeHint('No matches — try a fuller address')
-        return
+        setGeocodeHint('No map location — try a fuller address')
+        return false
       }
       setShowBuildings(true)
       const preset = GEO_FLY_PRESETS[flyPresetId] || GEO_FLY_PRESETS.aerial
@@ -751,10 +747,30 @@ function HmdaGeographyMapbox({
       })
       const name = hit.placeName
       setGeocodeHint(name.length > 52 ? `${name.slice(0, 49)}…` : name)
+      return true
     } finally {
       setGeocodeBusy(false)
     }
-  }, [addressQuery, accessToken, flyPresetId, overlayTheme])
+  }, [searchQuery, accessToken, flyPresetId, overlayTheme])
+
+  const submitMapSearch = useCallback(async () => {
+    const q = String(searchQuery ?? '').trim()
+    if (!q) {
+      setGeocodeHint(unifiedSearch ? 'Enter a lender, county, city, or address' : 'Enter an address or place')
+      return
+    }
+    if (unifiedSearch) {
+      onCommitSearch(q)
+      onShowSearchSuggestions?.(false)
+      const looksLikeStreetAddress = /\d/.test(q) && /(,|\b(st|street|ave|avenue|road|rd|blvd|dr|drive|ln|lane|way|court|ct)\b)/i.test(q)
+      const noStructuredMatch = suggestionList.length === 0
+      if (looksLikeStreetAddress || noStructuredMatch) {
+        await flyToAddress(q)
+      }
+      return
+    }
+    await flyToAddress(q)
+  }, [searchQuery, unifiedSearch, onCommitSearch, onShowSearchSuggestions, suggestionList.length, flyToAddress])
 
   const syncGulfLabelVisibility = useCallback(() => {
     const map = mapRef.current?.getMap?.()
@@ -833,75 +849,36 @@ function HmdaGeographyMapbox({
     const map = mapRef.current?.getMap?.()
     if (!map) return
 
-    const pushBoundsToReact = (bounds, z) => {
-      if (z >= 7) {
-        setMapBounds(bounds)
-      } else if (mapBoundsRef.current !== null) {
-        mapBoundsRef.current = null
-        setMapBounds(null)
-      }
-    }
-
-    const onMoveEnd = () => {
+    const onViewChange = () => {
       syncGulfLabelVisibility()
       const z = map.getZoom()
-      mapZoomRef.current = z
+      setMapZoom(z)
       syncGeographyAtmosphere(map, {
         satelliteBasemap: basemapSatellite,
         detailView: showCensusTractsRef.current || z >= 5.5,
       })
       const b = map.getBounds()
-      const bounds = {
+      setMapBounds({
         west: b.getWest(),
         south: b.getSouth(),
         east: b.getEast(),
         north: b.getNorth(),
-      }
-      mapBoundsRef.current = bounds
-      clearTimeout(mapBoundsDebounceRef.current)
-      if (z >= 7) {
-        mapBoundsDebounceRef.current = setTimeout(() => {
-          pushBoundsToReact(bounds, z)
-        }, MAP_BOUNDS_DEBOUNCE_MS)
-      } else {
-        pushBoundsToReact(null, z)
-      }
-    }
-
-    const onZoomEnd = () => {
-      const z = map.getZoom()
-      mapZoomRef.current = z
-      const band = Math.floor(z)
-      if (band !== zoomBandRef.current) {
-        zoomBandRef.current = band
-        setMapZoom(z)
-      }
-      syncGeographyAtmosphere(map, {
-        satelliteBasemap: basemapSatellite,
-        detailView: showCensusTractsRef.current || z >= 5.5,
       })
     }
-
     syncGulfLabelVisibility()
-    const initialZ = map.getZoom()
-    mapZoomRef.current = initialZ
-    zoomBandRef.current = Math.floor(initialZ)
-    setMapZoom(initialZ)
+    setMapZoom(map.getZoom())
     const b0 = map.getBounds()
-    const initialBounds = {
+    setMapBounds({
       west: b0.getWest(),
       south: b0.getSouth(),
       east: b0.getEast(),
       north: b0.getNorth(),
-    }
-    mapBoundsRef.current = initialBounds
-    pushBoundsToReact(initialZ >= 7 ? initialBounds : null, initialZ)
-    map.on('moveend', onMoveEnd)
-    map.on('zoomend', onZoomEnd)
+    })
+    map.on('moveend', onViewChange)
+    map.on('zoomend', onViewChange)
     return () => {
-      clearTimeout(mapBoundsDebounceRef.current)
-      map.off('moveend', onMoveEnd)
-      map.off('zoomend', onZoomEnd)
+      map.off('moveend', onViewChange)
+      map.off('zoomend', onViewChange)
     }
   }, [mapReady, syncGulfLabelVisibility, basemapSatellite])
 
@@ -947,6 +924,7 @@ function HmdaGeographyMapbox({
         msg,
       )
       setLoadError(null)
+      setMapReady(false)
       setMapStyleUrl(MAPBOX_GEOGRAPHY_STREETS_STYLE)
       return
     }
@@ -1210,40 +1188,45 @@ function HmdaGeographyMapbox({
       if (showCensusTractsRef.current) syncTractLayerOrder(map)
     }
     sync()
-    const onStyleData = () => {
-      if (!tractsGeo || !map.style?._loaded) return
-      if (!map.getSource(SRC)) sync()
-    }
-    map.on('styledata', onStyleData)
-    return () => {
-      map.off('styledata', onStyleData)
-    }
+    // Re-sync only after a full style reload (style.load), not on every tile/source
+    // styledata event — the old 'styledata' fired dozens of times per map interaction.
+    map.on('style.load', sync)
+    return () => { try { map.off('style.load', sync) } catch {} }
   }, [mapReady, tractsGeo, tractGlobeLayerOn, tractDetailLayerOn, tractGlobeCirclePaint, tractSymbolLayout, tractSymbolPaint, mapLenderFocusList])
 
-  const stateLenderRankCacheRef = useRef({})
-  useEffect(() => {
-    stateLenderRankCacheRef.current = {}
-  }, [lenders, geoSliceYear, geoYear])
-
-  const getStateLenderRank = useCallback(
-    (stateCode) => {
-      const st = String(stateCode || '').trim().toUpperCase()
-      if (!st || !Array.isArray(lenders) || !lenders.length) return []
-      const cache = stateLenderRankCacheRef.current
-      if (cache[st]) return cache[st]
-      try {
-        cache[st] = rankLendersForGeography(
-          lenders,
-          geoSliceYear,
-          { state: st, geoDrilldownYear: geoYear },
-          5,
-        )
-      } catch {
-        cache[st] = []
-      }
-      return cache[st]
-    },
-    [lenders, geoSliceYear, geoYear],
+  // Lazy rank cache — computes top-5 lenders for a state only on first hover access,
+  // not upfront for all 51 states (was O(51 × lenders) on every lenders change).
+  const _lazyRankStore   = useRef({})
+  const _lazyRankKey     = useRef('')
+  const _lazyRankLenders = useRef(lenders)
+  _lazyRankLenders.current = lenders
+  const newRankKey = `${geoSliceYear}:${lenders?.length ?? 0}`
+  if (_lazyRankKey.current !== newRankKey) {
+    _lazyRankStore.current = {}
+    _lazyRankKey.current = newRankKey
+  }
+  const stateLenderRankCache = useMemo(
+    () =>
+      new Proxy(_lazyRankStore.current, {
+        get(target, st) {
+          if (typeof st !== 'string' || !st) return undefined
+          if (!Object.prototype.hasOwnProperty.call(target, st)) {
+            try {
+              target[st] = rankLendersForGeography(
+                _lazyRankLenders.current,
+                geoSliceYear,
+                { state: st, geoDrilldownYear: geoYear },
+                5,
+              )
+            } catch {
+              target[st] = []
+            }
+          }
+          return target[st]
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [newRankKey],
   )
 
   const lenderHoverFocus = useMemo(() => {
@@ -1271,7 +1254,7 @@ function HmdaGeographyMapbox({
       panelYear,
       geoYear,
       countyNames: countyFipsNames || {},
-      getStateLenderRank,
+      stateRankCache: stateLenderRankCache,
       stateMedians: STATE_MEDIAN_INCOME,
       dispositionByState: dispositionCtx.byState,
       dispositionYear: dispositionCtx.dispositionYear,
@@ -1282,7 +1265,7 @@ function HmdaGeographyMapbox({
       panelYear,
       geoYear,
       countyFipsNames,
-      getStateLenderRank,
+      stateLenderRankCache,
       dispositionCtx.byState,
       dispositionCtx.dispositionYear,
       lenderHoverFocus,
@@ -1371,10 +1354,8 @@ function HmdaGeographyMapbox({
   }, [onClearState, onSetShowCensusTracts])
 
   useEffect(() => {
-    const map = mapRef.current?.getMap?.()
-    if (!map) return
     const onResize = () => {
-      map.resize()
+      try { mapRef.current?.getMap?.()?.resize() } catch { /* ignore during teardown */ }
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
@@ -1386,19 +1367,12 @@ function HmdaGeographyMapbox({
     const shell = mapShellRef.current
     if (!map || !shell || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
+      // Resize the Mapbox GL canvas whenever the container dimensions change
+      // (panel open/close, sidebar toggle, window resize, etc.)
+      try { map.resize() } catch {}
     })
     ro.observe(shell)
     return () => ro.disconnect()
-  }, [mapReady])
-
-  useEffect(() => {
-    if (!mapReady) return
-    const map = mapRef.current?.getMap?.()
-    if (!map) return
-    const onMoveEnd = () => {
-    }
-    map.on('moveend', onMoveEnd)
-    return () => map.off('moveend', onMoveEnd)
   }, [mapReady])
 
   /** Compass: when drilled in or off hero framing → full USA globe; else Mapbox resets bearing only. */
@@ -1673,7 +1647,7 @@ function HmdaGeographyMapbox({
       idleCleanup()
       teardown()
     }
-  }, [mapReady, mapSelectedState, showCensusTracts, lenderMapInsights])
+  }, [mapReady, mapSelectedState, showCensusTracts, countiesGeo, tractsGeo, statesGeo, lenderMapInsights, pinsGeo])
 
   useEffect(() => {
     if (!mapReady) return
@@ -1798,6 +1772,9 @@ function HmdaGeographyMapbox({
 
   const mapTextScaleUi = GEO_TEXT_SCALE_UI[mapTextScale] || GEO_TEXT_SCALE_UI.default
 
+  const searchSuggestionsOpen =
+    unifiedSearch && showSearchSuggestions && suggestionList.length > 0
+
   const wrapClass = `hmda-geo-mapbox-wrap hmda-geo-mapbox-wrap--light hmda-geo-mapbox-wrap--usa${
     basemapSatellite
       ? ' hmda-geo-mapbox-wrap--basemap-satellite hmda-geo-mapbox-wrap--satellite'
@@ -1806,7 +1783,7 @@ function HmdaGeographyMapbox({
     isBrowserFullscreen ? ' hmda-geo-mapbox-wrap--browser-fs' : ''
   }${mapTextScale === 'large' ? ' hmda-geo-mapbox-wrap--text-large' : ''}${
     mapTextScale === 'xlarge' ? ' hmda-geo-mapbox-wrap--text-xlarge' : ''
-  }`
+  }${searchSuggestionsOpen ? ' hmda-geo-mapbox-wrap--search-open' : ''}`
 
   if (!accessToken || !isMapboxPublicToken(accessToken)) {
     return (
@@ -1818,7 +1795,11 @@ function HmdaGeographyMapbox({
 
   return (
     <div ref={wrapRef} className={wrapClass}>
-      <div className="hmda-geo-mapbox-toolbar hmda-geo-mapbox-toolbar--minimal hmda-geo-mapbox-toolbar--elevated">
+      <div
+        className={`hmda-geo-mapbox-toolbar hmda-geo-mapbox-toolbar--minimal hmda-geo-mapbox-toolbar--elevated${
+          searchSuggestionsOpen ? ' hmda-geo-mapbox-toolbar--search-open' : ''
+        }`}
+      >
         <GeoMetricPicker value={metric.id} onChange={onGeoMapMetricChange} />
 
         {onDrilldownYearChange && drilldownYearOptions.length > 0 ? (
@@ -1849,23 +1830,70 @@ function HmdaGeographyMapbox({
             <span className="hmda-geo-toolbar-icon-well hmda-geo-toolbar-icon-well--sky" aria-hidden>
               <Search size={15} strokeWidth={2} className="hmda-geo-toolbar-search__glyph" />
             </span>
-            <input
-              id="hmda-geo-address-search"
-              type="search"
-              className="hmda-geo-toolbar-search__input"
-              placeholder="Address or place…"
-              value={addressQuery}
-              onChange={(e) => setAddressQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  flyToAddress()
-                }
-              }}
-              disabled={geocodeBusy}
-              aria-label="Address or place to find on the map"
-              autoComplete="street-address"
-            />
+            <div className="hmda-geo-toolbar-search__field-wrap">
+              <input
+                id="hmda-geo-address-search"
+                type="search"
+                className="hmda-geo-toolbar-search__input"
+                placeholder={unifiedSearch ? 'Search lender, county, city, or address…' : 'Address or place…'}
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery?.(e.target.value)
+                  if (unifiedSearch) {
+                    const t = e.target.value.trim()
+                    onShowSearchSuggestions?.(/^\d+$/.test(t) || t.length >= 2)
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    submitMapSearch()
+                  }
+                  if (e.key === 'Escape') onShowSearchSuggestions?.(false)
+                }}
+                onFocus={() => {
+                  if (!unifiedSearch) return
+                  const t = String(searchQuery ?? '').trim()
+                  if (/^\d+$/.test(t) || t.length >= 2) onShowSearchSuggestions?.(true)
+                }}
+                disabled={geocodeBusy}
+                aria-label={unifiedSearch ? 'Search lenders, geographies, or addresses on the map' : 'Address or place to find on the map'}
+                autoComplete={unifiedSearch ? 'off' : 'street-address'}
+              />
+              {unifiedSearch && searchQuery && onClearSearch ? (
+                <button
+                  type="button"
+                  className="hmda-geo-toolbar-search__clear"
+                  onClick={() => {
+                    onClearSearch()
+                    setGeocodeHint('')
+                  }}
+                  aria-label="Clear search"
+                >
+                  ×
+                </button>
+              ) : null}
+              {unifiedSearch && showSearchSuggestions && suggestionList.length > 0 ? (
+                <div className="hmda-geo-toolbar-search__suggestions" data-hmda-search-ui role="listbox">
+                  {suggestionList.map((s, i) => (
+                    <button
+                      key={`${s.category}-${s.label}-${i}`}
+                      type="button"
+                      role="option"
+                      className="hmda-geo-toolbar-search__suggestion"
+                      onClick={() => {
+                        const v = suggestionToQueryValue ? suggestionToQueryValue(s) : s.label
+                        onCommitSearch?.(v)
+                        onShowSearchSuggestions?.(false)
+                      }}
+                    >
+                      <span className="hmda-geo-toolbar-search__suggestion-label">{s.label}</span>
+                      <span className="hmda-geo-toolbar-search__suggestion-cat">{s.category}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <select
               className="hmda-geo-toolbar-search__select"
               value={flyPresetId}
@@ -1882,9 +1910,9 @@ function HmdaGeographyMapbox({
             <button
               type="button"
               className="hmda-geo-toolbar-search__go"
-              onClick={() => flyToAddress()}
+              onClick={() => submitMapSearch()}
               disabled={geocodeBusy}
-              aria-label="Fly map to address"
+              aria-label={unifiedSearch ? 'Search or fly map to location' : 'Fly map to address'}
             >
               <span className="hmda-geo-toolbar-search__go-inner">
                 Go
@@ -1989,7 +2017,7 @@ function HmdaGeographyMapbox({
           onError={onMapError}
           style={{ width: '100%', height: '100%' }}
           trackResize
-          attributionControl
+          attributionControl={false}
           maxPitch={85}
           maxZoom={GEO_MAP_MAX_ZOOM}
           minZoom={GEO_MAP_MIN_ZOOM}
@@ -2148,5 +2176,3 @@ function HmdaGeographyMapbox({
     </div>
   )
 }
-
-export default memo(HmdaGeographyMapbox)

@@ -161,23 +161,27 @@ export function syncTractLayerImperative(map, { enabled = false, geojson = null,
 }
 
 export function pickTopGeoFeature(map, point, priorityLayers = [], zoom) {
-  const z = Number.isFinite(zoom) ? zoom : map.getZoom?.() ?? 4
+  try {
+    const z = Number.isFinite(zoom) ? zoom : map.getZoom?.() ?? 4
 
-  for (const layerId of priorityLayers) {
-    if (!map.getLayer(layerId)) continue
-    const radius = pickRadiusForLayer(layerId, z)
-    const hits = map.queryRenderedFeatures(point, { layers: [layerId], radius })
-    if (hits?.[0]) return { feature: hits[0], layerId }
-  }
+    for (const layerId of priorityLayers) {
+      if (!map.getLayer(layerId)) continue
+      const radius = pickRadiusForLayer(layerId, z)
+      const hits = map.queryRenderedFeatures(point, { layers: [layerId], radius })
+      if (hits?.[0]) return { feature: hits[0], layerId }
+    }
 
-  const geoLayers = geoInteractiveLayersForZoom(z)
-  for (const layerId of geoLayers) {
-    if (!map.getLayer(layerId)) continue
-    const radius = pickRadiusForLayer(layerId, z)
-    const hits = map.queryRenderedFeatures(point, { layers: [layerId], radius })
-    if (hits?.[0]) return { feature: hits[0], layerId }
+    const geoLayers = geoInteractiveLayersForZoom(z)
+    for (const layerId of geoLayers) {
+      if (!map.getLayer(layerId)) continue
+      const radius = pickRadiusForLayer(layerId, z)
+      const hits = map.queryRenderedFeatures(point, { layers: [layerId], radius })
+      if (hits?.[0]) return { feature: hits[0], layerId }
+    }
+    return null
+  } catch {
+    return null
   }
-  return null
 }
 
 /**
@@ -265,38 +269,28 @@ export function bindGeographyFeatureInteractions(map, handlers) {
     }
   }
 
-  let moveRaf = 0
-  let pendingMoveEvent = null
-
-  const flushMove = () => {
-    moveRaf = 0
-    const e = pendingMoveEvent
-    pendingMoveEvent = null
-    if (!e) return
-
-    const hit = pickTopGeoFeature(map, e.point, priorityLayers, map.getZoom?.())
-    if (!hit) {
-      if (lastHoverKey != null) {
-        clearHighlight()
-        lastHoverKey = null
-        handlers.onHoverEnd?.()
-      }
-      return
-    }
-
-    applyHighlight(hit.feature, hit.layerId)
-    handlers.onMapPointerMove?.()
-    const key = hoverFeatureKey(hit.feature, hit.layerId)
-    if (key !== lastHoverKey) {
-      lastHoverKey = key
-      handlers.onHover?.(hit.feature, hit.layerId)
-    }
-  }
-
   const onMove = (e) => {
-    pendingMoveEvent = e
-    if (moveRaf) return
-    moveRaf = requestAnimationFrame(flushMove)
+    try {
+      const hit = pickTopGeoFeature(map, e.point, priorityLayers, map.getZoom?.())
+      if (!hit) {
+        if (lastHoverKey != null) {
+          clearHighlight()
+          lastHoverKey = null
+          handlers.onHoverEnd?.()
+        }
+        return
+      }
+
+      applyHighlight(hit.feature, hit.layerId)
+      handlers.onMapPointerMove?.()
+      const key = hoverFeatureKey(hit.feature, hit.layerId)
+      if (key !== lastHoverKey) {
+        lastHoverKey = key
+        handlers.onHover?.(hit.feature, hit.layerId)
+      }
+    } catch {
+      /* ignore errors during style reload / teardown */
+    }
   }
 
   const onLeave = () => {
@@ -316,9 +310,6 @@ export function bindGeographyFeatureInteractions(map, handlers) {
   map.on('click', onClick)
 
   return () => {
-    if (moveRaf) cancelAnimationFrame(moveRaf)
-    moveRaf = 0
-    pendingMoveEvent = null
     clearHighlight()
     lastHoverKey = null
     map.off('mousemove', onMove)
@@ -327,19 +318,23 @@ export function bindGeographyFeatureInteractions(map, handlers) {
   }
 }
 
+/** Track previous selection so we only toggle two states instead of scanning all source features. */
+let _prevSelectedState = null
+
 /** @param {import('mapbox-gl').Map} map */
 export function syncStateSelectionFeatureState(map, stateCode) {
   if (!map?.setFeatureState) return
   const source = 'geo-states'
-  try {
-    const features = map.querySourceFeatures(source) || []
-    for (const f of features) {
-      const id = f.properties?.state
-      if (!id) continue
-      safeSetFeatureState(map, { source, id }, { selected: false })
-    }
-  } catch {
-    /* querySourceFeatures unavailable until tiles loaded */
+  const prev = _prevSelectedState
+  _prevSelectedState = stateCode || null
+
+  // Deselect the previous state directly — avoids querySourceFeatures scan of all tiles
+  if (prev && prev !== stateCode) {
+    safeSetFeatureState(map, { source, id: prev }, { selected: false })
   }
-  if (stateCode) safeSetFeatureState(map, { source, id: stateCode }, { selected: true })
+  if (stateCode) {
+    safeSetFeatureState(map, { source, id: stateCode }, { selected: true })
+  } else if (!stateCode && !prev) {
+    // Nothing to clear; no-op
+  }
 }

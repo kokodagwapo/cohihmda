@@ -43,6 +43,8 @@
     "hmda:lender-pages": "node scripts/hmda/build-hmda-lender-pages.mjs",
     "hmda:products-summary": "node scripts/hmda/build-hmda-products-summary.mjs",
     "hmda:refresh": "node scripts/hmda/admin-refresh-pipeline.mjs",
+    "hmda:refresh:lenders": "node scripts/hmda/admin-refresh-pipeline.mjs --mode=lenders",
+    "hmda:refresh:geo": "node scripts/hmda/admin-refresh-pipeline.mjs --mode=geo",
     "hmda:verify": "node scripts/hmda/verify-fixes.mjs",
     "hmda:verify:quick": "node scripts/hmda/verify-fixes.mjs --skip-build",
     "hmda:verify:integration": "node scripts/hmda/verify-integration.mjs"

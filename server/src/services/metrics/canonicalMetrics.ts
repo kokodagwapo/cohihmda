@@ -221,9 +221,14 @@ export function getStandardDateRanges(): {
   prior36mBaseline: DateRange;
 } {
   const now = new Date();
-  const today = now.toISOString().split("T")[0];
   const DAY = 24 * 60 * 60 * 1000;
-  const toDate = (d: Date) => d.toISOString().split("T")[0];
+  const toDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+  const today = toDate(now);
 
   const startOfMonth = toDate(new Date(now.getFullYear(), now.getMonth(), 1));
   const startOfYear = toDate(new Date(now.getFullYear(), 0, 1));

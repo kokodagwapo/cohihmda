@@ -17,7 +17,7 @@ const ALL_PRODUCTS = [
   'Construction',
 ]
 
-/** @type {Map<string, { meta: object, lenders: object[], loadedAt: number }>} */
+/** @type {Map<string, { meta: object, lenders: object[], loadedAt: number, sourceMtime: number }>} */
 const cache = new Map()
 
 function resolveLenderJsonPath(year) {
@@ -28,35 +28,56 @@ function resolveLenderJsonPath(year) {
   return path.join(ROOT, 'public/data/hmda/lenders-from-hmda.json')
 }
 
+function readSourceMtime(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
 function normalizeRows(raw) {
   if (Array.isArray(raw)) return raw
   if (Array.isArray(raw?.lenders)) return raw.lenders
   return []
 }
 
-async function loadLenderPackStatic(year = 2025) {
-  const key = `static|${year}`
-  const hit = cache.get(key)
-  if (hit) return hit
+/** Drop cached lender packs (call after Admin refresh writes new JSON). */
+export function clearLenderPackCache(year) {
+  if (year != null && Number.isFinite(Number(year))) {
+    cache.delete(`static|${Number(year)}`)
+    cache.delete(`db|${Number(year)}`)
+    return
+  }
+  cache.clear()
+}
 
-  const filePath = resolveLenderJsonPath(year)
+async function loadLenderPackStatic(year = 2025) {
+  const y = Number(year) || 2025
+  const key = `static|${y}`
+  const filePath = resolveLenderJsonPath(y)
+  const sourceMtime = readSourceMtime(filePath)
+  const hit = cache.get(key)
+  if (hit && hit.sourceMtime === sourceMtime) return hit
+
   if (!fs.existsSync(filePath)) {
     throw new Error(`Static lender JSON missing: ${filePath}`)
   }
 
   const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'))
   const all = normalizeRows(raw)
-  const lenders = all.filter((l) => Number(l.dataYear) === Number(year))
+  const lenders = all.filter((l) => Number(l.dataYear) === y)
   const pack = {
     meta: {
       ...(raw?.meta || {}),
-      dataYear: Number(year),
+      dataYear: y,
       recordCount: lenders.length,
       sourcePath: path.relative(ROOT, filePath),
       source: 'static JSON',
     },
     lenders,
     loadedAt: Date.now(),
+    sourceMtime,
   }
   cache.set(key, pack)
   return pack

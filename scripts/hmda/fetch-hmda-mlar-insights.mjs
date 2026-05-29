@@ -26,6 +26,8 @@ import https from "node:https";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { HMDA_CACHE_DIR, HMDA_DATA_DIR } from "./paths.mjs";
+import { FFIEC_USER_AGENT } from "./ffiec-probe.mjs";
+import { resolveFilersForYear } from "./hmda-filers-source.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC_PATH = path.join(HMDA_DATA_DIR, "lenders-from-hmda.json");
@@ -98,40 +100,9 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function fetchFilers(year) {
-  return new Promise((resolve, reject) => {
-    const url = `https://ffiec.cfpb.gov/v2/reporting/filers/${year}`;
-    https
-      .get(
-        url,
-        {
-          headers: {
-            accept: "application/json",
-            "user-agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) cohi-warehouse-etl/1.0",
-            referer: "https://ffiec.cfpb.gov/data-publication/modified-lar",
-          },
-        },
-        (res) => {
-          if (res.statusCode !== 200) {
-            res.resume();
-            return reject(new Error(`filers HTTP ${res.statusCode}`));
-          }
-          let chunks = "";
-          res.setEncoding("utf8");
-          res.on("data", (c) => (chunks += c));
-          res.on("end", () => {
-            try {
-              const j = JSON.parse(chunks);
-              resolve(Array.isArray(j.institutions) ? j.institutions : []);
-            } catch (e) {
-              reject(e);
-            }
-          });
-        },
-      )
-      .on("error", reject);
-  });
+async function resolveFilers(year) {
+  const { filers } = await resolveFilersForYear(year);
+  return filers;
 }
 
 function makeEmptyInsights(year) {
@@ -279,8 +250,7 @@ function fetchMlarStreaming(lei, year, timeoutMs) {
       {
         headers: {
           accept: "text/csv,text/plain,*/*",
-          "user-agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) cohi-warehouse-etl/1.0",
+          "user-agent": FFIEC_USER_AGENT,
           referer: "https://ffiec.cfpb.gov/data-publication/modified-lar",
         },
         timeout: timeoutMs,
@@ -378,7 +348,7 @@ async function main() {
   const year = opts.year;
   console.log(`[mlar-insights] year=${year} concurrency=${opts.concurrency} resume=${opts.resume}`);
 
-  const filers = await fetchFilers(year);
+  const filers = await resolveFilers(year);
   if (!filers.length) throw new Error(`No filers returned for ${year}`);
   console.log(`[mlar-insights] ${filers.length} filers for ${year}`);
 

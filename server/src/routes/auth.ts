@@ -509,25 +509,34 @@ router.post("/signin", authLimiter, async (req, res) => {
         });
       }
 
-      if (
-        localResult.reason === "invalid_password" ||
-        localResult.reason === "locked" ||
-        localResult.reason === "inactive"
-      ) {
-        await logFailedLogin({
-          email: submittedEmail,
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-          failureReason: localResult.reason,
-        }).catch(() => {});
+      if (localResult.ok === false) {
+        const { reason } = localResult;
+        if (
+          reason === "invalid_password" ||
+          reason === "locked" ||
+          reason === "inactive"
+        ) {
+          const failureReason =
+            reason === "locked"
+              ? "account_locked"
+              : reason === "inactive"
+                ? "user_inactive"
+                : "invalid_password";
+          await logFailedLogin({
+            email: submittedEmail,
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent"),
+            failureReason,
+          }).catch(() => {});
 
-        if (localResult.reason === "locked") {
-          return res.status(423).json({ error: "Account is temporarily locked" });
+          if (reason === "locked") {
+            return res.status(423).json({ error: "Account is temporarily locked" });
+          }
+          if (reason === "inactive") {
+            return res.status(403).json({ error: "Account is inactive" });
+          }
+          return res.status(401).json({ error: "Invalid email or password" });
         }
-        if (localResult.reason === "inactive") {
-          return res.status(403).json({ error: "Account is inactive" });
-        }
-        return res.status(401).json({ error: "Invalid email or password" });
       }
     }
 

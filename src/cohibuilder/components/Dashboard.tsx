@@ -2052,7 +2052,7 @@ export default function Dashboard({ onLoanClick, onStatClick, onViewMap, onOpenV
                 </div>
                 <div className="mt-3 h-3 rounded-full bg-slate-900/[0.06] dark:bg-white/[0.06] overflow-hidden">
                   <div
-                    className={`h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 ${insightsStarted ? 'transition-[width] duration-[1200ms] ease-out' : ''}`}
+                    className={`h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 ${insightsStarted ? 'transition-[width] duration-1200 ease-out' : ''}`}
                     style={{ width: insightsStarted ? `${onTimePct}%` : '0%' }}
                   />
                 </div>
@@ -2106,7 +2106,7 @@ export default function Dashboard({ onLoanClick, onStatClick, onViewMap, onOpenV
                 </div>
                 <div className="mt-3 h-3 rounded-full bg-slate-900/[0.06] dark:bg-white/[0.06] overflow-hidden">
                   <div
-                    className={`h-full rounded-full bg-gradient-to-r from-amber-500 to-rose-500 ${insightsStarted ? 'transition-[width] duration-[1200ms] ease-out' : ''}`}
+                    className={`h-full rounded-full bg-gradient-to-r from-amber-500 to-rose-500 ${insightsStarted ? 'transition-[width] duration-1200 ease-out' : ''}`}
                     style={{ width: insightsStarted ? `${offSchedulePct}%` : '0%' }}
                   />
                 </div>
@@ -2205,7 +2205,7 @@ export default function Dashboard({ onLoanClick, onStatClick, onViewMap, onOpenV
                     }
                   >
                     <div
-                      className={`absolute left-0 top-0 bottom-0 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 ${insightsStarted ? 'transition-[width] duration-[1200ms] ease-out' : ''}`}
+                      className={`absolute left-0 top-0 bottom-0 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 ${insightsStarted ? 'transition-[width] duration-1200 ease-out' : ''}`}
                       style={{ width: insightsStarted ? `${Math.min(100, onTimePct)}%` : '0%' }}
                     />
                     <div

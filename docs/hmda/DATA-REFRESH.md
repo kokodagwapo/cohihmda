@@ -18,10 +18,16 @@ For static-JSON-only deployments (no HMDA warehouse DB), set `HMDA_DATA_SOURCE=s
 
 **Admin → Infrastructure → HMDA Data**
 
-- **Rebuild manifest only** — fast; rescans `public/data/hmda/` and updates `hmda-years-manifest.json`.
-- **Refresh from FFIEC source** — full pipeline: lenders, paginated pages, product summaries, geo (if MLAR present), manifest.
+| Action | Duration | Updates |
+|--------|----------|---------|
+| **Rebuild manifest** | Seconds | Rescans `public/data/hmda/` → `hmda-years-manifest.json` |
+| **Refresh lenders** | Hours | FFIEC per-institution batch → lender JSON (anchor year) |
+| **Rebuild geography** | Minutes | Combined MLAR → map drilldown, counties, tracts |
+| **Full refresh** | Hours | Lenders + geography + manifest (geo-only fallback if FFIEC blocked) |
 
-Geography steps are **skipped** (with a warning) if `{year}_combined_mlar_header.txt` or `.zip` is not present in `data/hmda-mlar/`.
+The dashboard reads **saved JSON** at runtime. Sync jobs persist API/MLAR results to disk — you do not need to call FFIEC on every page load.
+
+Geography rebuild requires `{year}_combined_mlar_header.txt` or `.zip` in `data/hmda-mlar/`.
 
 ## Refresh pipeline order
 
@@ -48,7 +54,9 @@ npm run hmda:lender-pages -- --year=2025
 npm run hmda:products-summary
 npm run hmda:geo -- 2025             # requires combined MLAR
 npm run hmda:geo:enrich -- 2025     # county metrics (after geo drilldown)
-npm run hmda:refresh                 # full pipeline
+npm run hmda:refresh                 # full pipeline (default)
+npm run hmda:refresh:lenders         # FFIEC lender batch only
+npm run hmda:refresh:geo             # combined MLAR geography only
 ```
 
 ## Recommended schedule

@@ -46,12 +46,13 @@ if (vite.includes('vendor-mapbox')) ok('Vite mapbox chunk split')
 else fail('Vite mapbox chunk split')
 
 const app = fs.readFileSync(path.join(ROOT, 'src/App.tsx'), 'utf8')
-if (app.includes('path="search"') || app.includes("path='search'")) ok('Nested /hmda routes')
-else fail('Nested /hmda routes')
+if (app.includes('path="/hmda/*"') || app.includes("path='/hmda/*'")) ok('HMDA catch-all route')
+else fail('HMDA catch-all route')
 
 const hmdaData = fs.readFileSync(path.join(ROOT, 'src/pages/HmdaData.tsx'), 'utf8')
-if (hmdaData.includes('<Outlet />')) ok('HmdaData shell uses Outlet')
-else fail('HmdaData shell uses Outlet')
+if (hmdaData.includes('HmdaEmbedShellProvider') && hmdaData.includes('HmdaDataBankPage')) {
+  ok('HmdaData embed shell')
+} else fail('HmdaData embed shell')
 
 const nav = fs.readFileSync(path.join(ROOT, 'src/components/layout/Navigation.tsx'), 'utf8')
 if (nav.includes('hmda: "/hmda"')) ok('Navigation HMDA link')

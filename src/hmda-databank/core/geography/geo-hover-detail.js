@@ -109,15 +109,11 @@ function fmtUnits(n) {
   return `${v.toLocaleString()} units`
 }
 
-/** Modeled area diversity index (0–100) — not loan-level HMDA race; for map hover context only. */
-export function modeledDemographicsIndex(fipsOrState, kind) {
-  const seed = String(fipsOrState || 'US')
-  let h = 0
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
-  const base = kind === 'tract' ? 58 : kind === 'county' ? 52 : 48
-  const spread = (h % 28) + (kind === 'state' ? 8 : 14)
-  return Math.min(92, base + spread)
-}
+/**
+ * @deprecated Replaced by real HMDA applicant diversity score from the drilldown pipeline.
+ * Kept as a no-op export so any lingering import references don't break at runtime.
+ */
+export function modeledDemographicsIndex() { return null }
 
 export function geoFeatureKind(feature) {
   const lid = feature?.layer?.id || ''
@@ -209,18 +205,14 @@ export function buildGeoHoverDetail(feature, metric, lenderCtx) {
   }
 
   const incomeBracket = classifyIncomeBracket(p.medianIncome, stateMedian)
-  const demographicsIndex = modeledDemographicsIndex(
-    kind === 'tract' ? `${countyFips}-${censusTract}` : countyFips || stateCode,
-    kind,
-  )
 
   const lines = []
   const push = (rowKey, k, v, source) => lines.push({ rowKey, k, v, source })
 
   const units = p.units ?? p.loanUnits
-  // When in lender-focus mode and state breakdown is still loading, suppress market
-  // unit/volume values — they would be the state market total, not the lender's share.
-  const suppressMarketValues = lenderFocusActive && lenderInsightsLoading && !lenderEst
+  // Suppress market unit/volume values whenever lender is focused but breakdown is not
+  // ready (covers both the loading phase AND failed/empty breakdown after load completes).
+  const suppressMarketValues = lenderFocusActive && !lenderInsightsReady && !lenderEst
   if (!suppressMarketValues && units != null && Number(units) > 0) {
     const unitsLabel =
       lenderFocusActive && lenderEst && kind === 'tract'
@@ -230,8 +222,9 @@ export function buildGeoHoverDetail(feature, metric, lenderCtx) {
           : 'Originated loans'
     push('units', unitsLabel, `${Number(units).toLocaleString()}`, 'CFPB HMDA')
   }
-  if (lenderFocusActive && lenderInsightsLoading && kind !== 'tract') {
-    push('units', 'Originated loans (lender)', 'Loading state data…', 'FFIEC')
+  if (lenderFocusActive && !lenderInsightsReady && kind !== 'tract') {
+    const msg = lenderInsightsLoading ? 'Loading state data…' : 'State data unavailable'
+    push('units', 'Originated loans (lender)', msg, 'FFIEC')
   }
   if (lenderFocusActive && lenderEst && kind === 'tract' && p.lenderShare != null) {
     push(
@@ -256,12 +249,24 @@ export function buildGeoHoverDetail(feature, metric, lenderCtx) {
     )
   }
 
-  push(
-    'demographics',
-    'Applicant diversity index',
-    `${demographicsIndex}/100 · area context index`,
-    'Modeled map context (not LAR disposition)',
-  )
+  // Real applicant diversity metrics — only present after geo-drilldown rebuild with
+  // derived_race / derived_ethnicity columns. State-level only (not county/tract).
+  if (kind === 'state' && p.diversityScore != null && Number.isFinite(Number(p.diversityScore))) {
+    push(
+      'demographics',
+      'Applicant diversity (HHI)',
+      `${Number(p.diversityScore)}/100 · Simpson's index across race/ethnicity buckets`,
+      'CFPB HMDA LAR applicants',
+    )
+  }
+  if (kind === 'state' && p.minorityShare != null && Number.isFinite(Number(p.minorityShare))) {
+    push(
+      'minorityShare',
+      'Minority applicant share',
+      `${Number(p.minorityShare).toFixed(1)}% of known-race applicants`,
+      'CFPB HMDA LAR — derived_race / derived_ethnicity',
+    )
+  }
 
   const dispSuffix = dispositionDetailSuffix(p)
   const hmdaOutcomeSource = dispSuffix || 'HMDA outcomes'
@@ -325,7 +330,9 @@ export function buildGeoHoverDetail(feature, metric, lenderCtx) {
   // properties still contain market-wide values. Show the lender total instead of
   // a misleading market figure, and flag that state-level data is being fetched.
   let primaryRaw = getMetricValue(p, metric.id) ?? p.metricValue
-  if (lenderFocusActive && lenderInsightsLoading && !lenderEst && metric.id === 'units') {
+  // While lender is selected but breakdown is not ready, substitute the lender's national
+  // total as the hero value so the market state total is never shown as "the lender's".
+  if (lenderFocusActive && !lenderInsightsReady && !lenderEst && metric.id === 'units') {
     primaryRaw = focus?.totalOriginated > 0 ? focus.totalOriginated : null
   }
   const primary = formatMetricValue(metric, primaryRaw)
@@ -333,9 +340,7 @@ export function buildGeoHoverDetail(feature, metric, lenderCtx) {
   let topLenders = []
   if (stateCode && lenderCtx && !lenderFocusActive) {
     try {
-      if (kind === 'state' && typeof lenderCtx.getStateLenderRank === 'function') {
-        topLenders = lenderCtx.getStateLenderRank(stateCode).slice(0, 5)
-      } else if (kind === 'state' && lenderCtx.stateRankCache?.[stateCode]) {
+      if (kind === 'state' && lenderCtx.stateRankCache?.[stateCode]) {
         topLenders = lenderCtx.stateRankCache[stateCode].slice(0, 5)
       } else if (lenderCtx.lenders?.length) {
         topLenders = rankLendersForGeography(
@@ -403,7 +408,7 @@ export function buildGeoHoverDetail(feature, metric, lenderCtx) {
     leadLender,
     tractAttribution,
     incomeBracket,
-    demographicsIndex,
+    demographicsIndex: null,
     modelNote,
     geoLevelLabel: kind === 'tract' ? 'Census tract' : kind === 'county' ? 'County' : 'State',
     navigateLabel:
@@ -584,8 +589,8 @@ export function buildTractsLayerOverviewDetail(
     lines,
     topLenders: [],
     topCensusTracts: [],
-    lenderFocusName: lenderReady ? mapLenderFocus.name : null,
-    lenderFocusYear: lenderReady ? mapLenderFocus.year ?? year : null,
+    lenderFocusName: (lenderReady || lenderFocused) ? mapLenderFocus.name : null,
+    lenderFocusYear: (lenderReady || lenderFocused) ? mapLenderFocus.year ?? year : null,
     modelNote: lenderReady
       ? 'State pin sizes use FFIEC originated counts by state. Tract dots scale the market HMDA pattern by each state’s lender share — not loan-level tract attribution.'
       : 'Tract markers use Census Gazetteer coordinates. HMDA volumes come from geo-drilldown aggregates — not loan-level FFIEC attribution.',

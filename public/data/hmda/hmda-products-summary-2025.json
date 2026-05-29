@@ -1,7 +1,7 @@
 {
   "meta": {
     "dataYear": 2025,
-    "exportedAt": "2026-05-28T16:55:07.543Z",
+    "exportedAt": "2026-05-29T20:32:50.816Z",
     "recordCount": 4784,
     "source": "static JSON",
     "liveFallback": null,
@@ -13,7 +13,7 @@
     {
       "name": "Conventional",
       "count": 4779,
-      "unitsOriginated": 5320828,
+      "unitsOriginated": 5320824,
       "topLenders": [
         "United Wholesale Mortgage",
         "Rocket Mortgage, LLC",
@@ -24,7 +24,7 @@
     },
     {
       "name": "FHA",
-      "count": 1279,
+      "count": 1280,
       "unitsOriginated": 906942,
       "topLenders": [
         "United Wholesale Mortgage",
@@ -36,7 +36,7 @@
     },
     {
       "name": "VA",
-      "count": 1220,
+      "count": 1221,
       "unitsOriginated": 561792,
       "topLenders": [
         "United Wholesale Mortgage",
@@ -60,11 +60,12 @@
     },
     {
       "name": "Non-QM",
-      "count": 3,
+      "count": 4,
       "unitsOriginated": null,
       "topLenders": [
         "FUNDING RESOURCES MORTGAGE CORPORATION",
         "ANCHOR NATIONWIDE LOANS, LLC",
+        "HOME FUNDING CORPORATION",
         "First Internet Bank of Indiana"
       ]
     },
@@ -90,10 +91,11 @@
     },
     {
       "name": "Construction",
-      "count": 2,
+      "count": 3,
       "unitsOriginated": null,
       "topLenders": [
         "ANCHOR NATIONWIDE LOANS, LLC",
+        "HOME FUNDING CORPORATION",
         "First Internet Bank of Indiana"
       ]
     }

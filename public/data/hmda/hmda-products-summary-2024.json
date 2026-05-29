@@ -2,7 +2,7 @@
   "meta": {
     "dataYear": 2024,
     "exportedAt": null,
-    "recordCount": 4893,
+    "recordCount": 4908,
     "source": "static JSON",
     "liveFallback": null,
     "insightsBackfillFromPriorYear": false,
@@ -12,8 +12,8 @@
   "products": [
     {
       "name": "Conventional",
-      "count": 4885,
-      "unitsOriginated": 3051310,
+      "count": 4900,
+      "unitsOriginated": 4824768,
       "topLenders": [
         "UNITED SHORE FINANCIAL SERVICES, LLC",
         "Rocket Mortgage, LLC",
@@ -24,8 +24,8 @@
     },
     {
       "name": "FHA",
-      "count": 1277,
-      "unitsOriginated": 644959,
+      "count": 1274,
+      "unitsOriginated": 827819,
       "topLenders": [
         "UNITED SHORE FINANCIAL SERVICES, LLC",
         "Rocket Mortgage, LLC",
@@ -36,8 +36,8 @@
     },
     {
       "name": "VA",
-      "count": 1247,
-      "unitsOriginated": 424966,
+      "count": 1243,
+      "unitsOriginated": 489998,
       "topLenders": [
         "UNITED SHORE FINANCIAL SERVICES, LLC",
         "Rocket Mortgage, LLC",
@@ -48,8 +48,8 @@
     },
     {
       "name": "USDA",
-      "count": 869,
-      "unitsOriginated": 24349,
+      "count": 866,
+      "unitsOriginated": 36210,
       "topLenders": [
         "UNITED SHORE FINANCIAL SERVICES, LLC",
         "CROSSCOUNTRY MORTGAGE, INC.",
@@ -60,50 +60,40 @@
     },
     {
       "name": "Non-QM",
-      "count": 4343,
+      "count": 3,
       "unitsOriginated": null,
       "topLenders": [
-        "UNITED SHORE FINANCIAL SERVICES, LLC",
-        "Rocket Mortgage, LLC",
-        "JPMorgan Chase Bank, National Association",
-        "CROSSCOUNTRY MORTGAGE, INC.",
-        "Wells Fargo Bank, National Association"
+        "First Internet Bank of Indiana",
+        "ANCHOR NATIONWIDE LOANS, LLC",
+        "FUNDING RESOURCES MORTGAGE CORPORATION"
       ]
     },
     {
       "name": "Jumbo",
-      "count": 3446,
+      "count": 246,
       "unitsOriginated": null,
       "topLenders": [
-        "UNITED SHORE FINANCIAL SERVICES, LLC",
-        "Rocket Mortgage, LLC",
-        "JPMorgan Chase Bank, National Association",
-        "CROSSCOUNTRY MORTGAGE, INC.",
-        "Wells Fargo Bank, National Association"
+        "Wells Fargo Bank, National Association",
+        "JONES LANG LASALLE MULTIFAMILY, LLC",
+        "Citibank, National Association",
+        "WALKER & DUNLOP, LLC",
+        "Morgan Stanley Private Bank, National Association"
       ]
     },
     {
       "name": "HELOC",
-      "count": 1162,
+      "count": 0,
       "unitsOriginated": null,
-      "topLenders": [
-        "UNITED SHORE FINANCIAL SERVICES, LLC",
-        "Rocket Mortgage, LLC",
-        "JPMorgan Chase Bank, National Association",
-        "Wells Fargo Bank, National Association",
-        "U.S. Bank National Association"
-      ]
+      "topLenders": []
     },
     {
       "name": "Construction",
-      "count": 3437,
+      "count": 3,
       "unitsOriginated": null,
       "topLenders": [
-        "UNITED SHORE FINANCIAL SERVICES, LLC",
-        "Rocket Mortgage, LLC",
-        "JPMorgan Chase Bank, National Association",
-        "CROSSCOUNTRY MORTGAGE, INC.",
-        "Wells Fargo Bank, National Association"
+        "First Internet Bank of Indiana",
+        "FIRST CREDIT CORPORATION OF NEW YORK, INC.",
+        "ANCHOR NATIONWIDE LOANS, LLC"
       ]
     }
   ]

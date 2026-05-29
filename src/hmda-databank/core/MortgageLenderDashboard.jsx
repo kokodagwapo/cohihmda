@@ -1,7 +1,8 @@
-﻿import React, { Fragment, useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, useDeferredValue, useTransition, startTransition, createContext, useContext } from "react";
+import React, { Fragment, useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, useDeferredValue, useTransition, startTransition, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useHmdaAuth } from '@hmda/context/HmdaAuthBridge';
+import { useHmdaEmbedShell } from '@hmda/context/HmdaEmbedShellContext';
 import { useHmdaSprinkle } from '@hmda/context/HmdaSprinkleContext';
 import ConstellationCanvas from "./ConstellationCanvas";
 import marketSignals from "./market-signals.json";
@@ -3722,6 +3723,8 @@ function FilterDropdown({ id, label, displayValue, open, onToggle, children, has
    MAIN COMPONENT
    ───────────────────────────────────────────────────── */
 export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode = false } = {}) {
+  const embedShell = useHmdaEmbedShell();
+  const headerSearchHost = embedShell?.headerSearchHost ?? null;
   const location = useLocation();
   const navigate = useNavigate();
   const sprinkleUi = useHmdaSprinkle();
@@ -3790,6 +3793,30 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
   const [lendersExplicitList, setLendersExplicitList] = useState(false);
   const lendersUseGrid = !lendersExplicitList;
 
+  const hmdaRouteForSection = useCallback((section) => {
+    if (embedMode) {
+      const routes = {
+        search: "/hmda/search",
+        lenders: "/hmda/lenders",
+        products: "/hmda/products",
+        geography: "/hmda/geography",
+      };
+      return routes[section] ?? routes.lenders;
+    }
+    const routes = {
+      search: "/",
+      lenders: "/",
+      products: "/products",
+      geography: "/geography",
+    };
+    return routes[section] ?? routes.lenders;
+  }, [embedMode]);
+
+  const navigateToHmdaSection = useCallback((section) => {
+    const path = hmdaRouteForSection(section);
+    if (location.pathname !== path) navigate(path);
+  }, [hmdaRouteForSection, location.pathname, navigate]);
+
   const goToLendersTab = useCallback((options = {}) => {
     setLendersExplicitList(false);
     setViewMode("grid");
@@ -3803,7 +3830,8 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
     } else if (options.heroTop100USA === false) {
       setHeroTop100USA(false);
     }
-  }, []);
+    navigateToHmdaSection("lenders");
+  }, [navigateToHmdaSection]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pinnedIds, setPinnedIds] = useState([]);
@@ -3865,6 +3893,13 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
   // Lender previewed in the hero section before the user commits to a tab
   const [heroPreviewLender, setHeroPreviewLender] = useState(null);
   const showResults = useMemo(() => forceResults || (q && String(q).trim().length > 0), [forceResults, q]);
+
+  useEffect(() => {
+    if (!embedMode) return;
+    embedShell?.setEmbedHeaderVisible?.(showResults);
+    return () => embedShell?.setEmbedHeaderVisible?.(false);
+  }, [embedMode, embedShell, showResults]);
+
   const shouldLoadLenders = useMemo(() => {
     const typed = String(qInput || "").trim();
     const searched = String(q || "").trim();
@@ -5146,14 +5181,12 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
     setGeoMapMetric(mapMetric === 'avgLoan' ? 'avg' : mapMetric)
     setForceResults(true)
     setTab('geography')
-    if (location.pathname !== '/geography') {
-      navigate('/geography')
-    }
+    navigateToHmdaSection('geography')
     setMapSelectedState(null)
     setMapSelectedCountyCode(null)
     setMapSelectedCensusTract(null)
     setGeoMapUiResetNonce((n) => n + 1)
-  }, [location.pathname, navigate])
+  }, [navigateToHmdaSection])
 
   const handleDimensionRowDrill = useCallback(({ table, row }) => {
     if (!row?.drill) return
@@ -5364,11 +5397,9 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
       setLenderMapFocus(lender);
       setTab("geography");
       setGeoMapYear(String(year));
-      if (location.pathname !== "/geography") {
-        navigate("/geography");
-      }
+      navigateToHmdaSection("geography");
     },
-    [panelYear, location.pathname, navigate, setLenderMapFocus],
+    [panelYear, navigateToHmdaSection, setLenderMapFocus],
   );
 
   const openSearchLenderOnMap = useCallback(() => {
@@ -5477,7 +5508,9 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
               if (source !== "static") {
                 console.info(`[HMDA] Geography drilldown loaded (${source})`);
               }
-              setGeoDrilldownHmda(data);
+              setGeoDrilldownHmda((prev) =>
+                prev ? mergeGeoDrilldownPayload(prev, data, { preferIncomingTotals: true }) : data,
+              );
             })
             .catch((e) => {
               if (!stillCurrent()) return;
@@ -5927,10 +5960,8 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
     setCompareOpen(false);
     setDemoActive(false);
     setMapFocusLenderKey(null);
-    if (location.pathname !== "/") {
-      navigate("/");
-    }
-  }, [location.pathname, navigate]);
+    navigateToHmdaSection("search");
+  }, [navigateToHmdaSection]);
 
   const onLandingLogoNavClick = useCallback(
     (e) => {
@@ -5943,12 +5974,12 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
         path.startsWith("/hmda/");
       if (!onDataBank) return;
 
-      if (path !== "/" || showResults) {
+      if (path !== hmdaRouteForSection("search") || showResults) {
         e.preventDefault();
         goToLandingHome();
       }
     },
-    [location.pathname, showResults, goToLandingHome],
+    [hmdaRouteForSection, location.pathname, showResults, goToLandingHome],
   );
 
   useEffect(() => {
@@ -6054,11 +6085,13 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
   const handleReset = goToLandingHome;
   const openCountyFromGlobalSearch = useCallback((stateCode, countyCode) => {
     setTab("geography");
+    setForceResults(true);
     setMapSelectedState(stateCode);
     setMapSelectedCountyCode(normCountyCode(countyCode));
     setMapSelectedCensusTract(null);
     setMapStateModalOpen(false);
-  }, []);
+    navigateToHmdaSection("geography");
+  }, [navigateToHmdaSection]);
   const togglePin = useCallback((lender) => {
     const key = lenderCacheKey(lender) || lender.id;
     setPinnedIds((prev) => {
@@ -6964,6 +6997,18 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
     { id: "geography", label: "Geography", icon: IC.map },
   ];
 
+  const onHmdaSectionTabClick = useCallback((tb) => {
+    if (tb.id === "lenders") {
+      goToLendersTab({ forceResults: showResults });
+      return;
+    }
+    startTransition(() => setTab(tb.id));
+    setMobileMenuOpen(false);
+    if (tb.id === "products" || tb.id === "geography") {
+      navigateToHmdaSection(tb.id);
+    }
+  }, [goToLendersTab, navigateToHmdaSection, showResults]);
+
   const hmdaToolbarHomeBtn = (
     <Tip text="Home — search landing" pos="bottom">
       <button
@@ -7017,7 +7062,7 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
   );
 
   /** Lenders tab: shared toolbar fragments (mobile stacks filters; desktop stays one row). */
-  const hmdaLendersToolbarTabIcons = embedMode ? null : (
+  const hmdaLendersToolbarTabIcons = (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }} role="tablist" aria-label="HMDA sections">
       {hmdaToolbarHomeBtn}
       {tabs.map((tb) => (
@@ -7028,13 +7073,7 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
             aria-selected={tab === tb.id}
             aria-label={tb.label}
             data-demo-target={tb.id === "lenders" ? "nav-lenders" : tb.id === "products" ? "nav-products" : tb.id === "geography" ? "nav-geography" : undefined}
-            onClick={() => {
-              if (tb.id === "lenders") goToLendersTab({ forceResults: showResults });
-              else {
-                setTab(tb.id);
-                setMobileMenuOpen(false);
-              }
-            }}
+            onClick={() => onHmdaSectionTabClick(tb)}
             style={{
               padding: isMobile ? "8px" : "7px 11px",
               borderRadius: "11px",
@@ -7425,6 +7464,264 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
     shouldLoadLenders &&
     (lendersLoading || lenderQuery.loading || !lenderQuery.fetched);
 
+  const hmdaLendersToolbarBarUi = isMobile ? (
+<div
+                className="toolbar-shell hmda-nav-filter-merge hmda-filter-toolbar-pastel hmda-filter-toolbar--mf"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "stretch",
+                  gap: 8,
+                  padding: "8px 8px",
+                  width: "100%",
+                  maxWidth: "100%",
+                  borderRadius: 14,
+                  overflowX: "visible",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%", flexWrap: "wrap", minWidth: 0 }}>
+                  {hmdaLendersToolbarTabIcons}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, marginLeft: "auto" }}>
+                    {hmdaLendersViewModeToggle}
+                    {hmdaLendersCountChip}
+                  </div>
+                </div>
+                <div className="hmda-filter-toolbar-mobile-filters">{hmdaLendersFilterNodes}</div>
+                <div className="toolbar-shell" data-hmda-search-ui style={{ width: "100%", padding: "6px 8px", borderRadius: "11px", position: "relative", boxSizing: "border-box" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                    <span style={{ color: c.text3, flexShrink: 0 }} aria-hidden>
+                      {IC.search}
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Search lender, county, MSA…"
+                      value={qInput}
+                      onChange={(e) => {
+                        setQInput(e.target.value);
+                        setShowSuggestions(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitSearch(qInput);
+                        }
+                      }}
+                      onFocus={() => {
+                        const t = qInput.trim();
+                        if (/^\d+$/.test(t) || t.length >= 2) setShowSuggestions(true);
+                      }}
+                      aria-label="Search lenders and geography"
+                      style={{ flex: 1, border: "none", outline: "none", background: "transparent", color: c.text, fontSize: "16px", fontFamily: "inherit", fontWeight: 500, minWidth: 0 }}
+                    />
+                    {qInput && (
+                      <button type="button" onClick={clearSearch} aria-label="Clear search" style={{ border: "none", background: c.chip, borderRadius: "8px", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: c.text3, flexShrink: 0 }}>
+                        {IC.x}
+                      </button>
+                    )}
+                    {hmdaSearchLenderMapBtn}
+                  </div>
+                  {showSuggestions && searchSuggestions.length > 0 && (
+                    <div data-hmda-search-ui style={{ position: "absolute", top: "100%", left: "10px", right: "10px", marginTop: "4px", padding: "6px", borderRadius: "12px", background: c.surface, border: `1px solid ${c.border}`, boxShadow: dk ? "0 12px 32px rgba(0,0,0,0.35)" : "0 12px 28px rgba(15,23,42,0.1)", zIndex: 1300, maxHeight: "min(280px, 50vh)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+                      {searchSuggestions.map((s, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => commitSearch(suggestionToQueryValue(s))}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "10px 12px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 500, fontFamily: "inherit", background: "transparent", color: c.text2, textAlign: "left", gap: "8px" }}
+                        >
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+                          <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: c.text4, flexShrink: 0, padding: "2px 6px", borderRadius: "4px", background: c.chip }}>{s.category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, flexWrap: "wrap", width: "100%", minWidth: 0 }}>
+                  {hmdaLendersPinsToolbar}
+                </div>
+              </div>
+              ) : (
+              <div className="toolbar-shell hmda-nav-filter-merge hmda-filter-toolbar-pastel" style={{ display: "flex", flexWrap: "nowrap", alignItems: "center", gap: "8px", padding: "8px 14px", width: "100%", borderRadius: "14px", overflowX: showSuggestions && searchSuggestions.length > 0 ? "visible" : "auto", overflowY: "visible" }}>
+                {hmdaLendersToolbarTabIcons}
+                <div aria-hidden style={{ width: 1, height: 22, background: c.drillBorder, flexShrink: 0, opacity: 0.85 }} />
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "nowrap", gap: 6, flexShrink: 0 }}>{hmdaLendersFilterNodes}</div>
+                <div aria-hidden style={{ width: 1, height: 22, background: c.drillBorder, flexShrink: 0, opacity: 0.85 }} />
+                <div className="toolbar-shell hmda-lenders-toolbar-search" data-hmda-search-ui style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", flex: "0 1 280px", minWidth: 160, maxWidth: 300, position: "relative", padding: "4px 8px" }}>
+                  <div className="hmda-nav-search-well" style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: 0, padding: "7px 9px" }}>
+                    <span style={{ color: c.text3, flexShrink: 0 }} aria-hidden>
+                      {IC.search}
+                    </span>
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      placeholder="Search lender…"
+                      value={qInput}
+                      onChange={(e) => {
+                        setQInput(e.target.value);
+                        setShowSuggestions(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitSearch(qInput);
+                        }
+                        if (e.key === "Escape") setShowSuggestions(false);
+                      }}
+                      onFocus={() => {
+                        const t = qInput.trim();
+                        if (/^\d+$/.test(t) || t.length >= 2) setShowSuggestions(true);
+                      }}
+                      aria-label="Search lenders and geography"
+                      aria-autocomplete="list"
+                      aria-expanded={showSuggestions && searchSuggestions.length > 0}
+                      aria-controls="hmda-lenders-search-suggest"
+                      style={{ flex: 1, border: "none", outline: "none", background: "transparent", color: c.text, fontSize: "13px", fontFamily: "inherit", fontWeight: 500, minWidth: 0 }}
+                    />
+                    {qInput && (
+                      <button type="button" onClick={clearSearch} aria-label="Clear search" style={{ border: "none", background: c.chip, borderRadius: "8px", width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: c.text3, flexShrink: 0 }}>
+                        {IC.x}
+                      </button>
+                    )}
+                    {hmdaSearchLenderMapBtn}
+                  </div>
+                  {showSuggestions && searchSuggestions.length > 0 && (
+                    <div id="hmda-lenders-search-suggest" role="listbox" data-hmda-search-ui style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, padding: "6px", borderRadius: "12px", background: c.surface, border: `1px solid ${c.border}`, boxShadow: dk ? "0 12px 32px rgba(0,0,0,0.35)" : "0 12px 28px rgba(15,23,42,0.12)", zIndex: 1300, maxHeight: "280px", overflowY: "auto" }}>
+                      {searchSuggestions.map((s, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => commitSearch(suggestionToQueryValue(s))}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "10px 12px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 500, fontFamily: "inherit", background: "transparent", color: c.text2, textAlign: "left", gap: "8px" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = dk ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.03)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                        >
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+                          <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: c.text4, flexShrink: 0, padding: "2px 6px", borderRadius: "4px", background: c.chip }}>{s.category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div aria-hidden style={{ width: 1, height: 22, background: c.drillBorder, flexShrink: 0, opacity: 0.85 }} />
+                {hmdaLendersViewModeToggle}
+                {hmdaLendersCountChip}
+                {hmdaLendersPinsToolbar}
+              </div>
+  );
+
+  const hmdaPastelNavBarUi = (
+    <nav className="hmda-nav hmda-nav-pastel" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",flexWrap:"nowrap",marginBottom:embedMode?0:(isMobile?"12px":"20px"),padding:isMobile?"4px 4px":"5px 6px",width:"100%",maxWidth:"100%",position:"relative",zIndex:showSuggestions&&searchSuggestions.length>0?1101:"auto"}}>
+      <div style={{display:"flex",gap:"4px",flex:isMobile?1:"unset",alignItems:"center"}}>
+        {hmdaToolbarHomeBtn}
+        {tabs.map(tb=>(
+          <button key={tb.id} data-demo-target={tb.id==="lenders"?"nav-lenders":tb.id==="products"?"nav-products":tb.id==="geography"?"nav-geography":undefined} className="tab-item" onClick={()=>onHmdaSectionTabClick(tb)} style={{display:"flex",alignItems:"center",justifyContent:isMobile?"center":"flex-start",gap:"8px",padding:isMobile?"10px 0":"11px 22px",borderRadius:"12px",border:"none",cursor:"pointer",fontSize:isMobile?"13px":"14px",fontFamily:"inherit",background:tab===tb.id?c.chipActive:"transparent",color:tab===tb.id?c.accent:c.chipText,boxShadow:tab===tb.id?`0 1px 6px ${dk?"rgba(129,140,248,0.10)":"rgba(99,102,241,0.05)"}`:"none",flexShrink:0,flex:isMobile?1:"unset"}}>
+            <HmdaTabIconWell tabId={tb.id} dark={dk}><span style={{display:"inline-flex",opacity:tab===tb.id?1:0.82}}>{tb.icon}</span></HmdaTabIconWell>
+            {!isMobile && tb.label}
+            {isMobile && <span className="hmda-label" style={{fontSize:"10px",display:"block",opacity:tab===tb.id?1:0.6}}>{tb.label}</span>}
+          </button>
+        ))}
+      </div>
+      {!isMobile && tab !== "products" && tab !== "geography" && <div className="toolbar-shell" data-hmda-search-ui style={{display:"flex",flexDirection:"row",alignItems:"center",gap:"8px",padding:"6px 8px",width:embedMode?"100%":"50%",maxWidth:embedMode?"none":"680px",minWidth:embedMode?0:"460px",flex:embedMode?1:undefined,position:"relative"}}>
+        <div className="hmda-nav-search-well" style={{display:"flex",alignItems:"center",gap:"10px",flex:1,minWidth:0,padding:"9px 11px"}}>
+          <span style={{color:c.text3,flexShrink:0}}>{IC.search}</span>
+          <input type="text" placeholder="Search lender, county, city, MSA, or census tract..." value={qInput} onChange={e=>{setQInput(e.target.value);setShowSuggestions(true);}}
+            onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();commitSearch(qInput);}}}
+            onFocus={()=>{const t=qInput.trim();if(/^\d+$/.test(t)||t.length>=2)setShowSuggestions(true);}}
+            style={{flex:1,border:"none",outline:"none",background:"transparent",color:c.text,fontSize:"14px",fontFamily:"inherit",fontWeight:500,minWidth:0}}/>
+          {qInput&&<button onClick={clearSearch} style={{border:"none",background:c.chip,borderRadius:"8px",width:"26px",height:"26px",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:c.text3,flexShrink:0}}>{IC.x}</button>}
+          {hmdaSearchLenderPinBtn}
+          {hmdaSearchLenderTrackBtn}
+          {hmdaSearchLenderMapBtn}
+        </div>
+        {showSuggestions&&searchSuggestions.length>0&&(
+          <div data-hmda-search-ui style={{position:"absolute",top:"100%",left:"8px",right:"8px",marginTop:"4px",padding:"6px",borderRadius:"12px",background:c.surface,border:`1px solid ${c.border}`,boxShadow:dk?"0 12px 32px rgba(0,0,0,0.35)":"0 12px 28px rgba(15,23,42,0.1)",zIndex:1300,maxHeight:"280px",overflowY:"auto"}}>
+            {searchSuggestions.map((s,i)=>(
+              <button key={i} type="button" onClick={()=>commitSearch(suggestionToQueryValue(s))} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"10px 12px",borderRadius:"8px",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:500,fontFamily:"inherit",background:"transparent",color:c.text2,textAlign:"left",gap:"8px"}}
+                onMouseEnter={e=>e.currentTarget.style.background=dk?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.03)"}
+                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
+                <span style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",color:c.text4,flexShrink:0,padding:"2px 6px",borderRadius:"4px",background:c.chip}}>{s.category}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <Tip
+          text={
+            pinnedLenders.length < 2
+              ? `Pin ${Math.max(2 - pinnedLenders.length, 0)} more lender${pinnedLenders.length === 1 ? "" : "s"} to compare`
+              : `Compare ${pinnedLenders.length} pinned lenders`
+          }
+          pos="bottom"
+        >
+          <button
+            type="button"
+            aria-label={pinnedLenders.length < 2 ? "Compare pinned lenders (pin at least 2)" : `Compare ${pinnedLenders.length} pinned lenders`}
+            onClick={() => { if (pinnedLenders.length >= 2) setCompareOpen(true); }}
+            disabled={pinnedLenders.length < 2}
+            className="hmda-nav-compare-btn"
+            data-active={pinnedLenders.length >= 2 ? "true" : "false"}
+            style={{
+              position: "relative",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              border: `1px solid ${pinnedLenders.length >= 2 ? "rgba(99,102,241,0.28)" : c.border}`,
+              background: pinnedLenders.length >= 2 ? c.chipActive : c.surface,
+              color: pinnedLenders.length >= 2 ? c.accent : c.text3,
+              cursor: pinnedLenders.length < 2 ? "not-allowed" : "pointer",
+              opacity: pinnedLenders.length < 2 ? 0.55 : 1,
+              flexShrink: 0,
+              transition: "background 0.15s ease, color 0.15s ease, border-color 0.15s ease",
+            }}
+          >
+            <GitCompareArrows size={17} strokeWidth={2} aria-hidden />
+            {pinnedLenders.length > 0 && (
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: -5,
+                  right: -5,
+                  minWidth: 18,
+                  height: 18,
+                  padding: "0 5px",
+                  borderRadius: 999,
+                  background: c.accent,
+                  color: "#fff",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  fontFamily: "'JetBrains Mono',monospace",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  lineHeight: 1,
+                  boxShadow: "0 2px 6px rgba(15,23,42,0.18)",
+                  border: `1.5px solid ${c.surface}`,
+                }}
+              >
+                {pinnedLenders.length}
+              </span>
+            )}
+          </button>
+        </Tip>
+      </div>}
+    </nav>
+  );
+
+  const hmdaEmbedHeaderToolbarUi = embedMode ? (
+    tab === "lenders" && showResults ? (
+      <div ref={filterBarRef} data-demo-target="filter-bar" className={`hmda-filter-bar hmda-nav hmda-nav-pastel${openFilter ? " hmda-filter-bar--menu-open" : ""}${showSuggestions && searchSuggestions.length > 0 ? " hmda-filter-bar--search-open" : ""}`} style={{marginBottom:0,width:"100%",position:"relative",zIndex:(showSuggestions&&searchSuggestions.length>0)?1101:(openFilter?10040:50)}}>
+        {hmdaLendersToolbarBarUi}
+      </div>
+    ) : (
+      hmdaPastelNavBarUi
+    )
+  ) : null;
+
   /* ─────────────────────────────────────────────────────
      RENDER
      ───────────────────────────────────────────────────── */
@@ -7661,8 +7958,8 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
             >
               <div className="hmda-hero-actions hmda-ds-hero-actions hmda-ds-hero-actions--merged">
                 <button type="button" onClick={()=>{startTransition(()=>{goToLendersTab({forceResults:true,heroTop100USA:false});});}} className="chip-btn hmda-hero-pastel-chip hmda-hero-action-min hmda-ds-hero-cta hmda-ds-hero-cta--blue">{IC.building} Browse all lenders</button>
-                <button type="button" onClick={()=>{startTransition(()=>{setTab("geography");setForceResults(true);});}} className="chip-btn hmda-hero-pastel-chip hmda-hero-action-min hmda-ds-hero-cta hmda-ds-hero-cta--green">{IC.map} Geography</button>
-                <Link to="/products" className="chip-btn hmda-hero-pastel-chip hmda-hero-action-min hmda-ds-hero-cta hmda-ds-hero-cta--teal" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>{IC.database} Product Type</Link>
+                <button type="button" onClick={()=>{startTransition(()=>{setTab("geography");setForceResults(true);});navigateToHmdaSection("geography");}} className="chip-btn hmda-hero-pastel-chip hmda-hero-action-min hmda-ds-hero-cta hmda-ds-hero-cta--green">{IC.map} Geography</button>
+                <Link to={hmdaRouteForSection("products")} className="chip-btn hmda-hero-pastel-chip hmda-hero-action-min hmda-ds-hero-cta hmda-ds-hero-cta--teal" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>{IC.database} Product Type</Link>
                 <button type="button" onClick={()=>{startTransition(()=>{goToLendersTab({forceResults:true,heroTop100USA:true});});}} className="chip-btn hmda-hero-pastel-chip hmda-hero-action-min hmda-ds-hero-cta hmda-ds-hero-cta--lime">{IC.chart} Top 100 USA</button>
               </div>
               <HmdaHeroSearchCombo
@@ -7755,10 +8052,10 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
                       <button type="button" onClick={()=>openLenderOnMap(pl)} style={{flex:"1 1 140px",padding:"11px 14px",borderRadius:"12px",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:700,background:dk?"rgba(99,102,241,0.22)":"rgba(99,102,241,0.10)",color:dk?"#818CF8":"#4F46E5",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=dk?"rgba(99,102,241,0.32)":"rgba(99,102,241,0.18)"} onMouseLeave={e=>e.currentTarget.style.background=dk?"rgba(99,102,241,0.22)":"rgba(99,102,241,0.10)"}>
                         {IC.mapPin} View on Map
                       </button>
-                      <button type="button" onClick={()=>{setProductsSelectedLender(pl);setProductsLenderSearch(pl.name||"");setProductsLtSnapshot(null);startTransition(()=>{setForceResults(true);setTab("products");if(location.pathname!=="/products")navigate("/products");});setHeroPreviewLender(null);}} style={{flex:"1 1 120px",padding:"11px 14px",borderRadius:"12px",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:700,background:dk?"rgba(52,211,153,0.14)":"rgba(5,150,105,0.08)",color:dk?"#34D399":"#059669",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=dk?"rgba(52,211,153,0.22)":"rgba(5,150,105,0.15)"} onMouseLeave={e=>e.currentTarget.style.background=dk?"rgba(52,211,153,0.14)":"rgba(5,150,105,0.08)"}>
+                      <button type="button" onClick={()=>{setProductsSelectedLender(pl);setProductsLenderSearch(pl.name||"");setProductsLtSnapshot(null);startTransition(()=>{setForceResults(true);setTab("products");});navigateToHmdaSection("products");setHeroPreviewLender(null);}} style={{flex:"1 1 120px",padding:"11px 14px",borderRadius:"12px",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:700,background:dk?"rgba(52,211,153,0.14)":"rgba(5,150,105,0.08)",color:dk?"#34D399":"#059669",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=dk?"rgba(52,211,153,0.22)":"rgba(5,150,105,0.15)"} onMouseLeave={e=>e.currentTarget.style.background=dk?"rgba(52,211,153,0.14)":"rgba(5,150,105,0.08)"}>
                         {IC.database} Products
                       </button>
-                      <button type="button" onClick={()=>{startTransition(()=>{setForceResults(true);setQ(pl.name||"");setQInput(pl.name||"");setTab("lenders");if(location.pathname!=="/")navigate("/");});setHeroPreviewLender(null);}} style={{flex:"1 1 120px",padding:"11px 14px",borderRadius:"12px",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:700,background:dk?"rgba(255,255,255,0.05)":"rgba(15,23,42,0.05)",color:dk?"rgba(226,232,240,0.8)":"#475569",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=dk?"rgba(255,255,255,0.09)":"rgba(15,23,42,0.09)"} onMouseLeave={e=>e.currentTarget.style.background=dk?"rgba(255,255,255,0.05)":"rgba(15,23,42,0.05)"}>
+                      <button type="button" onClick={()=>{startTransition(()=>{setForceResults(true);setQ(pl.name||"");setQInput(pl.name||"");setTab("lenders");});navigateToHmdaSection("lenders");setHeroPreviewLender(null);}} style={{flex:"1 1 120px",padding:"11px 14px",borderRadius:"12px",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:700,background:dk?"rgba(255,255,255,0.05)":"rgba(15,23,42,0.05)",color:dk?"rgba(226,232,240,0.8)":"#475569",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=dk?"rgba(255,255,255,0.09)":"rgba(15,23,42,0.09)"} onMouseLeave={e=>e.currentTarget.style.background=dk?"rgba(255,255,255,0.05)":"rgba(15,23,42,0.05)"}>
                         {IC.building} Lenders
                       </button>
                     </div>
@@ -7769,108 +8066,8 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
           </div>
         ) : (
           <>
-        {/* "" NAV (products / geography — lenders tab uses merged toolbar in lenders panel) "" */}
-        {!embedMode && tab !== "lenders" ? (
-        <nav className="hmda-nav hmda-nav-pastel" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",flexWrap:"nowrap",marginBottom:isMobile?"12px":"20px",padding:isMobile?"4px 4px":"5px 6px",width:"100%",maxWidth:"100%",position:"relative",zIndex:showSuggestions&&searchSuggestions.length>0?1101:"auto"}}>
-          <div style={{display:"flex",gap:"4px",flex:isMobile?1:"unset",alignItems:"center"}}>
-            {hmdaToolbarHomeBtn}
-            {tabs.map(tb=>(
-              <button key={tb.id} data-demo-target={tb.id==="lenders"?"nav-lenders":tb.id==="products"?"nav-products":tb.id==="geography"?"nav-geography":undefined} className="tab-item" onClick={()=>{if(tb.id==="lenders")goToLendersTab({forceResults:showResults});else{setTab(tb.id);setMobileMenuOpen(false);}}} style={{display:"flex",alignItems:"center",justifyContent:isMobile?"center":"flex-start",gap:"8px",padding:isMobile?"10px 0":"11px 22px",borderRadius:"12px",border:"none",cursor:"pointer",fontSize:isMobile?"13px":"14px",fontFamily:"inherit",background:tab===tb.id?c.chipActive:"transparent",color:tab===tb.id?c.accent:c.chipText,boxShadow:tab===tb.id?`0 1px 6px ${dk?"rgba(129,140,248,0.10)":"rgba(99,102,241,0.05)"}`:"none",flexShrink:0,flex:isMobile?1:"unset"}}>
-                <HmdaTabIconWell tabId={tb.id} dark={dk}><span style={{display:"inline-flex",opacity:tab===tb.id?1:0.82}}>{tb.icon}</span></HmdaTabIconWell>
-                {!isMobile && tb.label}
-                {isMobile && <span className="hmda-label" style={{fontSize:"10px",display:"block",opacity:tab===tb.id?1:0.6}}>{tb.label}</span>}
-              </button>
-            ))}
-          </div>
-          {!isMobile && tab !== "products" && <div className="toolbar-shell" data-hmda-search-ui style={{display:"flex",flexDirection:"row",alignItems:"center",gap:"8px",padding:"6px 8px",width:"50%",maxWidth:"680px",minWidth:"460px",position:"relative"}}>
-            <div className="hmda-nav-search-well" style={{display:"flex",alignItems:"center",gap:"10px",flex:1,minWidth:0,padding:"9px 11px"}}>
-              <span style={{color:c.text3,flexShrink:0}}>{IC.search}</span>
-              <input type="text" placeholder="Search lender, county, city, MSA, or census tract..." value={qInput} onChange={e=>{setQInput(e.target.value);setShowSuggestions(true);}}
-                onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();commitSearch(qInput);}}}
-                onFocus={()=>{const t=qInput.trim();if(/^\d+$/.test(t)||t.length>=2)setShowSuggestions(true);}}
-                style={{flex:1,border:"none",outline:"none",background:"transparent",color:c.text,fontSize:"14px",fontFamily:"inherit",fontWeight:500,minWidth:0}}/>
-              {qInput&&<button onClick={clearSearch} style={{border:"none",background:c.chip,borderRadius:"8px",width:"26px",height:"26px",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:c.text3,flexShrink:0}}>{IC.x}</button>}
-              {hmdaSearchLenderPinBtn}
-              {hmdaSearchLenderTrackBtn}
-              {hmdaSearchLenderMapBtn}
-            </div>
-            {showSuggestions&&searchSuggestions.length>0&&(
-              <div data-hmda-search-ui style={{position:"absolute",top:"100%",left:"8px",right:"8px",marginTop:"4px",padding:"6px",borderRadius:"12px",background:c.surface,border:`1px solid ${c.border}`,boxShadow:dk?"0 12px 32px rgba(0,0,0,0.35)":"0 12px 28px rgba(15,23,42,0.1)",zIndex:1300,maxHeight:"280px",overflowY:"auto"}}>
-                {searchSuggestions.map((s,i)=>(
-                  <button key={i} type="button" onClick={()=>commitSearch(suggestionToQueryValue(s))} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"10px 12px",borderRadius:"8px",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:500,fontFamily:"inherit",background:"transparent",color:c.text2,textAlign:"left",gap:"8px"}}
-                    onMouseEnter={e=>e.currentTarget.style.background=dk?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.03)"}
-                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
-                    <span style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",color:c.text4,flexShrink:0,padding:"2px 6px",borderRadius:"4px",background:c.chip}}>{s.category}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <Tip
-              text={
-                pinnedLenders.length < 2
-                  ? `Pin ${Math.max(2 - pinnedLenders.length, 0)} more lender${pinnedLenders.length === 1 ? "" : "s"} to compare`
-                  : `Compare ${pinnedLenders.length} pinned lenders`
-              }
-              pos="bottom"
-            >
-              <button
-                type="button"
-                aria-label={pinnedLenders.length < 2 ? "Compare pinned lenders (pin at least 2)" : `Compare ${pinnedLenders.length} pinned lenders`}
-                onClick={() => { if (pinnedLenders.length >= 2) setCompareOpen(true); }}
-                disabled={pinnedLenders.length < 2}
-                className="hmda-nav-compare-btn"
-                data-active={pinnedLenders.length >= 2 ? "true" : "false"}
-                style={{
-                  position: "relative",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  border: `1px solid ${pinnedLenders.length >= 2 ? "rgba(99,102,241,0.28)" : c.border}`,
-                  background: pinnedLenders.length >= 2 ? c.chipActive : c.surface,
-                  color: pinnedLenders.length >= 2 ? c.accent : c.text3,
-                  cursor: pinnedLenders.length < 2 ? "not-allowed" : "pointer",
-                  opacity: pinnedLenders.length < 2 ? 0.55 : 1,
-                  flexShrink: 0,
-                  transition: "background 0.15s ease, color 0.15s ease, border-color 0.15s ease",
-                }}
-              >
-                <GitCompareArrows size={17} strokeWidth={2} aria-hidden />
-                {pinnedLenders.length > 0 && (
-                  <span
-                    aria-hidden
-                    style={{
-                      position: "absolute",
-                      top: -5,
-                      right: -5,
-                      minWidth: 18,
-                      height: 18,
-                      padding: "0 5px",
-                      borderRadius: 999,
-                      background: c.accent,
-                      color: "#fff",
-                      fontSize: 10,
-                      fontWeight: 800,
-                      fontFamily: "'JetBrains Mono',monospace",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      lineHeight: 1,
-                      boxShadow: "0 2px 6px rgba(15,23,42,0.18)",
-                      border: `1.5px solid ${c.surface}`,
-                    }}
-                  >
-                    {pinnedLenders.length}
-                  </span>
-                )}
-              </button>
-            </Tip>
-          </div>}
-        </nav>
-        ) : null}
+        {/* NAV (products / geography — lenders tab uses merged toolbar in lenders panel) */}
+        {!embedMode && tab !== "lenders" ? hmdaPastelNavBarUi : null}
 
         {trackRecordOpen && searchMapLender ? (
           <HmdaLenderTrackRecordPanel
@@ -7894,7 +8091,7 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
         ) : null}
 
         {/* Mobile: search below nav when not on lenders merged toolbar */}
-        {isMobile && showResults && tab !== "lenders" && (
+        {isMobile && showResults && tab !== "lenders" && tab !== "products" && tab !== "geography" && !embedMode && (
           <div className="toolbar-shell" data-hmda-search-ui style={{marginBottom:"16px",padding:"10px 12px",borderRadius:"12px",background:c.inputBg,border:`1px solid ${c.inputBorder}`,position:"relative"}}>
             <div style={{display:"flex",alignItems:"center",gap:"10px",minWidth:0}}>
               <span style={{color:c.text3,flexShrink:0}}>{IC.search}</span>
@@ -8053,153 +8250,9 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
         {/* ───────────────────────────────────────────────────── LENDERS ───────────────────────────────────────────────────── */}
         {tab==="lenders"&&(
           <div className="hmda-lenders-tab-stack" style={{animation:"rise 0.4s ease",paddingBottom:isMobile?"100px":0}}>
+            {!embedMode && (
             <div ref={filterBarRef} data-demo-target="filter-bar" className={`hmda-filter-bar${openFilter ? " hmda-filter-bar--menu-open" : ""}${showSuggestions && searchSuggestions.length > 0 ? " hmda-filter-bar--search-open" : ""}`} style={{marginBottom:isMobile?"8px":"12px",width:"100%",alignSelf:"stretch",marginTop:isMobile?0:"-4px",position:"relative",zIndex:(showSuggestions&&searchSuggestions.length>0)?1101:(openFilter?10040:1)}}>
-              {isMobile ? (
-              <div
-                className="toolbar-shell hmda-nav-filter-merge hmda-filter-toolbar-pastel hmda-filter-toolbar--mf"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "stretch",
-                  gap: 8,
-                  padding: "8px 8px",
-                  width: "100%",
-                  maxWidth: "100%",
-                  borderRadius: 14,
-                  overflowX: "visible",
-                  boxSizing: "border-box",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%", flexWrap: "wrap", minWidth: 0 }}>
-                  {hmdaLendersToolbarTabIcons}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, marginLeft: "auto" }}>
-                    {hmdaLendersViewModeToggle}
-                    {hmdaLendersCountChip}
-                  </div>
-                </div>
-                <div className="hmda-filter-toolbar-mobile-filters">{hmdaLendersFilterNodes}</div>
-                <div className="toolbar-shell" data-hmda-search-ui style={{ width: "100%", padding: "6px 8px", borderRadius: "11px", position: "relative", boxSizing: "border-box" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-                    <span style={{ color: c.text3, flexShrink: 0 }} aria-hidden>
-                      {IC.search}
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="Search lender, county, MSA…"
-                      value={qInput}
-                      onChange={(e) => {
-                        setQInput(e.target.value);
-                        setShowSuggestions(true);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          commitSearch(qInput);
-                        }
-                      }}
-                      onFocus={() => {
-                        const t = qInput.trim();
-                        if (/^\d+$/.test(t) || t.length >= 2) setShowSuggestions(true);
-                      }}
-                      aria-label="Search lenders and geography"
-                      style={{ flex: 1, border: "none", outline: "none", background: "transparent", color: c.text, fontSize: "16px", fontFamily: "inherit", fontWeight: 500, minWidth: 0 }}
-                    />
-                    {qInput && (
-                      <button type="button" onClick={clearSearch} aria-label="Clear search" style={{ border: "none", background: c.chip, borderRadius: "8px", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: c.text3, flexShrink: 0 }}>
-                        {IC.x}
-                      </button>
-                    )}
-                    {hmdaSearchLenderMapBtn}
-                  </div>
-                  {showSuggestions && searchSuggestions.length > 0 && (
-                    <div data-hmda-search-ui style={{ position: "absolute", top: "100%", left: "10px", right: "10px", marginTop: "4px", padding: "6px", borderRadius: "12px", background: c.surface, border: `1px solid ${c.border}`, boxShadow: dk ? "0 12px 32px rgba(0,0,0,0.35)" : "0 12px 28px rgba(15,23,42,0.1)", zIndex: 1300, maxHeight: "min(280px, 50vh)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-                      {searchSuggestions.map((s, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => commitSearch(suggestionToQueryValue(s))}
-                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "10px 12px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 500, fontFamily: "inherit", background: "transparent", color: c.text2, textAlign: "left", gap: "8px" }}
-                        >
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-                          <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: c.text4, flexShrink: 0, padding: "2px 6px", borderRadius: "4px", background: c.chip }}>{s.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, flexWrap: "wrap", width: "100%", minWidth: 0 }}>
-                  {hmdaLendersPinsToolbar}
-                </div>
-              </div>
-              ) : (
-              <div className="toolbar-shell hmda-nav-filter-merge hmda-filter-toolbar-pastel" style={{ display: "flex", flexWrap: "nowrap", alignItems: "center", gap: "8px", padding: "8px 14px", width: "100%", borderRadius: "14px", overflowX: showSuggestions && searchSuggestions.length > 0 ? "visible" : "auto", overflowY: "visible" }}>
-                {hmdaLendersToolbarTabIcons}
-                <div aria-hidden style={{ width: 1, height: 22, background: c.drillBorder, flexShrink: 0, opacity: 0.85 }} />
-                <div style={{ display: "flex", alignItems: "center", flexWrap: "nowrap", gap: 6, flexShrink: 0 }}>{hmdaLendersFilterNodes}</div>
-                <div aria-hidden style={{ width: 1, height: 22, background: c.drillBorder, flexShrink: 0, opacity: 0.85 }} />
-                <div className="toolbar-shell hmda-lenders-toolbar-search" data-hmda-search-ui style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", flex: "0 1 280px", minWidth: 160, maxWidth: 300, position: "relative", padding: "4px 8px" }}>
-                  <div className="hmda-nav-search-well" style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: 0, padding: "7px 9px" }}>
-                    <span style={{ color: c.text3, flexShrink: 0 }} aria-hidden>
-                      {IC.search}
-                    </span>
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      placeholder="Search lender…"
-                      value={qInput}
-                      onChange={(e) => {
-                        setQInput(e.target.value);
-                        setShowSuggestions(true);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          commitSearch(qInput);
-                        }
-                        if (e.key === "Escape") setShowSuggestions(false);
-                      }}
-                      onFocus={() => {
-                        const t = qInput.trim();
-                        if (/^\d+$/.test(t) || t.length >= 2) setShowSuggestions(true);
-                      }}
-                      aria-label="Search lenders and geography"
-                      aria-autocomplete="list"
-                      aria-expanded={showSuggestions && searchSuggestions.length > 0}
-                      aria-controls="hmda-lenders-search-suggest"
-                      style={{ flex: 1, border: "none", outline: "none", background: "transparent", color: c.text, fontSize: "13px", fontFamily: "inherit", fontWeight: 500, minWidth: 0 }}
-                    />
-                    {qInput && (
-                      <button type="button" onClick={clearSearch} aria-label="Clear search" style={{ border: "none", background: c.chip, borderRadius: "8px", width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: c.text3, flexShrink: 0 }}>
-                        {IC.x}
-                      </button>
-                    )}
-                    {hmdaSearchLenderMapBtn}
-                  </div>
-                  {showSuggestions && searchSuggestions.length > 0 && (
-                    <div id="hmda-lenders-search-suggest" role="listbox" data-hmda-search-ui style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, padding: "6px", borderRadius: "12px", background: c.surface, border: `1px solid ${c.border}`, boxShadow: dk ? "0 12px 32px rgba(0,0,0,0.35)" : "0 12px 28px rgba(15,23,42,0.12)", zIndex: 1300, maxHeight: "280px", overflowY: "auto" }}>
-                      {searchSuggestions.map((s, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => commitSearch(suggestionToQueryValue(s))}
-                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "10px 12px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 500, fontFamily: "inherit", background: "transparent", color: c.text2, textAlign: "left", gap: "8px" }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = dk ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.03)")}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                        >
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-                          <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: c.text4, flexShrink: 0, padding: "2px 6px", borderRadius: "4px", background: c.chip }}>{s.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div aria-hidden style={{ width: 1, height: 22, background: c.drillBorder, flexShrink: 0, opacity: 0.85 }} />
-                {hmdaLendersViewModeToggle}
-                {hmdaLendersCountChip}
-                {hmdaLendersPinsToolbar}
-              </div>
-              )}
-
+              {hmdaLendersToolbarBarUi}
               {isMobile&&(
                 <div style={{position:"fixed",left:"10px",right:"10px",bottom:"10px",zIndex:95,display:"flex",alignItems:"center",gap:"8px",padding:"10px",borderRadius:"14px",background:c.surfaceRaised,border:`1px solid ${c.border}`,backdropFilter:"blur(16px)",boxShadow:dk?"0 10px 24px rgba(0,0,0,0.35)":"0 10px 24px rgba(15,23,42,0.08)"}}>
                   <div style={{fontSize:"11px",fontWeight:700,color:c.text3,whiteSpace:"nowrap"}}>Pinned</div>
@@ -8223,6 +8276,7 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
                 </div>
               )}
             </div>
+            )}
 
             <div className="hmda-lenders-results-rule" style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"8px"}}>
               <div style={{height:"1px",flex:1,background:dk?"linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.14) 40%, rgba(255,255,255,0.04) 100%)":"linear-gradient(90deg, transparent 0%, rgba(15,23,42,0.18) 40%, rgba(15,23,42,0.05) 100%)"}} />
@@ -8960,6 +9014,14 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
                 toolbarActions={geoPremiumActions}
                 resetUiNonce={geoMapUiResetNonce}
                 onInitialMapReady={() => setGeoMapCanvasReady(true)}
+                mapSearchQuery={qInput}
+                onMapSearchQueryChange={setQInput}
+                showSearchSuggestions={showSuggestions}
+                onShowSearchSuggestions={setShowSuggestions}
+                searchSuggestions={searchSuggestions}
+                onCommitSearch={commitSearch}
+                suggestionToQueryValue={suggestionToQueryValue}
+                onClearSearch={clearSearch}
               />
               </Suspense>
             </div>
@@ -10829,6 +10891,22 @@ export default function App({ onCanvasReady, onHeroReady, initialTab, embedMode 
           </div>
         </div>
       )}
+
+      {embedMode && showResults && headerSearchHost && hmdaEmbedHeaderToolbarUi
+        ? createPortal(
+            <HmdaThemeCtx.Provider value={{ c, dk }}>
+              <div
+                data-hmda-theme={theme}
+                data-hmda-sprinkle={sprinkleUi ? "1" : "0"}
+                data-hmda-embed="1"
+                className="hmda-premium-exec hmda-route-shell hmda-embed-header-toolbar w-full"
+              >
+                {hmdaEmbedHeaderToolbarUi}
+              </div>
+            </HmdaThemeCtx.Provider>,
+            headerSearchHost,
+          )
+        : null}
 
     </div>
     </HmdaThemeCtx.Provider>

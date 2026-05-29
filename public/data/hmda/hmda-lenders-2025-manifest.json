@@ -1,18 +1,18 @@
 {
-  "exportedAt": "2026-05-28T16:55:07.543Z",
+  "exportedAt": "2026-05-29T20:32:50.816Z",
   "dataYear": 2025,
   "recordCount": 4784,
-  "etag": "2026-05-28T16:55:07.543Z",
+  "etag": "2026-05-29T20:32:50.816Z",
   "prodCounts": {
     "all": 4784,
     "Conventional": 4779,
-    "FHA": 1279,
-    "VA": 1220,
+    "FHA": 1280,
+    "VA": 1221,
     "USDA": 834,
-    "Non-QM": 3,
+    "Non-QM": 4,
     "Jumbo": 248,
     "HELOC": 1,
-    "Construction": 2
+    "Construction": 3
   },
   "channelCounts": {
     "all": 4784,

@@ -57,15 +57,54 @@ function findCol(headers, ...candidates) {
   return -1;
 }
 
+// ── race/ethnicity diversity helpers ─────────────────────────────────────────
+
+/**
+ * Map HMDA `derived_race` + `derived_ethnicity` to one of six buckets used for
+ * Simpson's Diversity Index.  Returns null when race/ethnicity is unknown/exempt
+ * so those rows are excluded from the denominator.
+ */
+function raceBucket(raceRaw, ethRaw) {
+  const r = (raceRaw || "").trim().toLowerCase();
+  const e = (ethRaw  || "").trim().toLowerCase();
+  if (
+    r === "race not available" || r === "free form text only" || r === "exempt" || r === "" ||
+    e === "ethnicity not available" || e === "free form text only" || e === "exempt"
+  ) return null;
+  if (e === "hispanic or latino") return "hispanic";
+  if (r === "white") return "white";
+  if (r === "black or african american") return "black";
+  if (r === "asian") return "asian";
+  if (r === "american indian or alaska native") return "nativeAm";
+  if (r === "native hawaiian or other pacific islander") return "pacificIsl";
+  return "other";
+}
+
+function computeDiversityMetrics(buckets) {
+  const counts = Object.values(buckets);
+  const total  = counts.reduce((s, n) => s + n, 0);
+  if (total < 10) return { diversityScore: null, minorityShare: null };
+  const simpson = 1 - counts.reduce((s, n) => s + (n / total) ** 2, 0);
+  const diversityScore = Math.round(simpson * 100);
+  const minority = total - (buckets.white || 0);
+  const minorityShare = Math.round((minority / total) * 1000) / 10;
+  return { diversityScore, minorityShare };
+}
+
+function emptyRaceBuckets() {
+  return { white: 0, black: 0, asian: 0, hispanic: 0, nativeAm: 0, pacificIsl: 0, other: 0 };
+}
+
 // ── aggregation ──────────────────────────────────────────────────────────────
 
 async function aggregateLines(lineIter) {
-  /** @type {Map<string, {units:number,volume:number,counties:Map<string,{units:number,volume:number,tracts:Map<string,{units:number,volume:number}>}>}>} */
+  /** @type {Map<string, {units:number,volume:number,counties:Map<string,{units:number,volume:number,tracts:Map<string,{units:number,volume:number}>}>,raceBuckets:object}>} */
   const agg = new Map();
 
   let headerParsed = false;
   let sep = "|";
   let idxAction = 8, idxState = 9, idxCounty = 10, idxTract = 11, idxAmount = 7;
+  let idxRace = -1, idxEthnicity = -1;
   let processed = 0;
 
   for await (const raw of lineIter) {
@@ -76,15 +115,16 @@ async function aggregateLines(lineIter) {
     if (!headerParsed) {
       sep = trimmed.includes("|") ? "|" : ",";
       const headers = trimmed.split(sep).map((h) => h.trim());
-      idxAction = findCol(headers, "action_taken");
-      idxState  = findCol(headers, "state_code", "derived_msa-md", "state");
-      idxCounty = findCol(headers, "county_code", "county");
-      idxTract  = findCol(headers, "census_tract", "tract_number");
-      idxAmount = findCol(headers, "loan_amount", "loan_amount_000s");
-      // Positional fallback if header names not found
+      idxAction    = findCol(headers, "action_taken");
+      idxState     = findCol(headers, "state_code", "derived_msa-md", "state");
+      idxCounty    = findCol(headers, "county_code", "county");
+      idxTract     = findCol(headers, "census_tract", "tract_number");
+      idxAmount    = findCol(headers, "loan_amount", "loan_amount_000s");
+      idxRace      = findCol(headers, "derived_race");
+      idxEthnicity = findCol(headers, "derived_ethnicity");
       if (idxAction < 0) { idxAction = 8; idxState = 9; idxCounty = 10; idxTract = 11; idxAmount = 7; }
       process.stdout.write(
-        `  Header: ${headers.length} cols | action@${idxAction} state@${idxState} county@${idxCounty} tract@${idxTract} amount@${idxAmount}\n`
+        `  Header: ${headers.length} cols | action@${idxAction} state@${idxState} county@${idxCounty} tract@${idxTract} amount@${idxAmount} race@${idxRace} eth@${idxEthnicity}\n`
       );
       headerParsed = true;
       continue;
@@ -94,10 +134,22 @@ async function aggregateLines(lineIter) {
     const needed = Math.max(idxAction, idxState, idxCounty, idxTract, idxAmount);
     if (cols.length <= needed) continue;
 
-    if ((cols[idxAction] || "").trim() !== "1") continue;
-
+    const actionTaken = (cols[idxAction] || "").trim();
     const state = (cols[idxState] || "").trim().toUpperCase();
     if (!state) continue;
+
+    if (idxRace >= 0) {
+      const bucket = raceBucket(
+        idxRace      >= 0 ? cols[idxRace]      : "",
+        idxEthnicity >= 0 ? cols[idxEthnicity] : "",
+      );
+      if (bucket) {
+        if (!agg.has(state)) agg.set(state, { units: 0, volume: 0, counties: new Map(), raceBuckets: emptyRaceBuckets() });
+        agg.get(state).raceBuckets[bucket] = (agg.get(state).raceBuckets[bucket] || 0) + 1;
+      }
+    }
+
+    if (actionTaken !== "1") continue;
 
     let county = (cols[idxCounty] || "").trim();
     if (!county || county === "NA" || county === "Exempt") county = "000";
@@ -107,7 +159,7 @@ async function aggregateLines(lineIter) {
     const rawAmt = (cols[idxAmount] || "").trim();
     const amt = /^\d+$/.test(rawAmt) ? parseInt(rawAmt, 10) : 0;
 
-    if (!agg.has(state)) agg.set(state, { units: 0, volume: 0, counties: new Map() });
+    if (!agg.has(state)) agg.set(state, { units: 0, volume: 0, counties: new Map(), raceBuckets: emptyRaceBuckets() });
     const srec = agg.get(state);
     srec.units++;
     srec.volume += amt;
@@ -142,7 +194,11 @@ function finalize(agg) {
     }
     counties.sort((a, b) => b.units - a.units);
     const countiesOut = TOP_COUNTIES_PER_STATE ? counties.slice(0, TOP_COUNTIES_PER_STATE) : counties;
-    out[state] = { units: srec.units, volume: srec.volume, counties: countiesOut };
+    const { diversityScore, minorityShare } = computeDiversityMetrics(srec.raceBuckets || emptyRaceBuckets());
+    const stateRecord = { units: srec.units, volume: srec.volume, counties: countiesOut };
+    if (diversityScore !== null) stateRecord.diversityScore = diversityScore;
+    if (minorityShare  !== null) stateRecord.minorityShare  = minorityShare;
+    out[state] = stateRecord;
   }
   return out;
 }
@@ -172,6 +228,7 @@ async function processZip(filePath, year) {
       let headerParsed = false;
       let sep = "|";
       let idxAction = 8, idxState = 9, idxCounty = 10, idxTract = 11, idxAmount = 7;
+      let idxRace = -1, idxEthnicity = -1;
 
       const zip = fs.createReadStream(filePath).pipe(unzipper.Parse({ forceStream: true }));
       zip.on("entry", (entry) => {
@@ -185,14 +242,16 @@ async function processZip(filePath, year) {
           if (!headerParsed) {
             sep = trimmed.includes("|") ? "|" : ",";
             const headers = trimmed.split(sep).map((h) => h.trim());
-            idxAction = findCol(headers, "action_taken");
-            idxState  = findCol(headers, "state_code", "derived_msa-md", "state");
-            idxCounty = findCol(headers, "county_code", "county");
-            idxTract  = findCol(headers, "census_tract", "tract_number");
-            idxAmount = findCol(headers, "loan_amount", "loan_amount_000s");
+            idxAction    = findCol(headers, "action_taken");
+            idxState     = findCol(headers, "state_code", "derived_msa-md", "state");
+            idxCounty    = findCol(headers, "county_code", "county");
+            idxTract     = findCol(headers, "census_tract", "tract_number");
+            idxAmount    = findCol(headers, "loan_amount", "loan_amount_000s");
+            idxRace      = findCol(headers, "derived_race");
+            idxEthnicity = findCol(headers, "derived_ethnicity");
             if (idxAction < 0) { idxAction = 8; idxState = 9; idxCounty = 10; idxTract = 11; idxAmount = 7; }
             process.stdout.write(
-              `  Header: ${headers.length} cols | action@${idxAction} state@${idxState} county@${idxCounty} tract@${idxTract} amount@${idxAmount}\n`
+              `  Header: ${headers.length} cols | action@${idxAction} state@${idxState} county@${idxCounty} tract@${idxTract} amount@${idxAmount} race@${idxRace} eth@${idxEthnicity}\n`
             );
             headerParsed = true;
             return;
@@ -200,16 +259,27 @@ async function processZip(filePath, year) {
           const cols = trimmed.split(sep);
           const needed = Math.max(idxAction, idxState, idxCounty, idxTract, idxAmount);
           if (cols.length <= needed) return;
-          if ((cols[idxAction] || "").trim() !== "1") return;
+          const actionTaken = (cols[idxAction] || "").trim();
           const state = (cols[idxState] || "").trim().toUpperCase();
           if (!state) return;
+          if (idxRace >= 0) {
+            const bucket = raceBucket(
+              idxRace      >= 0 ? cols[idxRace]      : "",
+              idxEthnicity >= 0 ? cols[idxEthnicity] : "",
+            );
+            if (bucket) {
+              if (!agg.has(state)) agg.set(state, { units: 0, volume: 0, counties: new Map(), raceBuckets: emptyRaceBuckets() });
+              agg.get(state).raceBuckets[bucket] = (agg.get(state).raceBuckets[bucket] || 0) + 1;
+            }
+          }
+          if (actionTaken !== "1") return;
           let county = (cols[idxCounty] || "").trim();
           if (!county || county === "NA" || county === "Exempt") county = "000";
           else if (/^\d+$/.test(county)) county = county.padStart(3, "0");
           const tract = fmtTract(cols[idxTract]);
           const rawAmt = (cols[idxAmount] || "").trim();
           const amt = /^\d+$/.test(rawAmt) ? parseInt(rawAmt, 10) : 0;
-          if (!agg.has(state)) agg.set(state, { units: 0, volume: 0, counties: new Map() });
+          if (!agg.has(state)) agg.set(state, { units: 0, volume: 0, counties: new Map(), raceBuckets: emptyRaceBuckets() });
           const srec = agg.get(state);
           srec.units++;
           srec.volume += amt;
@@ -302,6 +372,8 @@ async function main() {
       : await processTxt(mlarPath, year);
 
     existing[String(year)] = data;
+    meta[`${year}Source`] = `CFPB HMDA combined MLAR (${path.basename(mlarPath)})`;
+    meta.updatedAt = new Date().toISOString();
     console.log(`${year}: ${Object.keys(data).length} states written.`);
   }
 

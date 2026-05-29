@@ -56,18 +56,47 @@ function countyMetricsYears() {
     .sort((a, b) => b - a)
 }
 
-function tractYears() {
-  const manifest = readJson('geo-map/tracts/manifest.json', {})
-  const years = manifest?.years
-  if (Array.isArray(years) && years.length) {
-    return years.map(String).filter((y) => /^\d{4}$/.test(y)).sort((a, b) => Number(b) - Number(a))
-  }
+function tractYearsFromDisk() {
   const dir = path.join(DATA, 'geo-map/tracts')
   if (!fs.existsSync(dir)) return []
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && /^\d{4}$/.test(d.name))
+    .filter((d) => fs.existsSync(path.join(dir, d.name, '_national-top.json')))
     .map((d) => d.name)
+    .sort((a, b) => Number(b) - Number(a))
+}
+
+function syncTractManifestYears() {
+  const manifestPath = path.join(DATA, 'geo-map/tracts/manifest.json')
+  const dirYears = tractYearsFromDisk()
+  if (!dirYears.length) return
+
+  const manifest = readJson('geo-map/tracts/manifest.json', {}) || {}
+  const merged = [...new Set([
+    ...(Array.isArray(manifest.years) ? manifest.years : []),
+    ...Object.keys(manifest.files || {}),
+    ...dirYears,
+  ].map(String).filter((y) => /^\d{4}$/.test(y)))].sort((a, b) => Number(b) - Number(a))
+
+  const prev = JSON.stringify(manifest.years || [])
+  if (prev === JSON.stringify(merged)) return
+
+  manifest.years = merged
+  if (!manifest.builtAt) manifest.builtAt = new Date().toISOString()
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+  console.log('[hmda-years-manifest] synced tract manifest years:', merged.join(', '))
+}
+
+function tractYears() {
+  syncTractManifestYears()
+  const manifest = readJson('geo-map/tracts/manifest.json', {})
+  const fromManifest = [
+    ...(Array.isArray(manifest?.years) ? manifest.years : []),
+    ...Object.keys(manifest?.files || {}),
+  ].map(String).filter((y) => /^\d{4}$/.test(y))
+  return [...new Set([...fromManifest, ...tractYearsFromDisk()])]
     .sort((a, b) => Number(b) - Number(a))
 }
 
@@ -91,6 +120,14 @@ function nearestGeoYear(want, geoYears) {
   const sorted = [...geoYears].map(Number).sort((a, b) => b - a)
   const hit = sorted.find((y) => y <= pref && geoYears.includes(String(y)))
   return hit != null ? hit : sorted[0] ?? null
+}
+
+/** Tract tiles must not fall forward to a newer filing year. */
+function nearestPriorTractYear(want, tractYearsList) {
+  const pref = Number(want)
+  const sorted = [...tractYearsList].map(Number).filter(Number.isFinite).sort((a, b) => b - a)
+  const hit = sorted.find((y) => y <= pref && tractYearsList.includes(String(y)))
+  return hit ?? null
 }
 
 function main() {
@@ -119,7 +156,7 @@ function main() {
     const hasTracts = tractYearsList.includes(ys)
     const hasProducts = productYears.includes(y) || hasLenders
     const geoFallbackYear = hasGeo ? null : nearestGeoYear(y, geoYears)
-    const tractFallbackYear = hasTracts ? null : nearestGeoYear(y, tractYearsList)
+    const tractFallbackYear = hasTracts ? null : nearestPriorTractYear(y, tractYearsList)
     const larDetail = Math.min(y, LAR_DETAIL_MAX_YEAR)
     years[ys] = {
       lenders: hasLenders,
@@ -151,6 +188,7 @@ function main() {
     years,
   }
 
+  console.log('[HMDA_PROGRESS] 1/1 Rebuild years manifest')
   fs.mkdirSync(DATA, { recursive: true })
   fs.writeFileSync(OUT, JSON.stringify(manifest, null, 2))
   console.log('[hmda-years-manifest]', OUT)

@@ -1,0 +1,163 @@
+/* Coheus HMDA embed shell — outer chrome is minimal; nav uses standalone glass styles */
+
+.hmda-embed-shell-header {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding: 10px 12px 6px;
+}
+
+.hmda-embed-shell-header--hidden {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .hmda-embed-shell-header {
+    padding: 12px 20px 8px;
+  }
+}
+
+.hmda-embed-header-search-host {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+  z-index: 40;
+}
+
+.hmda-embed-header-toolbar {
+  width: 100%;
+  background: transparent;
+  overflow: visible;
+}
+
+.hmda-embed-header-toolbar.hmda-route-shell {
+  min-height: 0;
+  overflow: visible;
+}
+
+.hmda-embed-header-search-host .hmda-nav.hmda-nav-pastel,
+.hmda-embed-header-search-host .hmda-filter-bar {
+  margin-bottom: 0;
+  width: 100%;
+}
+
+.hmda-embed-header-search-host .toolbar-shell {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+/* Standalone HMDA glass nav in the embed header host */
+.hmda-embed-header-toolbar.hmda-route-shell .hmda-nav.hmda-nav-pastel,
+.hmda-embed-header-toolbar.hmda-route-shell .hmda-filter-bar {
+  border-radius: 20px !important;
+}
+
+.hmda-embed-header-toolbar.hmda-route-shell .hmda-nav-pastel .tab-item,
+.hmda-embed-header-toolbar.hmda-route-shell .hmda-nav-home-btn.tab-item {
+  border-radius: var(--hmda-glass-radius-sm, 11px) !important;
+}
+
+.hmda-embed-nav-well--home {
+  background: rgba(254, 243, 199, 0.75);
+  color: #b45309;
+}
+
+.hmda-embed-nav-well--lenders {
+  background: rgba(199, 210, 254, 0.52);
+  color: #4338ca;
+}
+
+.hmda-embed-nav-well--products {
+  background: rgba(187, 247, 208, 0.5);
+  color: #047857;
+}
+
+.hmda-embed-nav-well--geography {
+  background: rgba(186, 230, 253, 0.55);
+  color: #0369a1;
+}
+
+.dark .hmda-embed-nav-well--home {
+  background: rgba(251, 191, 36, 0.22);
+  color: #fcd34d;
+}
+
+.dark .hmda-embed-nav-well--lenders {
+  background: rgba(129, 140, 248, 0.24);
+  color: #c4b5fd;
+}
+
+.dark .hmda-embed-nav-well--products {
+  background: rgba(52, 211, 153, 0.2);
+  color: #6ee7b7;
+}
+
+.dark .hmda-embed-nav-well--geography {
+  background: rgba(56, 189, 248, 0.22);
+  color: #7dd3fc;
+}
+
+.hmda-embed-nav-active--home {
+  background: rgba(254, 243, 199, 0.45);
+  color: #92400e;
+}
+
+.hmda-embed-nav-active--lenders {
+  background: rgba(199, 210, 254, 0.38);
+  color: #4338ca;
+}
+
+.hmda-embed-nav-active--products {
+  background: rgba(187, 247, 208, 0.38);
+  color: #047857;
+}
+
+.hmda-embed-nav-active--geography {
+  background: rgba(186, 230, 253, 0.48);
+  color: #0369a1;
+}
+
+.dark .hmda-embed-nav-active--home {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fcd34d;
+}
+
+.dark .hmda-embed-nav-active--lenders {
+  background: rgba(129, 140, 248, 0.18);
+  color: #c4b5fd;
+}
+
+.dark .hmda-embed-nav-active--products {
+  background: rgba(52, 211, 153, 0.14);
+  color: #6ee7b7;
+}
+
+.dark .hmda-embed-nav-active--geography {
+  background: rgba(56, 189, 248, 0.18);
+  color: #7dd3fc;
+}
+
+/* Modals — clear Coheus top bar (4rem) + embed HMDA nav toolbar */
+.hmda-databank-root .hmda-modal-overlay.hmda-modal-compare {
+  z-index: 200 !important;
+}
+
+@media (min-width: 640px) {
+  .hmda-databank-root .hmda-modal-overlay.hmda-modal-compare {
+    align-items: flex-start;
+    padding: calc(4rem + 6.5rem) 16px 40px;
+  }
+
+  .hmda-databank-root .hmda-modal-compare-panel {
+    max-height: calc(100vh - 4rem - 6.5rem - 56px);
+  }
+}
+
+@media (max-width: 639px) {
+  .hmda-databank-root .hmda-modal-overlay.hmda-modal-compare {
+    padding-top: calc(4rem + 4.5rem);
+  }
+}

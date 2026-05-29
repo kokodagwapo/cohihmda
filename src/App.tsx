@@ -53,7 +53,7 @@ import PricingDashboard from "./pages/PricingDashboard";
 import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
 import DataQualityDashboard from "./pages/DataQualityDashboard";
-import HmdaData, { HmdaDataBankOutlet } from "./pages/HmdaData";
+import HmdaData from "./pages/HmdaData";
 import ActiveWorkload from "./pages/ActiveWorkload";
 import LoanComplexity from "./pages/LoanComplexity";
 import LeaderboardDashboard from "./pages/LeaderboardDashboard";
@@ -250,13 +250,7 @@ const App = () => (
               <Route path="/lock-stratification" element={<LockStratification />} />
               <Route path="/pipeline-analysis" element={<PipelineAnalysisDashboard />} />
               <Route path="/data-quality" element={<DataQualityDashboard />} />
-              <Route path="/hmda" element={<HmdaData />}>
-                <Route index element={<Navigate to="search" replace />} />
-                <Route path="search" element={<HmdaDataBankOutlet />} />
-                <Route path="lenders" element={<HmdaDataBankOutlet />} />
-                <Route path="products" element={<HmdaDataBankOutlet />} />
-                <Route path="geography" element={<HmdaDataBankOutlet />} />
-              </Route>
+              <Route path="/hmda/*" element={<HmdaData />} />
               <Route path="/loan-complexity" element={<LoanComplexity />} />
               <Route path="/leaderboard" element={<LeaderboardDashboard />} />
               <Route path="/business-overview" element={<BusinessOverviewDashboard />} />

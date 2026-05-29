@@ -12,6 +12,10 @@ export function publicAssetUrl(relativePath) {
   const base = raw.endsWith('/') ? raw : `${raw}/`
   const p = String(relativePath).replace(/^\//, '')
   const dataPrefix = hmdaDataPrefix()
+  // Path already includes the configured HMDA prefix (e.g. data/hmda/foo.json).
+  if (dataPrefix !== 'data/' && p.startsWith(dataPrefix)) {
+    return `${base}${p}`
+  }
   if (p.startsWith('data/') && dataPrefix !== 'data/') {
     return `${base}${dataPrefix}${p.slice('data/'.length)}`
   }
@@ -21,9 +25,8 @@ export function publicAssetUrl(relativePath) {
 /** Relative path under /public for the full multi-year HMDA lender panel JSON. */
 export function hmdaLendersJsonRelativePath() {
   const v = String(import.meta.env.VITE_HMDA_LENDERS_VERSION || '').trim()
-  const prefix = hmdaDataPrefix()
   const rel = v ? `lenders-from-hmda.json?v=${encodeURIComponent(v)}` : 'lenders-from-hmda.json'
-  return `${prefix}${rel}`
+  return `data/${rel}`
 }
 
 /**
@@ -35,19 +38,18 @@ export function hmdaLendersBootstrapJsonRelativePath(year) {
   const v = String(import.meta.env.VITE_HMDA_LENDERS_VERSION || '').trim()
   const yr = Number(year) || 2025
   const qs = v ? `?v=${encodeURIComponent(v)}` : ''
-  const prefix = hmdaDataPrefix()
   // Per-year slices exist for 2022–2025.
   if (yr >= 2022 && yr <= 2025) {
-    return `${prefix}hmda-lenders-${yr}-only.json${qs}`
+    return `data/hmda-lenders-${yr}-only.json${qs}`
   }
   // Fallback to full panel for other years.
-  return `${prefix}lenders-from-hmda.json${qs}`
+  return `data/lenders-from-hmda.json${qs}`
 }
 
 export function geoMapSummaryRelativePath(year = '2025') {
-  return `${hmdaDataPrefix()}geo-map-summary-${year}.json`
+  return `data/geo-map-summary-${year}.json`
 }
 
 export function geoDrilldownFullRelativePath() {
-  return `${hmdaDataPrefix()}geo-drilldown-from-hmda.json`
+  return 'data/geo-drilldown-from-hmda.json'
 }

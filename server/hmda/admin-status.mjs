@@ -148,6 +148,44 @@ export function readLastRefreshJob() {
 
 }
 
+function formatWhen(iso) {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleString()
+  } catch {
+    return iso
+  }
+}
+
+function readMlarInsightsCheckpointSummary(year) {
+  const filePath = path.join(REPO_ROOT, '.cache/hmda/mlar-insights', `mlar-insights-${year}.json`)
+  const raw = readJsonSafe(filePath)
+  if (!raw?.byLei || typeof raw.byLei !== 'object') return null
+  const institutionCount = Object.keys(raw.byLei).length
+  if (!institutionCount) return null
+  return { institutionCount, checkpointPath: path.relative(REPO_ROOT, filePath) }
+}
+
+function describeLenderSyncMethod({ year, dataBrowserLive, hasStaticLenders, mlarCheckpoint, rateSourceCounts, lastRefresh }) {
+  const mlarRates = Number(rateSourceCounts?.['hmda-mlar'] || 0)
+  if (
+    lastRefresh?.status === 'completed' &&
+    Number(lastRefresh.anchorYear) === Number(year) &&
+    (lastRefresh.mode === 'lenders' || lastRefresh.mode === 'refresh')
+  ) {
+    return `Per-institution modified-LAR batch (${formatWhen(lastRefresh.finishedAt)})`
+  }
+  if (mlarCheckpoint?.institutionCount || mlarRates > 0) {
+    const n = mlarCheckpoint?.institutionCount || mlarRates
+    return `Per-institution modified-LAR batch (${n.toLocaleString()} institutions in checkpoint/export)`
+  }
+  if (dataBrowserLive && hasStaticLenders) {
+    return 'Data Browser API filers list (live queries also available at runtime when enabled)'
+  }
+  if (hasStaticLenders) return 'Static JSON on disk (source unknown — run Refresh lenders to sync from FFIEC)'
+  return 'Not loaded — run Refresh lenders'
+}
+
 
 
 /** @param {number} [anchorYear] */
@@ -220,11 +258,52 @@ export async function getHmdaAdminStatus(anchorYear = HMDA_DEFAULT_ANCHOR_YEAR) 
 
   }
 
-
+  const lastJob = readLastRefreshJob()
+  const dataBrowserLive = Boolean(ffiecWindow?.available?.includes(year))
+  const mlarCheckpoint = readMlarInsightsCheckpointSummary(year)
+  const hasStaticLenders = Boolean(yearRow?.lenders && (yearRow?.lenderCount ?? 0) > 0)
+  const lenderSyncMethod = describeLenderSyncMethod({
+    year,
+    dataBrowserLive,
+    hasStaticLenders,
+    mlarCheckpoint,
+    rateSourceCounts,
+    lastRefresh: lastJob,
+  })
 
   const warnings = []
 
-  if (!ffiecWindow?.available?.includes(year)) {
+  if (!dataBrowserLive) {
+
+    const hasStaticGeo = Boolean(yearRow?.geo && !yearRow?.partial)
+
+    const ffiecReason = ffiecWindow?.unavailable?.find((u) => u.year === year)?.reason
+
+    let message
+
+    if (hasStaticLenders || hasStaticGeo) {
+
+      message = `Live FFIEC Data Browser API does not serve ${year} yet (or is unreachable from this server). Static JSON for ${year} is already deployed — the app uses that.`
+
+    } else {
+
+      message = `FFIEC Data Browser API does not serve ${year} yet — static MLAR exports are required.`
+
+    }
+
+    if (ffiecReason && /HTTP 403|Access Denied|timed out/i.test(ffiecReason)) {
+
+      message = `FFIEC API probe failed for ${year} (${ffiecReason}). ${
+
+        hasStaticLenders || hasStaticGeo
+
+          ? 'Static JSON for this year is deployed and in use.'
+
+          : 'Deploy static MLAR exports for this year.'
+
+      }`
+
+    }
 
     warnings.push({
 
@@ -232,7 +311,7 @@ export async function getHmdaAdminStatus(anchorYear = HMDA_DEFAULT_ANCHOR_YEAR) 
 
       code: 'ffiec_year_unavailable',
 
-      message: `FFIEC Data Browser API does not serve ${year} yet — static MLAR exports are required.`,
+      message,
 
     })
 
@@ -252,7 +331,10 @@ export async function getHmdaAdminStatus(anchorYear = HMDA_DEFAULT_ANCHOR_YEAR) 
 
   }
 
-  if (yearRow?.tractFallbackYear) {
+  if (
+    yearRow?.tractFallbackYear &&
+    Number(yearRow.tractFallbackYear) < Number(year)
+  ) {
 
     warnings.push({
 
@@ -281,22 +363,28 @@ export async function getHmdaAdminStatus(anchorYear = HMDA_DEFAULT_ANCHOR_YEAR) 
   }
 
   if (!geoBuildReady) {
+    const hasStaticGeo = Boolean(yearRow?.geo)
+    if (!hasStaticGeo) {
+      const mlarYearsOnDisk = mlarFilesFound
+        .map((f) => Number(f.match(/^(\d{4})/)?.[1]))
+        .filter(Number.isFinite)
+        .sort((a, b) => b - a)
+      const otherMlarYears = mlarYearsOnDisk.filter((y) => y !== year)
+      const mlarDirLabel = path.relative(REPO_ROOT, HMDA_MLAR_DIR)
 
-    warnings.push({
-
-      level: 'warning',
-
-      code: 'mlar_geo_missing',
-
-      message: `No combined MLAR file for ${year} in ${path.relative(REPO_ROOT, HMDA_MLAR_DIR)} — geography rebuild will be skipped on refresh.`,
-
-    })
-
+      let message = `No combined MLAR file for ${year} in ${mlarDirLabel} — Rebuild geography cannot run for this anchor year.`
+      if (otherMlarYears.length) {
+        message += ` Combined MLAR on disk: ${otherMlarYears.join(', ')} — switch Admin year to match or download ${year} from FFIEC.`
+      } else {
+        message += ' Download the combined modified-LAR from FFIEC to enable geography rebuild.'
+      }
+      warnings.push({
+        level: 'warning',
+        code: 'mlar_geo_missing',
+        message,
+      })
+    }
   }
-
-
-
-  const lastJob = readLastRefreshJob()
 
 
 
@@ -354,7 +442,16 @@ export async function getHmdaAdminStatus(anchorYear = HMDA_DEFAULT_ANCHOR_YEAR) 
 
     ffiec: {
 
-      liveAvailable: Boolean(ffiecWindow?.available?.includes(year)),
+      /** @deprecated use dataBrowserLive — kept for older clients */
+      liveAvailable: dataBrowserLive,
+
+      dataBrowserLive,
+
+      runtimeMode: warehouseReady ? 'database' : 'static JSON on disk',
+
+      lenderSyncMethod,
+
+      mlarCheckpointInstitutions: mlarCheckpoint?.institutionCount ?? null,
 
       availableYears: ffiecWindow?.available || [],
 
