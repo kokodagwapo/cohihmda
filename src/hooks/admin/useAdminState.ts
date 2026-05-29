@@ -26,6 +26,7 @@ export type AdminSection =
   | "insight-feedback" // Insight feedback review & training (platform admin)
   | "release-notes" // Release notes editor and distribution (platform admin)
   | "sync-management" // Cross-tenant sync schedule management (platform admin)
+  | "hmda-data" // HMDA public static data status and refresh (platform admin)
   | "platform-settings" // Platform API keys and settings (platform admin)
   | "feedback-notification-recipients" // Manage feedback notification recipients (super admin)
   | "api-usage" // Per-tenant OpenAI token and cost tracking (platform admin)

@@ -35,6 +35,7 @@ import {
   Megaphone,
   Coins,
   Mail,
+  Map as MapIcon,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -178,6 +179,16 @@ const allAdminSections: AdminSectionDef[] = [
     icon: RefreshCw,
     description: "Cross-tenant sync schedules and status",
     color: "text-cyan-300 dark:text-cyan-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Infrastructure",
+    mode: "platform",
+  },
+  {
+    id: "hmda-data" as AdminSection,
+    label: "HMDA Data",
+    icon: MapIcon,
+    description: "Public HMDA static data status and manual refresh",
+    color: "text-amber-300 dark:text-amber-400/70",
     allowedRoles: ["super_admin", "platform_admin"],
     category: "Infrastructure",
     mode: "platform",

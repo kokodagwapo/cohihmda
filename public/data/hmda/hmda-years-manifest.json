@@ -1,0 +1,84 @@
+{
+  "generatedAt": "2026-05-29T13:34:04.566Z",
+  "anchorYear": 2024,
+  "larDetailMaxYear": 2025,
+  "lenderYears": [
+    "2025",
+    "2024",
+    "2023",
+    "2022"
+  ],
+  "geoYears": [
+    "2025",
+    "2024",
+    "2023",
+    "2022"
+  ],
+  "tractYears": [
+    "2025",
+    "2024",
+    "2023",
+    "2022"
+  ],
+  "productYears": [
+    "2025",
+    "2024",
+    "2023",
+    "2022"
+  ],
+  "partialYears": [],
+  "years": {
+    "2022": {
+      "lenders": true,
+      "lenderCount": 4454,
+      "geo": true,
+      "geoFallbackYear": null,
+      "countyMetrics": true,
+      "tracts": true,
+      "tractFallbackYear": null,
+      "products": true,
+      "larDetail": 2022,
+      "paginatedPages": false,
+      "partial": false
+    },
+    "2023": {
+      "lenders": true,
+      "lenderCount": 5098,
+      "geo": true,
+      "geoFallbackYear": null,
+      "countyMetrics": true,
+      "tracts": true,
+      "tractFallbackYear": null,
+      "products": true,
+      "larDetail": 2023,
+      "paginatedPages": false,
+      "partial": false
+    },
+    "2024": {
+      "lenders": true,
+      "lenderCount": 4893,
+      "geo": true,
+      "geoFallbackYear": null,
+      "countyMetrics": true,
+      "tracts": true,
+      "tractFallbackYear": null,
+      "products": true,
+      "larDetail": 2024,
+      "paginatedPages": false,
+      "partial": false
+    },
+    "2025": {
+      "lenders": true,
+      "lenderCount": 4784,
+      "geo": true,
+      "geoFallbackYear": null,
+      "countyMetrics": true,
+      "tracts": true,
+      "tractFallbackYear": null,
+      "products": true,
+      "larDetail": 2025,
+      "paginatedPages": true,
+      "partial": false
+    }
+  }
+}

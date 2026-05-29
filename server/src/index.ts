@@ -280,16 +280,29 @@ const startServer = async () => {
     );
   }
 
-  // Fail fast if Cognito auth isn't enabled or pool MFA config is unsafe.
+  const localDevPasswordAuth =
+    NODE_ENV === "development" &&
+    process.env.LOCAL_DEV_PASSWORD_AUTH === "true";
+
   if (!isCognitoAuthEnabled()) {
-    throw new Error(
-      "Cognito password auth must be enabled. Refusing to start without COGNITO_PASSWORD_AUTH=true and Cognito config.",
+    if (!localDevPasswordAuth) {
+      throw new Error(
+        "Cognito password auth must be enabled. Refusing to start without COGNITO_PASSWORD_AUTH=true and Cognito config, or LOCAL_DEV_PASSWORD_AUTH=true in development.",
+      );
+    }
+    console.warn(
+      "⚠️  Cognito not configured; sign-in uses LOCAL_DEV_PASSWORD_AUTH (DB passwords only).",
+    );
+  } else if (process.env.COGNITO_SKIP_MFA_PREFLIGHT === "true") {
+    console.warn(
+      "⚠️  Skipping Cognito MFA preflight (COGNITO_SKIP_MFA_PREFLIGHT=true).",
+    );
+  } else {
+    await assertMfaConfigurationReady();
+    console.log(
+      "✅ Cognito MFA preflight passed (EMAIL_OTP + SOFTWARE_TOKEN_MFA enabled)",
     );
   }
-  await assertMfaConfigurationReady();
-  console.log(
-    "✅ Cognito MFA preflight passed (EMAIL_OTP + SOFTWARE_TOKEN_MFA enabled)",
-  );
 
   // Setup routes
   setupRoutes(app);

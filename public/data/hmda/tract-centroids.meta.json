@@ -1,0 +1,9 @@
+{
+  "source": "U.S. Census Bureau",
+  "dataset": "2020 National Gazetteer Files — Census Tracts",
+  "url": "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2020_Gazetteer/2020_National_Gazetteer_Files.zip",
+  "referencePage": "https://www.census.gov/geographies/reference-files/time-series/geo/gazetteer-files.html",
+  "geoidFormat": "11-digit Census tract GEOID (state + county + tract)",
+  "featureCount": 85396,
+  "hmdaOverlay": "Originated loan counts on tract dots come from CFPB HMDA / FFIEC when available; lender-specific tract dots use FFIEC state totals allocated by market tract pattern."
+}

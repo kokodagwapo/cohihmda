@@ -1,0 +1,4607 @@
+/**
+ * HMDA DataBank — clean glassmorphism kit (nav, filters, lender cards, products, geo).
+ * Inspired by frosted-card UI: soft blur, hairline border, inset highlight, minimal shadow.
+ */
+.hmda-premium-exec.hmda-route-shell {
+  --hmda-glass-radius-lg: 24px;
+  --hmda-glass-radius-md: 16px;
+  --hmda-glass-radius-sm: 12px;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='light'] {
+  --hmda-ds-glass-bg: rgba(255, 255, 255, 0.38);
+  --hmda-ds-glass-border: rgba(255, 255, 255, 0.62);
+  --hmda-ds-glass-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.18),
+    0 14px 40px rgba(99, 102, 241, 0.08),
+    0 4px 18px rgba(6, 182, 212, 0.06);
+  --hmda-ds-glass-backdrop: blur(22px) saturate(190%);
+  --hmda-iris-shimmer:
+    radial-gradient(ellipse 90% 70% at 8% 6%, rgba(167, 243, 208, 0.38) 0%, transparent 52%),
+    radial-gradient(ellipse 75% 55% at 92% 10%, rgba(196, 181, 253, 0.34) 0%, transparent 48%),
+    radial-gradient(ellipse 80% 60% at 48% 100%, rgba(125, 211, 252, 0.3) 0%, transparent 50%),
+    radial-gradient(ellipse 55% 40% at 78% 72%, rgba(251, 207, 232, 0.22) 0%, transparent 46%);
+  --hmda-glass-card-bg: rgba(255, 255, 255, 0.52);
+  --hmda-glass-card-border: rgba(255, 255, 255, 0.68);
+  --hmda-glass-card-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 12px 40px rgba(15, 23, 42, 0.07);
+  --hmda-glass-card-shadow-outer:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.07),
+    0 20px 48px rgba(99, 102, 241, 0.06);
+  --hmda-glass-card-shadow-outer-hover:
+    0 2px 6px rgba(15, 23, 42, 0.06),
+    0 14px 36px rgba(15, 23, 42, 0.1),
+    0 28px 64px rgba(99, 102, 241, 0.1);
+  --hmda-glass-inset: rgba(248, 250, 252, 0.42);
+  --hmda-glass-inset-border: rgba(255, 255, 255, 0.55);
+  --hmda-glass-text: #0f172a;
+  --hmda-glass-text-secondary: #334155;
+  --hmda-glass-text-muted: #64748b;
+  --hmda-glass-control-bg: rgba(255, 255, 255, 0.32);
+  --hmda-glass-control-border: rgba(255, 255, 255, 0.55);
+  --hmda-iris-pill-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 10px 28px rgba(99, 102, 241, 0.1),
+    0 3px 10px rgba(6, 182, 212, 0.08);
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] {
+  --hmda-ds-glass-bg: rgba(255, 255, 255, 0.06);
+  --hmda-ds-glass-border: rgba(255, 255, 255, 0.16);
+  --hmda-ds-glass-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 48px rgba(0, 0, 0, 0.38),
+    0 6px 20px rgba(99, 102, 241, 0.12);
+  --hmda-ds-glass-backdrop: blur(26px) saturate(175%);
+  --hmda-iris-shimmer:
+    radial-gradient(ellipse 85% 65% at 10% 8%, rgba(52, 211, 153, 0.14) 0%, transparent 52%),
+    radial-gradient(ellipse 70% 50% at 90% 12%, rgba(167, 139, 250, 0.16) 0%, transparent 48%),
+    radial-gradient(ellipse 75% 55% at 50% 100%, rgba(56, 189, 248, 0.12) 0%, transparent 50%);
+  --hmda-glass-card-bg: rgba(15, 23, 42, 0.38);
+  --hmda-glass-card-border: rgba(255, 255, 255, 0.12);
+  --hmda-glass-card-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 14px 40px rgba(0, 0, 0, 0.32);
+  --hmda-glass-card-shadow-outer:
+    0 2px 8px rgba(0, 0, 0, 0.22),
+    0 12px 32px rgba(0, 0, 0, 0.28),
+    0 24px 56px rgba(99, 102, 241, 0.1);
+  --hmda-glass-card-shadow-outer-hover:
+    0 4px 12px rgba(0, 0, 0, 0.28),
+    0 18px 44px rgba(0, 0, 0, 0.36),
+    0 32px 72px rgba(99, 102, 241, 0.14);
+  --hmda-glass-inset: rgba(255, 255, 255, 0.04);
+  --hmda-glass-inset-border: rgba(255, 255, 255, 0.08);
+  --hmda-glass-text: #f8fafc;
+  --hmda-glass-text-secondary: #e2e8f0;
+  --hmda-glass-text-muted: rgba(148, 163, 184, 0.92);
+  --hmda-glass-control-bg: rgba(255, 255, 255, 0.05);
+  --hmda-glass-control-border: rgba(255, 255, 255, 0.12);
+  --hmda-iris-pill-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 12px 32px rgba(0, 0, 0, 0.35),
+    0 4px 14px rgba(99, 102, 241, 0.15);
+}
+
+/* ── Nav + filter chrome ─────────────────────────────────────────────── */
+.hmda-premium-exec.hmda-route-shell .hmda-nav.hmda-nav-pastel,
+.hmda-premium-exec.hmda-route-shell .hmda-filter-toolbar-pastel,
+.hmda-premium-exec.hmda-route-shell .hmda-filter-bar .toolbar-shell:not(.hmda-hero-toolbar) {
+  background-color: var(--hmda-ds-glass-bg) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: 1px solid var(--hmda-ds-glass-border) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-nav-pastel .tab-item {
+  border-radius: var(--hmda-glass-radius-sm) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='light'] .hmda-nav-pastel .tab-item {
+  color: var(--hmda-glass-text-muted) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='light'] .hmda-nav-pastel .tab-item[style*='chipActive'],
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='light'] .hmda-nav-pastel .tab-item:focus-visible {
+  background: rgba(255, 255, 255, 0.72) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-nav-search-well,
+.hmda-premium-exec.hmda-route-shell .hmda-nav-count-pill,
+.hmda-premium-exec.hmda-route-shell .filter-group {
+  background: var(--hmda-glass-control-bg) !important;
+  border: 1px solid var(--hmda-glass-control-border) !important;
+  border-radius: var(--hmda-glass-radius-sm) !important;
+  backdrop-filter: blur(12px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .filter-group span.hmda-heading-2 {
+  color: var(--hmda-glass-text) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase;
+  font-size: 0.6875rem !important;
+}
+
+/* ── Lender results grid ─────────────────────────────────────────────── */
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid {
+  gap: 14px 16px !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card:not(.hmda-results-grid-card--clean),
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel > .hmda-results-grid > .lcard-item:not(.hmda-results-grid-card--clean) {
+  background: var(--hmda-glass-card-bg) !important;
+  border: 1px solid var(--hmda-glass-card-border) !important;
+  border-radius: var(--hmda-glass-radius-lg) !important;
+  box-shadow: var(--hmda-glass-card-shadow) !important;
+  backdrop-filter: blur(12px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    border-color 0.22s ease !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card:not(.hmda-results-grid-card--clean):hover:not(.hmda-results-list-card--minimal) {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.82) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 18px 48px rgba(15, 23, 42, 0.1) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark']
+  .hmda-results-panel
+  .hmda-results-grid-card:not(.hmda-results-grid-card--clean):hover:not(.hmda-results-list-card--minimal) {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 20px 52px rgba(0, 0, 0, 0.42) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card-head {
+  background: transparent !important;
+  padding: 16px 18px 12px !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card:not(.hmda-results-grid-card--clean) .hmda-results-grid-card-body.hmda-results-grid-card-sheet {
+  margin: 0 14px 14px !important;
+  padding: 12px 14px !important;
+  border-radius: var(--hmda-glass-radius-sm) !important;
+  background: var(--hmda-glass-inset) !important;
+  border: 1px solid var(--hmda-glass-inset-border) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card .hmda-heading-2 {
+  color: var(--hmda-glass-text) !important;
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.025em !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card .hmda-lcard-inst-chip {
+  color: var(--hmda-glass-text-muted) !important;
+  font-weight: 500 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-lcard-rank-pill {
+  background: var(--hmda-glass-control-bg) !important;
+  border: 1px solid var(--hmda-glass-control-border) !important;
+  border-radius: 999px !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card:not(.hmda-results-grid-card--clean) .hmda-results-grid-pin {
+  background: var(--hmda-glass-control-bg) !important;
+  border: 1px solid var(--hmda-glass-control-border) !important;
+  border-radius: 999px !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-list-card--minimal {
+  border-radius: var(--hmda-glass-radius-md) !important;
+}
+
+/* ── Product cards ───────────────────────────────────────────────────── */
+.hmda-premium-exec.hmda-route-shell .hmda-product-card.lcard-item:not(.hmda-product-card--clean) {
+  background: var(--hmda-glass-card-bg) !important;
+  border: 1px solid var(--hmda-glass-card-border) !important;
+  border-radius: var(--hmda-glass-radius-lg) !important;
+  box-shadow: var(--hmda-glass-card-shadow) !important;
+  backdrop-filter: blur(20px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(155%) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card-icon {
+  background: var(--hmda-glass-control-bg) !important;
+  border: 1px solid var(--hmda-glass-control-border) !important;
+  border-radius: 14px !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+/* ── Clean product cards (borderless interior, frosted shell) ───────── */
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean.lcard-item {
+  background-color: rgba(255, 255, 255, 0.34) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: 1px solid rgba(255, 255, 255, 0.58) !important;
+  border-radius: var(--hmda-glass-radius-lg) !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-product-card--clean.lcard-item {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 20px 50px rgba(15, 23, 42, 0.1) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-product-card--clean:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 22px 56px rgba(0, 0, 0, 0.38) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-card-icon {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(1) .hmda-product-card-icon { color: #4f46e5 !important; }
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(2) .hmda-product-card-icon { color: #047857 !important; }
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(3) .hmda-product-card-icon { color: #0369a1 !important; }
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(4) .hmda-product-card-icon { color: #7c3aed !important; }
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(5) .hmda-product-card-icon { color: #c2410c !important; }
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(6) .hmda-product-card-icon { color: #a16207 !important; }
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(7) .hmda-product-card-icon { color: #0f766e !important; }
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid > .hmda-product-card--clean:nth-child(8) .hmda-product-card-icon { color: #be185d !important; }
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-heading-2 {
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  color: var(--hmda-glass-text) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown {
+  margin-top: 14px;
+  gap: 16px;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__section {
+  gap: 8px;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__title,
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__subtitle {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__subsection {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__pill-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__pill,
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__pill--neutral {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--hmda-glass-text-secondary) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__pill-units {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--hmda-glass-text) !important;
+  opacity: 1;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__pullthrough {
+  padding: 8px 0 0 !important;
+  margin-top: 4px;
+  border: none !important;
+  background: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__pullthrough-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__stat-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__stat-label {
+  margin-bottom: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__stat strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--hmda-glass-text);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__muted,
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-breakdown__note {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-outcome__track {
+  height: 3px;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-product-card--clean .hmda-product-outcome__track {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-card-drill-btn {
+  border-top: none !important;
+  opacity: 0.88;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-card--clean .hmda-product-card-drill-btn:hover {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-grid:has(.hmda-product-card--clean) {
+  gap: 20px !important;
+}
+
+/* ── Products dimension tables — borderless, lender-style typography ── */
+.hmda-product-dimension-wrap {
+  width: 100%;
+}
+
+.hmda-product-dimension-grid {
+  width: 100%;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-dimension-card--clean {
+  border: none !important;
+  border-radius: 20px !important;
+  background: rgba(255, 255, 255, 0.58) !important;
+  box-shadow: var(--hmda-glass-card-shadow-outer, 0 10px 40px rgba(15, 23, 42, 0.08)) !important;
+  overflow: hidden;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+  padding: 0 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-dimension-card--clean:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 16px 48px rgba(15, 23, 42, 0.1),
+    0 4px 14px rgba(99, 102, 241, 0.06) !important;
+}
+
+.hmda-product-dimension-card__header {
+  padding: 18px 20px 10px;
+  border: none;
+  background: transparent;
+}
+
+.hmda-product-dimension-card--blue .hmda-product-dimension-card__header {
+  background: linear-gradient(165deg, rgba(238, 242, 255, 0.72) 0%, rgba(255, 255, 255, 0) 88%);
+}
+
+.hmda-product-dimension-card--green .hmda-product-dimension-card__header {
+  background: linear-gradient(165deg, rgba(236, 253, 245, 0.72) 0%, rgba(255, 255, 255, 0) 88%);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-product-dimension-card__title {
+  margin: 0;
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  line-height: 1.32 !important;
+  color: var(--hmda-ds-text, #0f172a) !important;
+}
+
+.hmda-product-dimension-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 12px 14px;
+}
+
+.hmda-product-dimension-table {
+  display: grid;
+  min-width: 560px;
+  width: 100%;
+  row-gap: 6px;
+  --hmda-pdim-row-cols: minmax(148px, 1.35fr) repeat(5, minmax(72px, 1fr)) 28px;
+}
+
+.hmda-product-dimension-table__head,
+.hmda-product-dimension-table__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: var(--hmda-pdim-row-cols);
+  align-items: center;
+}
+
+@supports (grid-template-columns: subgrid) {
+  .hmda-product-dimension-table__head,
+  .hmda-product-dimension-table__row {
+    grid-template-columns: subgrid;
+  }
+}
+
+.hmda-product-dimension-table__head {
+  padding: 0 10px 8px;
+  margin-bottom: 2px;
+}
+
+.hmda-product-dimension-table__head-cell {
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, rgba(100, 116, 139, 0.88));
+  text-align: right;
+  line-height: 1.2;
+}
+
+.hmda-product-dimension-table__head-cell--category {
+  text-align: left;
+}
+
+.hmda-product-dimension-table__head-cell--action {
+  opacity: 0;
+}
+
+.hmda-product-dimension-table__body {
+  display: contents;
+}
+
+.hmda-product-dimension-table__row {
+  width: 100%;
+  margin: 0;
+  padding: 10px 10px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  cursor: pointer;
+  text-align: inherit;
+  font: inherit;
+  color: inherit;
+  transition:
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.hmda-product-dimension-table__row:hover,
+.hmda-product-dimension-table__row:focus-visible {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
+  outline: none;
+}
+
+.hmda-product-dimension-table__row:active {
+  transform: scale(0.995);
+}
+
+.hmda-product-dimension-table__category {
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--hmda-ds-text, #0f172a);
+  text-align: left;
+  line-height: 1.35;
+  padding-right: 8px;
+}
+
+.hmda-product-dimension-metric {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+}
+
+.hmda-product-dimension-metric__value {
+  font-family: var(--font-mono, 'JetBrains Mono'), ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: var(--hmda-ds-text-secondary, #334155);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.hmda-product-dimension-table__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hmda-product-dimension-table__chev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  font-size: 15px;
+  line-height: 1;
+  color: rgba(99, 102, 241, 0.55);
+  background: rgba(99, 102, 241, 0.06);
+  transition: color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.hmda-product-dimension-table__row:hover .hmda-product-dimension-table__chev,
+.hmda-product-dimension-table__row:focus-visible .hmda-product-dimension-table__chev {
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.12);
+  transform: translateX(1px);
+}
+
+.hmda-product-dimension-footnote {
+  margin: 0 0 8px;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  color: rgba(100, 116, 139, 0.88);
+}
+  display: none !important;
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-card--clean {
+  background: rgba(15, 23, 42, 0.58) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-card--blue .hmda-product-dimension-card__header {
+  background: linear-gradient(165deg, rgba(30, 58, 138, 0.28) 0%, transparent 88%);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-card--green .hmda-product-dimension-card__header {
+  background: linear-gradient(165deg, rgba(6, 78, 59, 0.28) 0%, transparent 88%);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-card__title,
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-table__category {
+  color: rgba(248, 250, 252, 0.94) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-table__head-cell {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-metric__value {
+  color: rgba(226, 232, 240, 0.88);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-table__row:hover,
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-table__row:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-footnote {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+@media (max-width: 720px) {
+  .hmda-product-dimension-table-scroll {
+    padding: 0 8px 12px;
+  }
+
+  .hmda-product-dimension-table__row {
+    padding: 9px 8px;
+  }
+
+  .hmda-product-dimension-metric__value {
+    font-size: 11px;
+  }
+}
+
+.hmda-product-dimension-drill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.hmda-product-dimension-drill-btn:hover {
+  background: rgba(248, 250, 252, 0.98);
+  border-color: rgba(99, 102, 241, 0.22);
+  color: #4338ca;
+}
+
+.hmda-product-dimension-drill-btn--primary {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border-color: transparent;
+  color: #fff;
+}
+
+.hmda-product-dimension-drill-btn--primary:hover {
+  background: linear-gradient(135deg, #4338ca, #4f46e5);
+  color: #fff;
+}
+
+.hmda-product-dimension-drill-btn--ghost {
+  background: transparent;
+}
+
+/* ── Product dimension drill modal (centered, dimension-card aesthetic) ── */
+.hmda-modal-overlay.hmda-modal-dimension-drill {
+  z-index: 102;
+  background: rgba(246, 249, 252, 0.75);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-modal-overlay.hmda-modal-dimension-drill {
+  background: rgba(2, 4, 18, 0.72);
+}
+
+.hmda-product-dimension-drill-modal {
+  border: none !important;
+  border-radius: 20px !important;
+  padding: 0 !important;
+  max-width: 640px;
+  width: min(96vw, 640px);
+  overflow: hidden;
+  box-shadow:
+    0 10px 40px rgba(15, 23, 42, 0.08),
+    0 4px 14px rgba(99, 102, 241, 0.06) !important;
+  background: rgba(255, 255, 255, 0.58) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-drill-modal {
+  background: rgba(15, 23, 42, 0.58) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35) !important;
+}
+
+.hmda-product-dimension-drill-modal::before {
+  content: none !important;
+}
+
+.hmda-product-dimension-drill-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 10px;
+  background: linear-gradient(165deg, rgba(238, 242, 255, 0.72) 0%, rgba(255, 255, 255, 0) 88%);
+  border: none;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-drill-modal__header {
+  background: linear-gradient(165deg, rgba(30, 58, 138, 0.28) 0%, transparent 88%);
+}
+
+.hmda-product-dimension-drill-modal__eyebrow {
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, rgba(100, 116, 139, 0.88));
+  margin-bottom: 4px;
+}
+
+.hmda-product-dimension-drill-modal__title {
+  margin: 0;
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  line-height: 1.32 !important;
+  color: var(--hmda-ds-text, #0f172a) !important;
+}
+
+.hmda-product-dimension-drill-modal__subtitle {
+  margin: 6px 0 0;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: rgba(100, 116, 139, 0.88);
+}
+
+.hmda-product-dimension-drill-modal__close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  background: rgba(99, 102, 241, 0.06);
+  color: rgba(99, 102, 241, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.hmda-product-dimension-drill-modal__close:hover {
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.hmda-product-dimension-drill-modal__body {
+  padding: 0 12px 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hmda-dimension-drill-metrics {
+  display: grid;
+  min-width: 480px;
+  width: 100%;
+  row-gap: 6px;
+}
+
+.hmda-dimension-drill-metrics__head,
+.hmda-dimension-drill-metrics__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: var(--hmda-pdim-row-cols);
+  align-items: center;
+}
+
+@supports (grid-template-columns: subgrid) {
+  .hmda-dimension-drill-metrics__head,
+  .hmda-dimension-drill-metrics__row {
+    grid-template-columns: subgrid;
+  }
+}
+
+.hmda-dimension-drill-metrics__head {
+  padding: 0 10px 8px;
+}
+
+.hmda-dimension-drill-metrics__row {
+  margin: 0 2px;
+  padding: 10px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-dimension-drill-metrics__row {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
+
+.hmda-product-dimension-drill-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  padding: 2px 20px 20px;
+  border: none;
+  background: transparent;
+}
+
+.hmda-dimension-drill-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: rgba(51, 65, 85, 0.88);
+  cursor: pointer;
+  transition: color 0.14s ease, transform 0.14s ease;
+}
+
+.hmda-dimension-drill-action-link:hover {
+  color: #4338ca;
+}
+
+.hmda-dimension-drill-action-link--primary {
+  color: #4f46e5;
+}
+
+.hmda-dimension-drill-action-link--primary:hover {
+  color: #4338ca;
+  transform: translateX(1px);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-dimension-drill-action-link {
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-dimension-drill-action-link--primary {
+  color: rgba(165, 180, 252, 0.96);
+}
+
+.hmda-geo-dimension-context-panel {
+  margin: 0 0 16px;
+  border: none;
+  border-radius: 20px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow:
+    0 10px 40px rgba(15, 23, 42, 0.08),
+    0 4px 14px rgba(99, 102, 241, 0.06);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-geo-dimension-context-panel {
+  background: rgba(15, 23, 42, 0.58);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+
+.hmda-geo-dimension-context-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 10px;
+  background: linear-gradient(165deg, rgba(238, 242, 255, 0.72) 0%, rgba(255, 255, 255, 0) 88%);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-geo-dimension-context-panel__header {
+  background: linear-gradient(165deg, rgba(30, 58, 138, 0.28) 0%, transparent 88%);
+}
+
+.hmda-geo-dimension-context-panel__title {
+  margin: 0;
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  line-height: 1.32 !important;
+  color: var(--hmda-ds-text, #0f172a) !important;
+}
+
+.hmda-geo-dimension-context-panel__clear {
+  flex-shrink: 0;
+  border: none;
+  background: rgba(99, 102, 241, 0.06);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(99, 102, 241, 0.72);
+  cursor: pointer;
+  transition: color 0.14s ease, background 0.14s ease;
+}
+
+.hmda-geo-dimension-context-panel__clear:hover {
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.hmda-geo-dimension-context-panel__body {
+  padding: 0 12px 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-geo-dimension-context-panel__title {
+  color: rgba(248, 250, 252, 0.94) !important;
+}
+
+@media (max-width: 640px) {
+  .hmda-product-dimension-drill-modal__header {
+    padding: 16px 16px 8px;
+  }
+
+  .hmda-product-dimension-drill-modal__actions {
+    padding: 0 16px 16px;
+  }
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-drill-modal__title {
+  color: rgba(248, 250, 252, 0.94) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-drill-modal__subtitle,
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-drill-modal__metric-label {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+.hmda-geo-dimension-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(219, 234, 254, 0.55);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  font-size: 12px;
+  color: #334155;
+}
+
+.hmda-geo-dimension-context__clear {
+  border: none;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  color: #4338ca;
+  cursor: pointer;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-geo-dimension-context {
+  background: rgba(30, 58, 138, 0.28);
+  border-color: rgba(129, 140, 248, 0.22);
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-product-dimension-drill-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(226, 232, 240, 0.9);
+}
+
+/* ── Geography map chrome (borderless frost, white type on aerial) ─── */
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar--elevated,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar--minimal {
+  background-color: rgba(255, 255, 255, 0.34) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: none !important;
+  border-radius: 20px !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  padding: 8px 14px !important;
+  gap: 8px !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar--elevated,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar--minimal,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar--elevated,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar--minimal {
+  background-color: rgba(15, 23, 42, 0.38) !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.28) !important;
+  backdrop-filter: blur(20px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(165%) !important;
+  color: rgba(255, 255, 255, 0.96) !important;
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap .hmda-geo-toolbar-search__select,
+.hmda-geo-mapbox-wrap .hmda-geo-metric-trigger,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip--stack,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-layer-toggle,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-text-scale-btn,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn {
+  background: rgba(255, 255, 255, 0.22) !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 999px !important;
+  font-weight: 500 !important;
+  backdrop-filter: blur(10px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease !important;
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap .hmda-geo-toolbar-search__select {
+  border-radius: 10px !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-toolbar-search__select,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-metric-trigger,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip--stack,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-layer-toggle,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-text-scale-btn,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-toolbar-search__select,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-metric-trigger,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip--stack,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-layer-toggle,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-text-scale-btn,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.94) !important;
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip:hover,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip--stack:hover,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-layer-toggle:hover:not(:disabled),
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-text-scale-btn:hover,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn:hover,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn:hover,
+.hmda-geo-mapbox-wrap .hmda-geo-metric-trigger:hover {
+  background: rgba(255, 255, 255, 0.38) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip:hover,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip--stack:hover,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-layer-toggle:hover:not(:disabled),
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-text-scale-btn:hover,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn:hover,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn:hover,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-metric-trigger:hover,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip:hover,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip--stack:hover,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-layer-toggle:hover:not(:disabled),
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-text-scale-btn:hover,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn:hover,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn:hover,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-metric-trigger:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+  color: #fff !important;
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip.is-active,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip--stack.is-active,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-layer-toggle.is-active {
+  background: rgba(255, 255, 255, 0.48) !important;
+  background-image: none !important;
+  border: none !important;
+  color: #4338ca !important;
+  box-shadow: none !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip.is-active,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip--stack.is-active,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-layer-toggle.is-active,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip.is-active,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip--stack.is-active,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-layer-toggle.is-active {
+  background: rgba(255, 255, 255, 0.22) !important;
+  background-image: none !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(15, 23, 42, 0.08) !important;
+  opacity: 0.6 !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar__sep,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar__sep {
+  background: rgba(255, 255, 255, 0.18) !important;
+  opacity: 1 !important;
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__label,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-layer-toggle__label,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip__text,
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-chip--stack .hmda-geo-mapbox-chip__text {
+  font-size: calc(10px * var(--geo-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+}
+
+.hmda-geo-mapbox-wrap--text-large .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap--text-large .hmda-geo-toolbar-search__select,
+.hmda-geo-mapbox-wrap--text-large .hmda-geo-metric-trigger,
+.hmda-geo-mapbox-wrap--text-xlarge .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap--text-xlarge .hmda-geo-toolbar-search__select,
+.hmda-geo-mapbox-wrap--text-xlarge .hmda-geo-metric-trigger {
+  font-size: calc(12px * var(--geo-ui-scale, 1)) !important;
+}
+
+.hmda-geo-mapbox-wrap--text-large .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn,
+.hmda-geo-mapbox-wrap--text-large .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn,
+.hmda-geo-mapbox-wrap--text-xlarge .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn,
+.hmda-geo-mapbox-wrap--text-xlarge .hmda-geo-mapbox-toolbar__actions .hmda-geo-view-btn {
+  font-size: calc(11px * var(--geo-ui-scale, 1)) !important;
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__label {
+  color: rgba(100, 116, 139, 0.88) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar__label,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar__label,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-layer-toggle,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-layer-toggle,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-chip--stack,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-chip--stack,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-metric-trigger,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-metric-trigger,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-toolbar-search__input,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-toolbar-search__select,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-toolbar-search__select {
+  color: rgba(255, 255, 255, 0.94) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-toolbar__label,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-toolbar__label {
+  color: rgba(255, 255, 255, 0.68) !important;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-toolbar-search__glyph,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-toolbar-search__glyph,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-metric-trigger__chev,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-metric-trigger__chev,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-metric-trigger__icon,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-metric-trigger__icon {
+  color: rgba(255, 255, 255, 0.78) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-layer-toggle__well,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-layer-toggle__well,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-metric-trigger__glyph-well,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-metric-trigger__glyph-well,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-toolbar-icon-well,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-toolbar-icon-well {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.hmda-geo-mapbox-fs-btn,
+.hmda-geo-mapbox-wrap .mapboxgl-ctrl-group {
+  background-color: rgba(255, 255, 255, 0.34) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: 1px solid rgba(255, 255, 255, 0.52) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-geo-mapbox-wrap .mapboxgl-ctrl-group button {
+  border: none !important;
+  background: transparent !important;
+}
+
+.hmda-geo-mapbox-wrap .mapboxgl-ctrl-group button + button {
+  border-top: 1px solid rgba(255, 255, 255, 0.35) !important;
+}
+
+.hmda-geo-mapbox-fs-btn {
+  color: #475569 !important;
+}
+
+.hmda-geo-mapbox-fs-btn:hover {
+  background-color: rgba(255, 255, 255, 0.48) !important;
+  border-color: rgba(255, 255, 255, 0.68) !important;
+  color: #4f46e5 !important;
+  transform: translateY(-1px);
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-mapbox-fs-btn,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-mapbox-fs-btn,
+.hmda-geo-mapbox-wrap--basemap-satellite .mapboxgl-ctrl-group,
+.hmda-geo-mapbox-wrap--satellite .mapboxgl-ctrl-group {
+  background-color: rgba(15, 23, 42, 0.38) !important;
+  background-image: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: rgba(255, 255, 255, 0.94) !important;
+  backdrop-filter: blur(18px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%) !important;
+}
+
+.hmda-geo-hover-card {
+  background-color: rgba(255, 255, 255, 0.34) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: 1px solid rgba(255, 255, 255, 0.52) !important;
+  border-radius: 22px !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card {
+  background-color: rgba(15, 23, 42, 0.42) !important;
+  background-image: none !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(22px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(165%) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__title,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__title,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__hero-value,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__hero-value,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__stat-v,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__stat-v {
+  color: rgba(255, 255, 255, 0.96) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__hero-label,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__hero-label,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__stat-label,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__stat-label,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__badge,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__badge,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__subtitle,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__subtitle,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__footnote,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__footnote {
+  color: rgba(255, 255, 255, 0.68) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__subtitle,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__subtitle {
+  color: rgba(226, 232, 240, 0.88) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__lender-rank,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__lender-rank {
+  color: rgba(199, 210, 254, 0.88) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__nav-btn,
+.hmda-geo-mapbox-wrap--satellite .hmda-geo-hover-card__nav-btn {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.hmda-geo-hover-card__head {
+  background: transparent !important;
+  border-bottom: none !important;
+  padding: 18px 18px 10px !important;
+}
+
+.hmda-geo-hover-card__scroll {
+  padding: 0 16px 14px !important;
+}
+
+.hmda-geo-hover-card__title {
+  font-weight: 700 !important;
+  letter-spacing: -0.025em !important;
+  font-size: 21px !important;
+  line-height: 1.28 !important;
+}
+
+.hmda-geo-hover-card__subtitle {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  line-height: 1.35 !important;
+  color: #475569 !important;
+}
+
+.hmda-geo-hover-card__badge {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  opacity: 0.88;
+}
+
+.hmda-geo-hover-card__close {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 10px !important;
+  opacity: 0.65;
+}
+
+.hmda-geo-hover-card__close:hover {
+  background: rgba(255, 255, 255, 0.22) !important;
+  opacity: 1;
+}
+
+.hmda-geo-hover-card__icon-well {
+  background: transparent !important;
+  border: none !important;
+}
+
+.hmda-geo-hover-card__hero,
+.hmda-geo-hover-card__income,
+.hmda-geo-hover-card__stat,
+.hmda-geo-hover-card__lenders-toggle,
+.hmda-geo-hover-card__tract-list li,
+.hmda-geo-hover-card__lender-list li,
+.hmda-geo-hover-card__tract-note,
+.hmda-geo-hover-card__empty {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-geo-hover-card__hero {
+  margin: 8px 0 12px !important;
+  padding: 0 !important;
+  gap: 12px !important;
+}
+
+.hmda-geo-hover-card__hero-label {
+  font-size: 10px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: rgba(100, 116, 139, 0.9) !important;
+}
+
+.hmda-geo-hover-card__hero-value {
+  font-size: 28px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.04em !important;
+}
+
+.hmda-geo-hover-card__stats {
+  gap: 10px !important;
+}
+
+.hmda-geo-hover-card__stat {
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+.hmda-geo-hover-card__stat:hover {
+  background: transparent !important;
+}
+
+.hmda-geo-hover-card__stat-label {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: rgba(100, 116, 139, 0.92) !important;
+}
+
+.hmda-geo-hover-card__stat-v {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+.hmda-geo-hover-card__income {
+  margin: 10px 0 !important;
+  padding: 0 !important;
+}
+
+.hmda-geo-hover-card__lenders,
+.hmda-geo-hover-card__tracts {
+  margin-top: 14px !important;
+  padding-top: 0 !important;
+  border-top: none !important;
+}
+
+.hmda-geo-hover-card__lenders-toggle {
+  padding: 6px 0 !important;
+  border-radius: 0 !important;
+}
+
+.hmda-geo-hover-card__lenders-toggle:hover {
+  background: transparent !important;
+  opacity: 0.82;
+}
+
+.hmda-geo-hover-card__tract-list li,
+.hmda-geo-hover-card__lender-list li {
+  padding: 6px 0 !important;
+  border-radius: 0 !important;
+}
+
+.hmda-geo-hover-card__lender-rank {
+  background: transparent !important;
+  border-radius: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: rgba(99, 102, 241, 0.75) !important;
+  justify-content: flex-start !important;
+}
+
+.hmda-geo-hover-card__tract-location {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 8px 0 !important;
+}
+
+.hmda-geo-hover-card__nav-btn {
+  background: rgba(255, 255, 255, 0.32) !important;
+  border: none !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+}
+
+.hmda-geo-hover-card__footnote,
+.hmda-geo-hover-card__tract-note {
+  padding: 0 !important;
+  margin-top: 10px !important;
+  font-size: 10px !important;
+  line-height: 1.45 !important;
+  color: rgba(100, 116, 139, 0.88) !important;
+}
+
+/* State ranking cards — clean glass grid */
+.hmda-premium-exec.hmda-route-shell .hmda-geo-state-card--clean.card-glass {
+  background-color: rgba(255, 255, 255, 0.34) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: 1px solid rgba(255, 255, 255, 0.52) !important;
+  border-radius: 22px !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-geo-state-card--clean.card-glass {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-geo-state-card--clean:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 20px 50px rgba(15, 23, 42, 0.1) !important;
+}
+
+.hmda-geo-state-card__rank {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(99, 102, 241, 0.75);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.hmda-geo-state-card__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 20px;
+  margin-bottom: 14px;
+}
+
+.hmda-geo-state-card__metric-label {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted);
+  margin-bottom: 4px;
+}
+
+.hmda-geo-state-card__metric-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: -0.03em;
+  color: var(--hmda-glass-text);
+  line-height: 1.1;
+}
+
+.hmda-geo-state-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hmda-geo-state-card__meta {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-geo-mapbox-wrap .hmda-geo-mapbox-toolbar__actions .hmda-geo-premium-btn--primary {
+  background: rgba(79, 70, 229, 0.92) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 999px !important;
+  padding-inline: 14px !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__hero-label,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__stat-label,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__lenders-toggle-hint,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__lender-meta {
+  color: rgba(203, 213, 225, 0.82) !important;
+}
+
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__hero-value,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__stat-v,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__lenders-toggle-label,
+.hmda-geo-mapbox-wrap--basemap-satellite .hmda-geo-hover-card__lender-name {
+  color: #f8fafc !important;
+}
+
+.hmda-geo-state-grid {
+  gap: 16px !important;
+}
+
+/* Re-enable glass blur when sprinkle shell disabled it on chrome */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'] nav.hmda-nav.hmda-nav-pastel,
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'] .hmda-filter-toolbar-pastel,
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'] .hmda-filter-bar .toolbar-shell:not(.hmda-hero-toolbar) {
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-results-panel .hmda-results-grid-card .hmda-heading-2 {
+  color: var(--hmda-glass-text) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-results-panel .hmda-results-grid-card .hmda-lcard-inst-chip {
+  color: var(--hmda-glass-text-muted) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-product-card .hmda-heading-2,
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-product-card p {
+  color: var(--hmda-glass-text-secondary) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-lenders-pagination-bar {
+  background: var(--hmda-ds-glass-bg) !important;
+  border: 1px solid var(--hmda-ds-glass-border) !important;
+  border-radius: var(--hmda-glass-radius-md) !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card,
+  .hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card:hover {
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .hmda-premium-exec.hmda-route-shell .hmda-nav.hmda-nav-pastel,
+  .hmda-premium-exec.hmda-route-shell .hmda-filter-toolbar-pastel {
+    border-radius: 14px !important;
+  }
+
+  .hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card {
+    border-radius: 16px !important;
+  }
+}
+
+/* ── Clean lender grid cards (borderless shell, outer shadow only) ─── */
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card--clean {
+  background: var(--hmda-glass-card-bg) !important;
+  border: none !important;
+  border-radius: var(--hmda-glass-radius-lg) !important;
+  box-shadow: var(--hmda-glass-card-shadow-outer) !important;
+  backdrop-filter: blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card--clean .hmda-results-grid-card-inner {
+  padding: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-results-grid-card-head {
+  padding: 18px 20px 14px !important;
+  background: transparent !important;
+  border-bottom: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-results-grid-card-head--minimal {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 10px 14px !important;
+  margin-bottom: 0 !important;
+  min-height: 52px !important;
+  box-sizing: border-box !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-results-grid-card-head--minimal .hmda-results-list-name-minimal {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-head-tail-minimal {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-pin--icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  cursor: pointer;
+  opacity: 0.72;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-pin--icon-only:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card-open-chevron {
+  opacity: 0.35;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card-head--minimal:hover .hmda-results-grid-card-open-chevron {
+  opacity: 0.85;
+  transform: translateX(1px);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-results-grid-card-body.hmda-results-grid-card-sheet {
+  margin: 0 !important;
+  padding: 0 20px 18px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-lcard-leading-well--clean {
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-lcard-leading-rank {
+  font-family: var(--hmda-ds-font-mono, var(--font-mono)) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.04em !important;
+  opacity: 0.5;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='light'] .hmda-results-grid-card--clean .hmda-lcard-leading-rank {
+  color: #64748b !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-heading-2.hmda-lcard-title {
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  line-height: 1.32 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-lcard-sub {
+  gap: 6px 10px !important;
+  margin-top: 5px !important;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-lcard-inst-chip {
+  font-weight: 500 !important;
+  letter-spacing: 0.05em !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-results-grid-pin {
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  opacity: 0.7;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-results-grid-pin:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-lcard-metric-clean {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hmda-lcard-metric-clean--end {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.hmda-lcard-metric-clean__label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted);
+  line-height: 1.2;
+}
+
+.hmda-lcard-metric-clean__value {
+  font-size: 22px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--hmda-glass-text);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-grid-card-stat-band {
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 0 8px !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-lcard-stat-clean {
+  border: none !important;
+  background: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-lcard-metrics-row--clean > span > div {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-grid-card--clean .hmda-product-chips--muted .hmda-product-chip--muted {
+  border: none !important;
+  background: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-product-chips--muted .hmda-product-chip--muted {
+  border: none !important;
+  background: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-product-chips--muted .hmda-product-chip-icon {
+  flex-shrink: 0;
+}
+
+/* Grid card accordion — icon well, sub-header, plus toggle */
+.hmda-results-grid-card--accordion .hmda-results-grid-card-head--interactive {
+  cursor: pointer;
+}
+
+.hmda-results-grid-card--accordion .hmda-results-grid-card-head--interactive:hover {
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.hmda-results-grid-card-open-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  flex-shrink: 0;
+}
+
+.hmda-results-grid-pin--labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.hmda-action-pin-icon {
+  flex-shrink: 0;
+  opacity: 0.78;
+}
+
+.hmda-action-pin-icon--active {
+  opacity: 1;
+}
+
+.hmda-results-grid-card-body--accordion {
+  padding: 0 16px 14px !important;
+}
+
+.hmda-lender-card-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.hmda-lender-card-accordion-item {
+  border-top: 1px solid rgba(15, 23, 42, 0.06) !important;
+  border-bottom: 0 !important;
+  padding: 2px 0 !important;
+  background: transparent !important;
+}
+
+.hmda-lender-card-accordion-item:first-child {
+  border-top: 0 !important;
+}
+
+.hmda-lender-card-accordion-trigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--hmda-glass-text, #334155);
+  font-family: inherit;
+}
+
+.hmda-lender-card-accordion-trigger:hover {
+  color: var(--hmda-glass-accent, #4f46e5);
+}
+
+.hmda-lender-card-accordion-icon-well {
+  display: flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.45);
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-card-accordion-sub {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-card-accordion-content {
+  padding: 0 0 10px 3.25rem !important;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-card-accordion-content > div {
+  padding-top: 2px;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-results-grid-card--accordion .hmda-results-grid-card-head--interactive:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-card-accordion-item {
+  border-top-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-card-accordion-icon-well {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-results-panel .hmda-results-grid-card--clean:hover:not(.hmda-results-list-card--minimal) {
+  transform: translateY(-3px);
+  border: none !important;
+  box-shadow: var(--hmda-glass-card-shadow-outer-hover) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark']
+  .hmda-results-panel
+  .hmda-results-grid-card--clean:hover:not(.hmda-results-list-card--minimal) {
+  border: none !important;
+  box-shadow: var(--hmda-glass-card-shadow-outer-hover) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='light'] .hmda-results-panel .hmda-results-grid-card--clean .hmda-heading-2 {
+  color: #0f172a !important;
+  font-weight: 500 !important;
+}
+
+/* ── Lender detail modal — same clean shell as grid cards ───────────── */
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean {
+  background: var(--hmda-glass-card-bg) !important;
+  border: none !important;
+  border-radius: var(--hmda-glass-radius-lg) !important;
+  box-shadow: var(--hmda-glass-card-shadow-outer) !important;
+  backdrop-filter: blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+}
+
+.hmda-lender-modal-panel--clean.hmda-modal-pastel-accent::before {
+  display: none !important;
+}
+
+.hmda-lcard-legal-glass {
+  margin-top: 8px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  max-width: 100%;
+  padding: 7px 12px;
+  border-radius: 12px;
+  border: none;
+  background: var(--hmda-glass-control-bg, rgba(255, 255, 255, 0.42));
+  backdrop-filter: blur(14px) saturate(145%);
+  -webkit-backdrop-filter: blur(14px) saturate(145%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lcard-legal-glass__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hmda-lcard-legal-glass__label {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.hmda-lcard-legal-glass__value {
+  font-weight: 500;
+  color: var(--hmda-glass-text, #334155);
+  word-break: break-word;
+}
+
+.hmda-lcard-legal-glass__sep {
+  opacity: 0.28;
+  user-select: none;
+  font-weight: 600;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lcard-legal-glass {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lcard-legal-glass__value {
+  color: rgba(226, 232, 240, 0.88);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-legal-glass {
+  margin-top: 8px;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-results-grid-card-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-results-grid-card-head,
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lender-modal-header,
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lender-modal-header-inner {
+  background: transparent !important;
+  border: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-results-grid-card-head {
+  padding: 14px 16px 12px !important;
+  flex-shrink: 0;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lender-modal-header-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 0 !important;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hmda-lender-modal-header-inner--merged {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px 14px;
+  width: 100%;
+}
+
+.hmda-lender-modal-header-inner--merged.hmda-lender-modal-header-inner--compact {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.hmda-lender-modal-header-primary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.hmda-lender-modal-header-inner--merged.hmda-lender-modal-header-inner--compact .hmda-lender-modal-header-primary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.hmda-lender-modal-header-inner--merged.hmda-lender-modal-header-inner--compact
+  .hmda-lender-modal-header-primary
+  > .hmda-lcard-leading-well {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.hmda-lender-modal-header-inner--merged.hmda-lender-modal-header-inner--compact
+  .hmda-lender-modal-header-primary
+  > .hmda-lcard-main {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.hmda-lender-modal-header-inner--merged.hmda-lender-modal-header-inner--compact
+  .hmda-lender-modal-header-primary:not(:has(.hmda-lcard-leading-well))
+  > .hmda-lcard-main {
+  grid-column: 1 / 3;
+}
+
+.hmda-lender-modal-header-inner--merged.hmda-lender-modal-header-inner--compact
+  .hmda-lender-modal-header-primary
+  > .hmda-lender-modal-header-toolbar {
+  grid-column: 3;
+  grid-row: 1;
+  margin-left: 0;
+  justify-self: end;
+  align-self: start;
+}
+
+.hmda-lender-modal-header-toolbar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-top: 2px;
+}
+
+.hmda-lender-modal-header-toolbar > span {
+  display: inline-flex;
+  align-items: center;
+}
+
+.hmda-lender-modal-header-inner--merged .hmda-lcard-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.hmda-lender-modal-header-kpis {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(12px, 1.4vw, 22px);
+  flex-shrink: 0;
+  padding: 0 2px;
+  min-width: 0;
+}
+
+.hmda-lender-modal-header-kpis--strip {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px 10px;
+  width: 100%;
+  justify-content: stretch;
+  padding: 16px 0 8px;
+  margin-top: 35px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.hmda-lender-modal-header-kpis--strip .hmda-lender-modal-header-kpi {
+  align-items: center;
+  text-align: center;
+  width: 100%;
+}
+
+.hmda-lender-modal-header-kpis--strip .hmda-lender-modal-header-kpi__value {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.hmda-lender-modal-header-kpis--mobile,
+.hmda-lender-modal-panel--dense .hmda-lender-modal-header-kpis:not(.hmda-lender-modal-header-kpis--strip) {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  width: 100%;
+  justify-content: space-between;
+  grid-column: 1 / -1;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-header-kpis--strip {
+  margin-top: 0;
+  padding-top: 10px;
+  border-top: 0;
+}
+
+.hmda-lender-modal-header-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  cursor: help;
+}
+
+.hmda-lender-modal-header-kpi__label {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.hmda-lender-modal-header-kpi__value {
+  font-size: clamp(12px, 0.55vw + 10px, 14px);
+  font-weight: 600;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  color: var(--hmda-glass-text, #0f172a);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.hmda-lender-modal-accordion-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 2px 0 8px;
+}
+
+.hmda-lender-modal-expand-all-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--hmda-glass-text-muted, #64748b);
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.14s ease;
+}
+
+.hmda-lender-modal-expand-all-btn:hover {
+  color: var(--hmda-glass-accent, #4f46e5);
+  background: color-mix(in srgb, var(--hmda-glass-accent, #6366f1) 8%, #fff);
+  border-color: color-mix(in srgb, var(--hmda-glass-accent, #6366f1) 22%, transparent);
+}
+
+.hmda-lender-modal-expand-all-btn[aria-expanded='true'] {
+  color: var(--hmda-glass-accent, #4f46e5);
+  background: color-mix(in srgb, var(--hmda-glass-accent, #6366f1) 10%, #fff);
+  border-color: color-mix(in srgb, var(--hmda-glass-accent, #6366f1) 24%, transparent);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lender-modal-body {
+  padding: 0 !important;
+  background: transparent !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-results-grid-card-body.hmda-results-grid-card-sheet {
+  margin: 0 !important;
+  padding: 0 20px 16px !important;
+  flex-shrink: 0;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lender-modal-body-inner--extended {
+  padding: 4px 20px 18px !important;
+  margin-top: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-trailing,
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-trailing--row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-trailing-actions {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-leading-well--clean {
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  flex-shrink: 0;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-leading-rank {
+  font-family: var(--hmda-ds-font-mono, var(--font-mono)) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.04em !important;
+  opacity: 0.5;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-heading-2.hmda-lcard-title {
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  line-height: 1.32 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px !important;
+  margin-top: 5px !important;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-inst-chip {
+  font-weight: 500 !important;
+  letter-spacing: 0.05em !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-results-grid-pin {
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  opacity: 0.7;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-results-grid-pin:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-lender-modal-close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  background: transparent;
+  color: rgba(100, 116, 139, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color 0.14s ease,
+    background 0.14s ease,
+    opacity 0.14s ease;
+}
+
+.hmda-lender-modal-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hmda-lender-modal-close:hover {
+  color: rgba(51, 65, 85, 0.92);
+  background: var(--hmda-glass-control-bg, rgba(255, 255, 255, 0.42));
+  opacity: 1;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lender-modal-close {
+  opacity: 0.72;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-grid-card-stat-band {
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 0 8px !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-stat-clean {
+  border: none !important;
+  background: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-metrics-row--clean > span > div {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-product-chips--muted .hmda-product-chip--muted {
+  border: none !important;
+  background: transparent !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='light'] .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-heading-2 {
+  color: #0f172a !important;
+  font-weight: 500 !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='light'] .hmda-modal-lender .hmda-lender-modal-panel--clean .hmda-lcard-leading-rank {
+  color: #64748b !important;
+}
+
+/* ── Lender modal — modern layout (sticky header, scroll body, KPI hero) ─ */
+.hmda-lender-modal-panel--modern {
+  width: min(680px, calc(100vw - 32px)) !important;
+  max-width: min(680px, calc(100vw - 32px)) !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.05),
+    0 20px 40px -16px rgba(15, 23, 42, 0.16),
+    0 8px 20px -10px rgba(79, 70, 229, 0.08) !important;
+}
+
+.hmda-lender-modal-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hmda-lender-modal-panel--modern .hmda-lender-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 14px 16px 12px !important;
+  background: color-mix(in srgb, var(--hmda-glass-card-bg, #fff) 94%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06) !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset;
+}
+
+.hmda-lender-modal-title {
+  margin: 0;
+  font-size: clamp(1rem, 1.1vw + 0.65rem, 1.125rem) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1.28 !important;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hmda-lender-modal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hmda-lender-modal-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: var(--hmda-glass-text-muted, #64748b);
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  white-space: nowrap;
+  max-width: 100%;
+  cursor: default;
+  transform-origin: left center;
+  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+.hmda-lender-modal-meta-chip:hover {
+  transform: scale(1.45);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
+  color: var(--hmda-glass-text, #0f172a);
+  z-index: 10;
+  position: relative;
+}
+
+.hmda-lender-modal-meta-chip--mono {
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+
+.hmda-lender-modal-meta-chip--accent {
+  color: var(--hmda-glass-accent, #4f46e5);
+  background: color-mix(in srgb, var(--hmda-glass-accent, #4f46e5) 8%, transparent);
+  border-color: color-mix(in srgb, var(--hmda-glass-accent, #4f46e5) 18%, transparent);
+}
+
+.hmda-lender-modal-meta-chip--type--imb {
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.14);
+}
+
+.hmda-lender-modal-meta-chip--type--bank {
+  color: #6d28d9;
+  background: rgba(124, 58, 237, 0.08);
+  border-color: rgba(124, 58, 237, 0.14);
+}
+
+.hmda-lender-modal-meta-chip--type--cu {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.08);
+  border-color: rgba(15, 118, 110, 0.14);
+}
+
+.hmda-lender-modal-meta-chip--link {
+  text-decoration: none;
+  color: var(--hmda-glass-accent, #4f46e5);
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.hmda-lender-modal-meta-chip--link:hover {
+  background: color-mix(in srgb, var(--hmda-glass-accent, #4f46e5) 12%, transparent);
+  border-color: color-mix(in srgb, var(--hmda-glass-accent, #4f46e5) 28%, transparent);
+}
+
+.hmda-lender-modal-meta-chip__icon {
+  display: inline-flex;
+  opacity: 0.88;
+}
+
+.hmda-lender-modal-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.hmda-lender-modal-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.hmda-lender-modal-panel--modern .hmda-lender-modal-body {
+  padding: 0 14px 16px !important;
+}
+
+.hmda-lender-modal-panel--modern .hmda-lender-modal-body--accordion {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.hmda-lender-modal-section-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px 10px;
+  margin: 0;
+}
+
+.hmda-lender-modal-section-label--span {
+  grid-column: 1 / -1;
+  padding-top: 6px;
+}
+
+.hmda-lender-modal-section-label__text {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #64748b);
+  flex-shrink: 0;
+}
+
+.hmda-lender-modal-section-label__rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.1), transparent);
+}
+
+.hmda-lender-modal-section-label__aside {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  flex-shrink: 0;
+}
+
+.hmda-lender-modal-production__sheet {
+  padding: 0 20px 18px !important;
+}
+
+.hmda-lender-modal-hero-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 28px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.72) 0%, rgba(248, 250, 252, 0.55) 100%);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.hmda-lender-modal-hero-metrics--stack {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.hmda-lender-modal-panel--modern .hmda-lender-modal-body-inner--extended {
+  padding: 0 20px 8px !important;
+  margin-top: 0 !important;
+  border-top: none !important;
+  gap: 12px 20px !important;
+}
+
+.hmda-lender-modal-lar-card {
+  margin-bottom: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--hmda-glass-control-bg, rgba(255, 255, 255, 0.5));
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.hmda-lender-modal-lar-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  cursor: help;
+}
+
+.hmda-lender-modal-lar-card__title {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-modal-lar-card__year {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  color: var(--hmda-glass-accent, #4f46e5);
+  opacity: 0.9;
+}
+
+.hmda-lender-modal-lar-card__note {
+  margin: 0 0 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-modal-lar-card__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.hmda-lender-modal-lar-card__grid--mobile {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hmda-lender-modal-lar-card__grid--single {
+  grid-template-columns: 1fr;
+}
+
+.hmda-lender-modal-pipeline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel .hmda-lender-modal-pullthrough-hero {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0;
+  padding: 16px 4px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: none;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel .hmda-lender-modal-lar-card {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel .hmda-lender-modal-lar-card__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hmda-lender-modal-pipeline-formula {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-modal-pipeline-formula--callout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(79, 70, 229, 0.06);
+  border: 1px solid rgba(79, 70, 229, 0.12);
+}
+
+.hmda-lender-modal-pipeline-formula__eq {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--hmda-glass-text, #334155);
+}
+
+.hmda-lender-modal-pipeline-formula__note {
+  font-size: 10px;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-modal-pullthrough-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px 20px;
+  align-items: center;
+  padding: 16px 4px;
+  margin-bottom: 4px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: none;
+  cursor: help;
+}
+
+.hmda-lender-modal-pullthrough-hero__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hmda-lender-modal-pullthrough-hero__label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-accent, #4f46e5);
+}
+
+.hmda-lender-modal-pullthrough-hero__value {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  letter-spacing: -0.03em;
+  color: var(--hmda-glass-text, #0f172a);
+  line-height: 1;
+}
+
+.hmda-lender-modal-pullthrough-hero__formula {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  color: var(--hmda-glass-text, #334155);
+}
+
+.hmda-lender-modal-pullthrough-hero__op {
+  opacity: 0.45;
+  font-weight: 700;
+}
+
+.hmda-lender-modal-pullthrough-hero__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+  min-width: 0;
+}
+
+.hmda-lender-modal-pullthrough-hero__side-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-modal-pullthrough-hero__side-value {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  color: var(--hmda-glass-text, #334155);
+}
+
+.hmda-lender-modal-pullthrough-hero__side-sub {
+  font-size: 9px;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-modal-pipeline-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--hmda-glass-inset, rgba(248, 250, 252, 0.42));
+  border: 1px solid var(--hmda-glass-inset-border, rgba(15, 23, 42, 0.06));
+}
+
+.hmda-lender-modal-pipeline-links__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hmda-lender-modal-pipeline-links__meta-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  flex-shrink: 0;
+}
+
+.hmda-lender-modal-pipeline-links__meta-value {
+  font-size: 10px;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  font-weight: 600;
+  color: var(--hmda-glass-text, #334155);
+  word-break: break-all;
+}
+
+.hmda-lender-modal-pipeline-links__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.hmda-lender-modal-pipeline-links__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--hmda-glass-accent, #4f46e5);
+  background: rgba(79, 70, 229, 0.08);
+  border: 1px solid rgba(79, 70, 229, 0.14);
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.hmda-lender-modal-pipeline-links__link:hover {
+  background: rgba(79, 70, 229, 0.14);
+  border-color: rgba(79, 70, 229, 0.24);
+}
+
+.hmda-lender-modal-sources-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hmda-lender-modal-pipeline-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 14px;
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  background: transparent;
+}
+
+.hmda-lender-modal-pipeline-sources__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hmda-lender-modal-pipeline-sources__label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-modal-pipeline-sources__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hmda-lender-modal-pipeline-sources__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  color: var(--hmda-glass-accent, #4f46e5);
+  background: rgba(79, 70, 229, 0.08);
+  border: 1px solid rgba(79, 70, 229, 0.16);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.hmda-lender-modal-pipeline-sources__chip:hover {
+  background: rgba(79, 70, 229, 0.14);
+  border-color: rgba(79, 70, 229, 0.28);
+}
+
+.hmda-lender-modal-pipeline-sources__chip--muted {
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.18);
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .hmda-lender-modal-pullthrough-hero {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .hmda-lender-modal-pullthrough-hero__formula {
+    grid-column: 1 / -1;
+  }
+
+  .hmda-lender-modal-pullthrough-hero__side {
+    align-items: flex-start;
+    text-align: left;
+  }
+}
+
+.hmda-lender-modal-lar-card__fallout {
+  margin-top: 8px;
+}
+
+.hmda-lender-modal-metric-cell {
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-lender-modal-metric-cell--accent .hmda-lender-modal-metric-cell__value {
+  color: var(--hmda-glass-accent, #4f46e5);
+}
+
+.hmda-lender-modal-metric-cell--danger .hmda-lender-modal-metric-cell__value {
+  color: #dc2626;
+}
+
+.hmda-lender-modal-metric-cell__label {
+  display: block;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-modal-metric-cell__value {
+  display: block;
+  margin-top: 3px;
+  font-size: 14px;
+  font-weight: 800;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  line-height: 1.2;
+  color: var(--hmda-glass-text, #334155);
+}
+
+.hmda-lender-modal-metric-cell__sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-modal-notice {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.hmda-lender-modal-notice--compact {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 10px;
+}
+
+.hmda-lender-modal-inset {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: rgba(15, 23, 42, 0.03);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-lender-modal-inset--muted {
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-modal-inset--flush {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.hmda-lender-modal-accordion-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.02);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  text-align: left;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.hmda-lender-modal-accordion-trigger:hover {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+.hmda-lender-modal-accordion-trigger--accent {
+  border-color: color-mix(in srgb, var(--hmda-glass-accent, #4f46e5) 22%, transparent);
+  background: color-mix(in srgb, var(--hmda-glass-accent, #4f46e5) 6%, transparent);
+}
+
+.hmda-lender-modal-accordion-trigger__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hmda-lender-modal-accordion-trigger__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.hmda-lender-modal-accordion-chev {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.65;
+  transition: transform 0.2s ease;
+}
+
+.hmda-lender-modal-disclaimer {
+  margin: 8px 0 0;
+}
+
+.hmda-lender-modal-footnote {
+  margin: 0 0 14px;
+  padding: 0 2px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.hmda-lender-modal-footnote-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--modern {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 24px 48px -12px rgba(0, 0, 0, 0.45) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--modern .hmda-lender-modal-header {
+  background: color-mix(in srgb, var(--hmda-glass-card-bg, #0f172a) 94%, transparent) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-header-kpis--strip {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-meta-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(203, 213, 225, 0.88);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-hero-metrics {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-metric-cell {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-metric-cell__value {
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-lar-card {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-header-kpi__value {
+  color: rgba(226, 232, 240, 0.94);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-header-kpis {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-expand-all-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(203, 213, 225, 0.82);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-expand-all-btn:hover,
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-expand-all-btn[aria-expanded='true'] {
+  color: #c7d2fe;
+  background: color-mix(in srgb, var(--hmda-glass-accent, #818cf8) 14%, #0f172a);
+  border-color: rgba(129, 140, 248, 0.28);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-accordion-trigger {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 639px) {
+  .hmda-lender-modal-panel--modern .hmda-lender-modal-header {
+    padding: 14px 16px 12px !important;
+  }
+
+  .hmda-lender-modal-body--accordion {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .hmda-lender-modal-production__sheet,
+  .hmda-lender-modal-panel--modern .hmda-lender-modal-body-inner--extended,
+  .hmda-lender-modal-section-label {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .hmda-lender-modal-header-kpis--strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .hmda-lender-modal-header-kpi__value {
+    font-size: 12px;
+  }
+}
+
+/* Dense lender modal: less repetition, tighter rhythm, card-matched styling */
+.hmda-lender-modal-panel--dense {
+  width: min(680px, calc(100vw - 32px)) !important;
+  max-width: min(680px, calc(100vw - 32px)) !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-header {
+  padding: 12px 16px 10px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-header-inner--merged {
+  gap: 8px 12px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-header-kpis {
+  gap: 14px;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-header-inner {
+  gap: 10px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-title {
+  font-size: 16px !important;
+  line-height: 1.22 !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-meta {
+  gap: 4px 8px;
+  margin-top: 5px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-meta-chip {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 9.5px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-meta-chip--type--imb,
+.hmda-lender-modal-panel--dense .hmda-lender-modal-meta-chip--type--bank,
+.hmda-lender-modal-panel--dense .hmda-lender-modal-meta-chip--type--cu {
+  background: transparent;
+  border: 0;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lcard-legal-glass {
+  display: none !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-scroll {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-production__sheet {
+  padding: 0 0 8px !important;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-hero-metrics {
+  padding: 4px 0 8px;
+  margin-bottom: 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-bottom: none;
+  box-shadow: none;
+  grid-column: 1;
+}
+
+.hmda-lender-modal-panel--dense .hmda-grid-card-stat-band {
+  padding: 4px 0 3px !important;
+  grid-column: 2;
+  align-self: center;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-production__sheet > :last-child {
+  grid-column: 1 / -1;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lcard-metrics-row--clean {
+  margin-bottom: 4px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lcard-metric-clean {
+  gap: 2px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lcard-metric-clean__label,
+.hmda-lender-modal-panel--dense .hmda-lcard-stat-clean__label {
+  font-size: 9px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lcard-metric-clean__value {
+  font-size: 20px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-body-inner--extended {
+  padding: 10px 22px 14px !important;
+  gap: 14px 22px !important;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-section-label--span {
+  padding: 0 0 4px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-section-label__text {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-lar-card {
+  padding: 8px 0 10px;
+  margin-bottom: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel > .hmda-lender-modal-pipeline-formula {
+  margin: 0;
+  padding: 4px 0 10px;
+  border: 0;
+  background: transparent;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel > .hmda-lender-modal-pipeline-sources {
+  padding: 10px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-sources__chip,
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-links__link {
+  border: 0;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.05),
+    0 4px 14px -4px rgba(15, 23, 42, 0.1);
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-sources__chip:hover,
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-links__link:hover {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 2px 4px rgba(15, 23, 42, 0.07),
+    0 8px 18px -6px rgba(79, 70, 229, 0.14);
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-sources__chip--muted {
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  background: rgba(248, 250, 252, 0.72);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-lar-card__head {
+  margin-bottom: 7px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-lar-card__grid {
+  gap: 6px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-metric-cell {
+  padding: 0 0 4px;
+  border: 0;
+  background: transparent;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-metric-cell__value {
+  font-size: 13px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-inset {
+  margin-bottom: 6px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-accordion-trigger {
+  padding: 8px 0;
+  border-radius: 0;
+  border-width: 0 0 1px;
+  background: transparent;
+  font-size: 11px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-accordion-trigger:hover {
+  background: transparent;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-col-span {
+  margin-top: 2px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-col-left [style*='padding:"10px 12px"'],
+.hmda-lender-modal-panel--dense .hmda-lender-modal-col-right [style*='padding:"10px 12px"'] {
+  padding: 8px 9px !important;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-footnote {
+  margin-bottom: 8px;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-hero-metrics {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-pullthrough-hero,
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-lar-card {
+  background: transparent;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel > .hmda-lender-modal-pipeline-sources {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-sources__chip,
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-links__link {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 4px 14px -4px rgba(0, 0, 0, 0.28);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-sources__chip:hover,
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-links__link:hover {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.22),
+    0 8px 18px -6px rgba(79, 70, 229, 0.2);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-sources__chip--muted {
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+/* Wide lender modal — block headers, metric tiles, contact, footer */
+.hmda-lender-modal-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.hmda-lender-modal-block-head__title {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-modal-block-head__aside {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  color: var(--hmda-glass-accent, #4f46e5);
+  opacity: 0.88;
+}
+
+.hmda-lender-modal-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+
+.hmda-lender-modal-metric-grid--stack {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hmda-lender-modal-metric-tile {
+  padding: 14px 16px;
+  border-right: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.hmda-lender-modal-metric-tile:last-child {
+  border-right: none;
+}
+
+.hmda-lender-modal-metric-tile__label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  margin-bottom: 6px;
+}
+
+.hmda-lender-modal-metric-tile__value {
+  margin-top: 0;
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--hmda-glass-text, #0f172a);
+}
+
+.hmda-lender-modal-metric-tile__value--empty {
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  opacity: 0.5;
+}
+
+.hmda-lender-modal-contact-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.hmda-lender-modal-contact-grid--stack {
+  grid-template-columns: 1fr;
+}
+
+.hmda-lender-modal-contact-tile__label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  margin-bottom: 3px;
+}
+
+.hmda-lender-modal-contact-tile__value {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--hmda-glass-text, #334155);
+}
+
+.hmda-lender-modal-contact-tile__value--mono {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+}
+
+.hmda-lender-modal-contact-tile__placeholder {
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-modal-contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hmda-lender-modal-contact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.03);
+  color: var(--hmda-glass-text-muted, #64748b);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.hmda-lender-modal-contact-btn:hover {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+.hmda-lender-modal-contact-btn--primary {
+  border-color: transparent;
+  background: var(--hmda-glass-accent, #4f46e5);
+  color: #fff;
+}
+
+.hmda-lender-modal-contact-btn--primary:hover {
+  background: color-mix(in srgb, var(--hmda-glass-accent, #4f46e5) 88%, #000);
+}
+
+.hmda-lender-modal-col--drill {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-lender-modal-footer {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-lender-modal-footer__macro {
+  font-size: 10px;
+}
+
+.hmda-lender-modal-footer__macro-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 6px;
+}
+
+.hmda-lender-modal-footer__macro-item {
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--hmda-glass-text, #334155);
+}
+
+.hmda-lender-modal-footer__macro-date {
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  font-weight: 600;
+}
+
+.hmda-lender-modal-footer__note {
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-lar-card__note {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .hmda-lender-modal-panel--dense .hmda-lender-modal-body-inner--extended {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  }
+
+  .hmda-lender-modal-panel--dense .hmda-lender-modal-col-lar {
+    grid-column: 1 / -1;
+  }
+
+  .hmda-lender-modal-panel--dense .hmda-lender-modal-production__sheet {
+    grid-template-columns: 1fr;
+  }
+
+  .hmda-lender-modal-panel--dense .hmda-lender-modal-hero-metrics,
+  .hmda-lender-modal-panel--dense .hmda-grid-card-stat-band {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 639px) {
+  .hmda-lender-modal-panel--dense .hmda-lender-modal-body-inner--extended {
+    grid-template-columns: 1fr !important;
+  }
+
+  .hmda-lender-modal-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Radix accordion shell — importance-ordered lender modal sections */
+.hmda-lender-modal-body--accordion {
+  padding: 0 20px 18px !important;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.hmda-lender-modal-summary {
+  padding: 12px 0 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-summary .hmda-lender-modal-hero-metrics {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 32px;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-summary .hmda-grid-card-stat-band {
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.hmda-lender-modal-meta-chip--legal {
+  max-width: min(320px, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hmda-glass-text-muted, #64748b);
+}
+
+.hmda-lender-modal-accordion {
+  margin-top: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hmda-lender-modal-accordion-item {
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  border-radius: 0 !important;
+  background: rgba(255, 255, 255, 0.35);
+  padding: 0 10px !important;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.hmda-lender-modal-accordion-item:first-child {
+  border-top-left-radius: 12px !important;
+  border-top-right-radius: 12px !important;
+}
+
+.hmda-lender-modal-accordion-item:last-child {
+  border-bottom-left-radius: 12px !important;
+  border-bottom-right-radius: 12px !important;
+}
+
+.hmda-lender-modal-accordion-item + .hmda-lender-modal-accordion-item {
+  margin-top: -1px;
+}
+
+.hmda-lender-modal-accordion-trigger {
+  width: 100%;
+  color: var(--hmda-glass-text, #334155);
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.hmda-lender-modal-accordion-trigger:hover {
+  color: var(--hmda-glass-accent, #4f46e5);
+}
+
+.hmda-lender-modal-accordion-trigger__aside {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.hmda-lender-modal-accordion-content {
+  padding: 0 0 14px !important;
+  color: var(--hmda-glass-text, #334155);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-accordion-content:not(.hmda-lender-modal-footer) {
+  padding-bottom: 10px !important;
+}
+
+.hmda-lender-modal-accordion-content > div {
+  padding-top: 2px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.hmda-lender-modal-accordion-content.hmda-lender-modal-footer {
+  padding-bottom: 10px !important;
+}
+
+.hmda-lender-registry {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-registry {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-registry__actions {
+  grid-column: 1 / -1;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-registry__row {
+  padding: 5px 0;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-accordion-content .hmda-lender-product-chips {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+  align-items: center;
+  justify-items: start;
+  overflow-x: visible;
+  flex-wrap: unset;
+}
+
+.hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel > * {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.hmda-lender-registry__row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.9fr) minmax(0, 1.6fr);
+  gap: 10px 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+  align-items: start;
+}
+
+.hmda-lender-registry__row:last-of-type {
+  border-bottom: 0;
+}
+
+.hmda-lender-registry__label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  padding-top: 2px;
+}
+
+.hmda-lender-registry__cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hmda-lender-registry__value,
+.hmda-lender-registry__value--mono {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--hmda-glass-text, #334155);
+  word-break: break-word;
+}
+
+.hmda-lender-registry__value--mono {
+  font-family: var(--hmda-ds-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.hmda-lender-registry__link {
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hmda-lender-registry__link:hover {
+  text-decoration: underline;
+}
+
+.hmda-lender-registry__source {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hmda-glass-text-muted, #94a3b8);
+}
+
+.hmda-lender-registry__placeholder {
+  color: var(--hmda-glass-text-muted, #94a3b8);
+  font-size: 12px;
+}
+
+.hmda-lender-registry__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-accordion-item {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-modal-summary {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.hmda-premium-exec[data-hmda-theme='dark'] .hmda-lender-registry__row {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 639px) {
+  .hmda-lender-modal-body--accordion {
+    padding: 0 16px 14px !important;
+  }
+
+  .hmda-lender-modal-panel--dense .hmda-lender-registry {
+    grid-template-columns: 1fr;
+  }
+
+  .hmda-lender-modal-panel--dense .hmda-lender-modal-pipeline-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .hmda-lender-registry__row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
+/* ── Compare lenders modal — same clean shell as grid cards ─────────── */
+.hmda-premium-exec.hmda-route-shell .hmda-modal-compare-panel--clean {
+  background: var(--hmda-glass-card-bg) !important;
+  border: none !important;
+  border-radius: var(--hmda-glass-radius-lg) !important;
+  box-shadow: var(--hmda-glass-card-shadow-outer) !important;
+  backdrop-filter: blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-modal-compare-panel--clean.hmda-compare-fs-light {
+  background: #fff !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-modal-compare-panel--clean.hmda-modal-pastel-accent::before {
+  display: none;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-title {
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-size: 20px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  margin-bottom: 2px;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-subtitle {
+  font-size: 12px;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-icon-well {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: none !important;
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-toolbar-btn {
+  padding: 7px 14px;
+  border-radius: 12px;
+  border: none !important;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent !important;
+  color: var(--hmda-glass-text-secondary);
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-toolbar-btn:hover {
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-toolbar-btn--icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-lender-head,
+.hmda-modal-compare-panel--clean .hmda-compare-mobile-card {
+  border-radius: 14px;
+  background: var(--hmda-glass-control-bg) !important;
+  border: none !important;
+  overflow: hidden;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-metric-label,
+.hmda-modal-compare-panel--clean .hmda-compare-metric-chip {
+  border: none !important;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-value-cell:not(.hmda-compare-value-cell--winner) {
+  border: none !important;
+  background: var(--hmda-glass-control-bg) !important;
+}
+.hmda-modal-compare-panel--clean .hmda-compare-hmda-block {
+  border: none !important;
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-unpin-btn {
+  border: none !important;
+  background: transparent !important;
+  opacity: 0.7;
+}
+
+.hmda-modal-compare-panel--clean .hmda-compare-unpin-btn:hover {
+  opacity: 1;
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-premium-exec[data-hmda-theme='light'] .hmda-modal-compare-panel--clean .hmda-compare-title {
+  color: #0f172a !important;
+}
+
+/* ── State county/census drill modal — clean shell like lender cards ─── */
+.hmda-premium-exec.hmda-route-shell .hmda-geo-state-drill-modal--clean {
+  background: var(--hmda-glass-card-bg) !important;
+  border: none !important;
+  border-radius: var(--hmda-glass-radius-lg) !important;
+  box-shadow: var(--hmda-glass-card-shadow-outer) !important;
+  backdrop-filter: blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+}
+
+.hmda-geo-state-drill-modal--clean.hmda-modal-pastel-accent::before {
+  display: none;
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-modal-title {
+  font-family: var(--hmda-ds-font-display, var(--font-display)) !important;
+  font-size: 18px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.028em !important;
+  margin-bottom: 4px;
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-modal-sub {
+  font-size: 12px;
+  color: var(--hmda-glass-text-muted);
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-modal-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: none !important;
+  cursor: pointer;
+  background: transparent !important;
+  color: var(--hmda-glass-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-modal-close:hover {
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-stat-card,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-panel,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-search,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-table-head,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-metric,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-detail-block,
+.hmda-geo-state-drill-modal--clean .drill-row,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-tract-chip {
+  border: none !important;
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-stat-card,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-panel,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-search,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-table-head,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-metric,
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-detail-block,
+.hmda-geo-state-drill-modal--clean .drill-row {
+  background: var(--hmda-glass-control-bg) !important;
+}
+
+.hmda-geo-state-drill-modal--clean .drill-row.hmda-geo-drill-row--selected {
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35);
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-search input {
+  border: none !important;
+  background: rgba(255, 255, 255, 0.42) !important;
+}
+
+.hmda-geo-state-drill-modal--clean .hmda-geo-drill-lender-meta {
+  border-top: none !important;
+  padding-top: 4px;
+}
+
+.hmda-premium-exec[data-hmda-theme='light'] .hmda-geo-state-drill-modal--clean .hmda-geo-drill-modal-title {
+  color: #0f172a !important;
+}
+
+.hmda-search-lender-map-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none !important;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--hmda-glass-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.hmda-search-lender-map-btn:hover {
+  background: var(--hmda-glass-control-bg);
+  color: var(--hmda-glass-accent, #4f46e5);
+}
+
+.hmda-ds-hero-search-row .hmda-search-lender-map-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.hmda-search-lender-pin-btn,
+.hmda-search-lender-track-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--hmda-glass-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    opacity 0.15s ease, transform 0.15s ease;
+}
+
+.hmda-search-lender-pin-btn:hover,
+.hmda-search-lender-track-btn:hover {
+  background: var(--hmda-glass-control-bg);
+  color: var(--hmda-glass-accent, #4f46e5);
+  border-color: rgba(99, 102, 241, 0.22);
+}
+
+.hmda-search-lender-pin-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.hmda-search-lender-pin-btn.is-active,
+.hmda-search-lender-track-btn.is-active {
+  background: var(--hmda-glass-chip-active-bg, rgba(99, 102, 241, 0.12));
+  color: var(--hmda-glass-accent, #4f46e5);
+  border-color: rgba(99, 102, 241, 0.28);
+}
+
+.hmda-search-lender-pin-btn.is-active svg {
+  transform: rotate(-20deg);
+}
+
+.hmda-ds-hero-search-row .hmda-search-lender-pin-btn,
+.hmda-ds-hero-search-row .hmda-search-lender-track-btn {
+  width: 34px;
+  height: 34px;
+}
+
+.hmda-lender-card-map-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+
+.hmda-lender-card-map-btn--labeled {
+  width: auto;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px 0 8px;
+  gap: 5px;
+}
+
+.hmda-lender-card-map-btn__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.hmda-results-grid-card--clean .hmda-lcard-trailing--row,
+.hmda-results-grid-card--clean .hmda-lcard-trailing-actions {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.hmda-results-grid-card--clean .hmda-results-grid-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+.hmda-results-list-tail-minimal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Iridescent glass: header, hero headline, hero search stack ─────── */
+.hmda-premium-exec.hmda-route-shell header .hmda-header-actions {
+  padding: 5px 6px !important;
+  gap: 6px !important;
+  border-radius: 18px !important;
+  background-color: var(--hmda-ds-glass-bg) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: 1px solid var(--hmda-ds-glass-border) !important;
+  box-shadow: var(--hmda-ds-glass-shadow) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell header .hmda-header-cmd:not(.hmda-header-cmd--primary) {
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 13px !important;
+  border-radius: 14px !important;
+  background-color: rgba(255, 255, 255, 0.28) !important;
+  background-image:
+    radial-gradient(ellipse 80% 100% at 20% 0%, rgba(255, 255, 255, 0.55) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 80% at 85% 100%, rgba(167, 243, 208, 0.2) 0%, transparent 50%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.58) !important;
+  box-shadow: var(--hmda-iris-pill-shadow) !important;
+  backdrop-filter: blur(14px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(180%) !important;
+  color: var(--hmda-glass-text) !important;
+  font-weight: 600 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] header .hmda-header-cmd:not(.hmda-header-cmd--primary) {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  background-image:
+    radial-gradient(ellipse 80% 100% at 20% 0%, rgba(255, 255, 255, 0.14) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 80% at 85% 100%, rgba(167, 139, 250, 0.12) 0%, transparent 50%) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: rgba(248, 250, 252, 0.92) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell header .hmda-header-cmd.hmda-header-cmd--primary {
+  height: 38px !important;
+  min-height: 38px !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.92) 0%, rgba(79, 70, 229, 0.88) 45%, rgba(13, 148, 136, 0.85) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 10px 28px rgba(79, 70, 229, 0.28) !important;
+  color: #fff !important;
+}
+
+.hmda-premium-exec.hmda-route-shell header .hmda-header-cmd:not(.hmda-header-cmd--primary):hover {
+  background-color: rgba(255, 255, 255, 0.42) !important;
+  border-color: rgba(255, 255, 255, 0.72) !important;
+  transform: translateY(-1px);
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-hero .hmda-heading-1.hmda-hero-display-title {
+  background: linear-gradient(
+    128deg,
+    #0f172a 0%,
+    #4338ca 16%,
+    #0891b2 34%,
+    #059669 50%,
+    #7c3aed 66%,
+    #0f172a 100%
+  ) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  filter: drop-shadow(0 2px 12px rgba(99, 102, 241, 0.12));
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-hero .hmda-heading-1.hmda-hero-display-title {
+  background: linear-gradient(
+    128deg,
+    #f8fafc 0%,
+    #a5f3fc 22%,
+    #c4b5fd 44%,
+    #6ee7b7 62%,
+    #fde68a 78%,
+    #f8fafc 100%
+  ) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  filter: drop-shadow(0 2px 16px rgba(167, 139, 250, 0.18));
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-hero .toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack {
+  max-width: 720px !important;
+  padding: 22px 24px 18px !important;
+  border-radius: 24px !important;
+  background-color: rgba(255, 255, 255, 0.34) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: none !important;
+  box-shadow:
+    0 28px 64px rgba(15, 23, 42, 0.1),
+    0 12px 28px rgba(15, 23, 42, 0.06),
+    0 2px 10px rgba(15, 23, 42, 0.04) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-hero .toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-ds-hero-toolbar-surface .hmda-ds-hero-cta {
+  padding: 10px 15px !important;
+  border-radius: 14px !important;
+  background-color: rgba(255, 255, 255, 0.28) !important;
+  background-image:
+    radial-gradient(ellipse 90% 80% at 15% 0%, rgba(255, 255, 255, 0.65) 0%, transparent 52%),
+    radial-gradient(ellipse 70% 60% at 90% 100%, rgba(196, 181, 253, 0.18) 0%, transparent 48%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.52) !important;
+  box-shadow: var(--hmda-iris-pill-shadow) !important;
+  backdrop-filter: blur(12px) saturate(175%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(175%) !important;
+  font-weight: 600 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-ds-hero-toolbar-surface .hmda-ds-hero-search-row {
+  border-radius: 16px !important;
+  background-color: rgba(255, 255, 255, 0.42) !important;
+  background-image:
+    radial-gradient(ellipse 100% 80% at 0% 50%, rgba(125, 211, 252, 0.14) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 70% at 100% 50%, rgba(167, 243, 208, 0.12) 0%, transparent 50%) !important;
+  border: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 24px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: blur(14px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(170%) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-hero-combo .hmda-ds-hero-search-row {
+  border: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-ds-hero-toolbar-surface .hmda-ds-hero-search-row {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-filter-toolbar-pastel [role='tablist'] button[role='tab'] {
+  border-radius: 12px !important;
+  backdrop-filter: blur(10px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(160%) !important;
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.16s ease !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-filter-toolbar-pastel [role='tablist'] button[role='tab'][aria-selected='true'] {
+  background-color: rgba(255, 255, 255, 0.42) !important;
+  background-image:
+    radial-gradient(ellipse 80% 100% at 30% 0%, rgba(255, 255, 255, 0.7) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 80% at 80% 100%, rgba(196, 181, 253, 0.22) 0%, transparent 48%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  box-shadow: var(--hmda-iris-pill-shadow) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell .hmda-filter-toolbar-pastel .filter-group,
+.hmda-premium-exec.hmda-route-shell .hmda-filter-toolbar-pastel .hmda-nav-search-well,
+.hmda-premium-exec.hmda-route-shell .hmda-lenders-toolbar-search {
+  background-color: rgba(255, 255, 255, 0.26) !important;
+  background-image: radial-gradient(ellipse 80% 100% at 20% 0%, rgba(255, 255, 255, 0.45) 0%, transparent 52%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.48) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65) !important;
+  border-radius: 12px !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-filter-toolbar-pastel .filter-group,
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-filter-toolbar-pastel .hmda-nav-search-well,
+.hmda-premium-exec.hmda-route-shell[data-hmda-theme='dark'] .hmda-lenders-toolbar-search {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  background-image: radial-gradient(ellipse 80% 100% at 20% 0%, rgba(255, 255, 255, 0.1) 0%, transparent 52%) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+@media (max-width: 768px) {
+  .hmda-premium-exec.hmda-route-shell header .hmda-header-actions {
+    border-radius: 16px !important;
+    padding: 4px !important;
+  }
+
+  .hmda-premium-exec.hmda-route-shell .hmda-hero .toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack {
+    border-radius: 20px !important;
+    padding: 16px 16px 14px !important;
+  }
+
+  .hmda-premium-exec.hmda-route-shell .hmda-filter-toolbar-pastel {
+    border-radius: 18px !important;
+  }
+}
+
+/* Sprinkle shell — same iris treatment (beats hmda-sprinkle-shell.css) */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'] .hmda-hero .hmda-heading-1.hmda-hero-display-title {
+  background: linear-gradient(
+    128deg,
+    #0f172a 0%,
+    #4338ca 16%,
+    #0891b2 34%,
+    #059669 50%,
+    #7c3aed 66%,
+    #0f172a 100%
+  ) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'] .hmda-hero .toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack {
+  background-color: rgba(255, 255, 255, 0.34) !important;
+  background-image: var(--hmda-iris-shimmer) !important;
+  border: none !important;
+  border-radius: 24px !important;
+  box-shadow:
+    0 28px 64px rgba(15, 23, 42, 0.1),
+    0 12px 28px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--hmda-ds-glass-backdrop) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  .hmda-hero
+  .hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack
+  .hmda-ds-hero-search-row {
+  background-color: rgba(255, 255, 255, 0.42) !important;
+  background-image:
+    radial-gradient(ellipse 100% 80% at 0% 50%, rgba(125, 211, 252, 0.14) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 70% at 100% 50%, rgba(167, 243, 208, 0.12) 0%, transparent 50%) !important;
+  border: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 24px rgba(15, 23, 42, 0.06) !important;
+}
+
+/* ── Magnify on hover — tiny identity/contact fields ── */
+.hmda-lcard-legal-glass__item,
+.hmda-lender-modal-contact-tile {
+  transform-origin: left center;
+  transition: transform 0.18s ease;
+  cursor: default;
+}
+
+.hmda-lcard-legal-glass__item:hover,
+.hmda-lender-modal-contact-tile:hover {
+  transform: scale(1.18);
+  position: relative;
+  z-index: 2;
+}

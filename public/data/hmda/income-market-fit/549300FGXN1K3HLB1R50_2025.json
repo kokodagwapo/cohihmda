@@ -1,0 +1,313 @@
+{
+  "lei": "549300FGXN1K3HLB1R50",
+  "year": 2025,
+  "found": true,
+  "lenderName": "Rocket Mortgage, LLC",
+  "dataAsOf": "2026-05-18T18:59:22.225Z",
+  "methodology": "Income-to-market ratios use FFIEC-style AMI bands and tract income categories from public reference baselines, joined to HMDA lender production and declination aggregates. County opportunity scores combine share, income fit, and demand proxies. Replace reference file with live FFIEC AMI + tract ingest for production-grade tract-level accuracy.",
+  "sources": [
+    "HMDA lender panel",
+    "FFIEC income reference (public/data/ffiec-income-reference.json)",
+    "geo-drilldown-from-hmda.json when available"
+  ],
+  "incomeToAmiBands": [
+    {
+      "band": "<80%",
+      "originatedShare": 0.1835,
+      "marketShareHint": 0.0608,
+      "peerShareByIncomeBand": 0.0608
+    },
+    {
+      "band": "80–100%",
+      "originatedShare": 0.267,
+      "marketShareHint": 0.06,
+      "peerShareByIncomeBand": 0.06
+    },
+    {
+      "band": "100–120%",
+      "originatedShare": 0.2937,
+      "marketShareHint": 0.0596,
+      "peerShareByIncomeBand": 0.0596
+    },
+    {
+      "band": "120%+",
+      "originatedShare": 0.2558,
+      "marketShareHint": 0.0732,
+      "peerShareByIncomeBand": 0.0732
+    }
+  ],
+  "tractIncomePenetration": [
+    {
+      "category": "Low",
+      "share": 0.0854
+    },
+    {
+      "category": "Moderate",
+      "share": 0.178
+    },
+    {
+      "category": "Middle",
+      "share": 0.4067
+    },
+    {
+      "category": "Upper",
+      "share": 0.3299
+    }
+  ],
+  "denialByIncomeBand": [
+    {
+      "band": "<80%",
+      "denialRate": 0.1753,
+      "topReasons": [
+        "Debt-to-income ratio",
+        "Credit history",
+        "Insufficient cash to close"
+      ]
+    },
+    {
+      "band": "80–100%",
+      "denialRate": 0.1605,
+      "topReasons": [
+        "Debt-to-income ratio",
+        "Collateral",
+        "Credit history"
+      ]
+    },
+    {
+      "band": "100–120%",
+      "denialRate": 0.1456,
+      "topReasons": [
+        "Collateral",
+        "Debt-to-income ratio",
+        "Insufficient cash to close"
+      ]
+    },
+    {
+      "band": "120%+",
+      "denialRate": 0.1307,
+      "topReasons": [
+        "Credit application incomplete",
+        "Collateral",
+        "Debt-to-income ratio"
+      ]
+    }
+  ],
+  "opportunityRankings": [
+    {
+      "rank": 1,
+      "geographyType": "county",
+      "state": "TX",
+      "name": "TX (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.6408,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 2,
+      "geographyType": "county",
+      "state": "CA",
+      "name": "CA (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.843,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 3,
+      "geographyType": "county",
+      "state": "FL",
+      "name": "FL (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.5658,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 4,
+      "geographyType": "county",
+      "state": "OH",
+      "name": "OH (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.7674,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 5,
+      "geographyType": "county",
+      "state": "MI",
+      "name": "MI (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.7192,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 6,
+      "geographyType": "county",
+      "state": "PA",
+      "name": "PA (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.7987,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    }
+  ],
+  "opportunityHeatmap": [
+    {
+      "rank": 1,
+      "geographyType": "county",
+      "state": "TX",
+      "name": "TX (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.6408,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 2,
+      "geographyType": "county",
+      "state": "CA",
+      "name": "CA (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.843,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 3,
+      "geographyType": "county",
+      "state": "FL",
+      "name": "FL (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.5658,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 4,
+      "geographyType": "county",
+      "state": "OH",
+      "name": "OH (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.7674,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 5,
+      "geographyType": "county",
+      "state": "MI",
+      "name": "MI (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.7192,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    },
+    {
+      "rank": 6,
+      "geographyType": "county",
+      "state": "PA",
+      "name": "PA (statewide proxy)",
+      "lenderShare": 1,
+      "incomeFitScore": 0.7987,
+      "demandIndex": 1,
+      "opportunityScore": 0,
+      "driver": "Moderate share — room to grow in middle-income tracts"
+    }
+  ],
+  "signalCards": [
+    {
+      "severity": "warning",
+      "title": "Middle-income tracts under index vs market",
+      "body": "Origination mix in middle-income tracts (40.7%) trails peer share hints in lower AMI bands — review county focus in top opportunity markets."
+    },
+    {
+      "severity": "warning",
+      "title": "Denial rate elevated below 90% of area median income",
+      "body": "Denial rate in the lowest AMI band is 17.5%, led by Debt-to-income ratio and Credit history."
+    },
+    {
+      "severity": "info",
+      "title": "Whitespace: TX (statewide proxy), TX",
+      "body": "Opportunity score 0 — Moderate share — room to grow in middle-income tracts."
+    }
+  ],
+  "communityReachDashboard": {
+    "affordableAmiBandShare": 0.4505,
+    "lowModerateTractShare": 0.2634,
+    "statesActive": 50,
+    "narrative": "Origination mix skews toward borrowers at or below moderate AMI relative to market."
+  },
+  "peerShareIncomeBand": [
+    {
+      "band": "<80%",
+      "lenderShare": 0.1835,
+      "marketShare": 0.0608
+    },
+    {
+      "band": "80–100%",
+      "lenderShare": 0.267,
+      "marketShare": 0.06
+    },
+    {
+      "band": "100–120%",
+      "lenderShare": 0.2937,
+      "marketShare": 0.0596
+    },
+    {
+      "band": "120%+",
+      "lenderShare": 0.2558,
+      "marketShare": 0.0732
+    }
+  ],
+  "incomeAdjustedAvgLoanByBand": [
+    {
+      "band": "<80%",
+      "avgLoanAmount": 194811,
+      "originatedShare": 0.1835
+    },
+    {
+      "band": "80–100%",
+      "avgLoanAmount": 238102,
+      "originatedShare": 0.267
+    },
+    {
+      "band": "100–120%",
+      "avgLoanAmount": 275982,
+      "originatedShare": 0.2937
+    },
+    {
+      "band": "120%+",
+      "avgLoanAmount": 319274,
+      "originatedShare": 0.2558
+    }
+  ],
+  "incomeStressSignal": {
+    "score": 0.4533,
+    "label": "Moderate",
+    "inputs": {
+      "overallDenialRate": 0.1486,
+      "lowAmiBandDenialRate": 0.1753,
+      "avgLoanAmount": 270571
+    }
+  },
+  "fhfaOverlay": {
+    "available": false,
+    "note": "Phase 2: FHFA HPI overlay for affordability trends."
+  },
+  "premium": true,
+  "upgradeRequired": false
+}

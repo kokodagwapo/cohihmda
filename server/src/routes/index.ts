@@ -34,6 +34,7 @@ import platformSettingsRoutes from "./admin/platformSettings.js";
 import tenantConfigExportRoutes from "./admin/tenantConfigExport.js";
 import insightFeedbackRoutes from "./admin/insightFeedback.js";
 import releaseNotesAdminRoutes from "./admin/releaseNotes.js";
+import hmdaDataAdminRoutes from "./admin/hmdaData.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import workbenchRoutes from "./workbench.js";
 import groupsRoutes from "./groups.js";
@@ -54,6 +55,7 @@ import feedbackRoutes from "./feedback.js";
 import qaResultsRoutes from "./internal/qaResults.js";
 import aiLedgerRoutes from "./internal/aiLedger.js";
 import jiraTransitionWebhookRoutes from "./webhooks/jiraTransition.js";
+import { registerHmdaRoutes } from "./hmda.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -104,6 +106,8 @@ export function setupRoutes(app: Express) {
     next();
   });
 
+  registerHmdaRoutes(app);
+
   app.use("/api/auth", authRoutes);
   app.use("/api/auth/cognito", cognitoAuth);
   app.use("/api/auth/mfa", mfaRoutes);
@@ -142,6 +146,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/tenant-config-transfer", tenantConfigExportRoutes);
   app.use("/api/admin/insight-feedback", insightFeedbackRoutes);
   app.use("/api/admin/release-notes", releaseNotesAdminRoutes);
+  app.use("/api/admin/hmda-data", hmdaDataAdminRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
   app.use("/api/groups", groupsRoutes); // User groups for canvas sharing (tenant DB)

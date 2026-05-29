@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "dataYear": 2025,
+    "exportedAt": "2026-05-28T16:55:07.543Z",
+    "recordCount": 4784,
+    "source": "static JSON",
+    "liveFallback": null,
+    "insightsBackfillFromPriorYear": false,
+    "insightsBackfillCount": 0,
+    "insightsBackfillNote": null
+  },
+  "products": [
+    {
+      "name": "Conventional",
+      "count": 4779,
+      "unitsOriginated": 5320828,
+      "topLenders": [
+        "United Wholesale Mortgage",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "FHA",
+      "count": 1279,
+      "unitsOriginated": 906942,
+      "topLenders": [
+        "United Wholesale Mortgage",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "VA",
+      "count": 1220,
+      "unitsOriginated": 561792,
+      "topLenders": [
+        "United Wholesale Mortgage",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "USDA",
+      "count": 834,
+      "unitsOriginated": 39133,
+      "topLenders": [
+        "United Wholesale Mortgage",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association",
+        "PENNYMAC LOAN SERVICES, LLC",
+        "U.S. Bank National Association"
+      ]
+    },
+    {
+      "name": "Non-QM",
+      "count": 3,
+      "unitsOriginated": null,
+      "topLenders": [
+        "FUNDING RESOURCES MORTGAGE CORPORATION",
+        "ANCHOR NATIONWIDE LOANS, LLC",
+        "First Internet Bank of Indiana"
+      ]
+    },
+    {
+      "name": "Jumbo",
+      "count": 248,
+      "unitsOriginated": null,
+      "topLenders": [
+        "Wells Fargo Bank, National Association",
+        "WALKER & DUNLOP, LLC",
+        "Citibank, National Association",
+        "BERKADIA COMMERCIAL MORTGAGE LLC",
+        "Morgan Stanley Private Bank, National Association"
+      ]
+    },
+    {
+      "name": "HELOC",
+      "count": 1,
+      "unitsOriginated": null,
+      "topLenders": [
+        "Resource One Credit Union"
+      ]
+    },
+    {
+      "name": "Construction",
+      "count": 2,
+      "unitsOriginated": null,
+      "topLenders": [
+        "ANCHOR NATIONWIDE LOANS, LLC",
+        "First Internet Bank of Indiana"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "_comment": "Manual LEI→NMLS mapping. Add entries verified via NMLS Consumer Access (nmlsconsumeraccess.org). Format: LEI -> NMLS company ID.",
+  "_verification": "Match LEI (GLEIF) legal name to NMLS company name. NMLS IDs from nmlsconsumeraccess.org.",
+  "_lastUpdated": null,
+  "549300HW662MN1WU8550": "3038",
+  "549300FGXN1K3HLB1R50": "3030",
+  "549300VZVN841I2ILS84": "3029"
+}

@@ -1,0 +1,110 @@
+{
+  "meta": {
+    "dataYear": 2023,
+    "exportedAt": null,
+    "recordCount": 5098,
+    "source": "static JSON",
+    "liveFallback": "ffiec-nationwide",
+    "insightsBackfillFromPriorYear": false,
+    "insightsBackfillCount": 0,
+    "insightsBackfillNote": null
+  },
+  "products": [
+    {
+      "name": "Conventional",
+      "count": 5093,
+      "unitsOriginated": 4541961,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "ROCKET MORTGAGE, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, LLC"
+      ]
+    },
+    {
+      "name": "FHA",
+      "count": 1368,
+      "unitsOriginated": 754785,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "ROCKET MORTGAGE, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, LLC"
+      ]
+    },
+    {
+      "name": "VA",
+      "count": 1318,
+      "unitsOriginated": 378179,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "ROCKET MORTGAGE, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, LLC"
+      ]
+    },
+    {
+      "name": "USDA",
+      "count": 919,
+      "unitsOriginated": 35474,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "Wells Fargo Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, LLC",
+        "FAIRWAY INDEPENDENT MORTGAGE CORPORATION",
+        "U.S. Bank National Association"
+      ]
+    },
+    {
+      "name": "Non-QM",
+      "count": 4509,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "ROCKET MORTGAGE, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, LLC"
+      ]
+    },
+    {
+      "name": "Jumbo",
+      "count": 3570,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "ROCKET MORTGAGE, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, LLC"
+      ]
+    },
+    {
+      "name": "HELOC",
+      "count": 1170,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "ROCKET MORTGAGE, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "Bank of America, National Association"
+      ]
+    },
+    {
+      "name": "Construction",
+      "count": 3576,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED WHOLESALE MORTGAGE, LLC",
+        "ROCKET MORTGAGE, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, LLC"
+      ]
+    }
+  ]
+}

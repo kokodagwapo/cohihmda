@@ -1,0 +1,2466 @@
+/**
+ * HMDA SaaS marketing & auth — aligned with HMDA DataBank executive shell
+ * Typography uses global tokens (--font-display / --font-sans from index.css).
+ */
+.hmda-saas-page {
+  --coheus-blue: #1d77c3;
+  --coheus-green: #4e9a4b;
+  --coheus-lime: #90d348;
+  --coheus-gradient: linear-gradient(128deg, #1d77c3 0%, #4e9a4b 52%, #90d348 100%);
+  --coheus-gradient-soft: linear-gradient(128deg, rgba(29, 119, 195, 0.12) 0%, rgba(78, 154, 75, 0.1) 100%);
+  --saas-bg: #eef0f1;
+  --saas-bg-elevated: #f4f5f6;
+  --saas-surface: #ffffff;
+  --saas-border: rgba(15, 23, 42, 0.08);
+  --saas-border-hover: rgba(15, 23, 42, 0.14);
+  --saas-text: #0f172a;
+  --saas-muted: #64748b;
+  --saas-navy: #172b55;
+  --saas-navy-hover: #1e3a7a;
+  --saas-accent: #6f45d6;
+  --saas-input-bg: rgba(248, 250, 252, 0.98);
+  --saas-input-border: rgba(15, 23, 42, 0.1);
+  --saas-focus-ring: rgba(111, 69, 214, 0.22);
+  --saas-shadow-card: 0 6px 22px rgba(15, 23, 42, 0.05), 0 1px 4px rgba(15, 23, 42, 0.04);
+  --saas-shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
+
+  /* Typography — Inter (UI) + Sora (headings); shared on every SaaS page */
+  --saas-font-sans: var(--font-sans, 'Inter'), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --saas-font-display: var(--font-display, 'Sora'), ui-sans-serif, system-ui, sans-serif;
+  --saas-text-xs: 0.6875rem;
+  --saas-text-sm: 0.8125rem;
+  --saas-text-base: 0.9375rem;
+  --saas-text-md: 1rem;
+  --saas-text-lg: 1.125rem;
+  --saas-leading-tight: 1.2;
+  --saas-leading-normal: 1.5;
+  --saas-leading-relaxed: 1.55;
+  --saas-tracking-tight: -0.022em;
+  --saas-tracking-body: -0.014em;
+  --saas-label-color: rgba(15, 23, 42, 0.68);
+
+  min-height: 100vh;
+  font-family: var(--saas-font-sans);
+  font-size: var(--saas-text-base);
+  line-height: var(--saas-leading-normal);
+  color: var(--saas-text);
+  position: relative;
+  letter-spacing: var(--saas-tracking-body);
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Display headings — Sora across sign-in, signup, billing, onboarding, etc. */
+.hmda-saas-page :where(
+  .hmda-saas-title,
+  .hmda-saas-auth__title,
+  .hmda-saas-signup-heading,
+  .hmda-saas-plan-price,
+  .hmda-saas-onb-heading,
+  .hmda-saas-insight h3,
+  .hmda-saas-step strong
+) {
+  font-family: var(--saas-font-display);
+  font-feature-settings: 'kern' 1;
+}
+
+.hmda-saas-page :where(button, input, select, textarea, .hmda-saas-btn, .hmda-saas-pill, .hmda-saas-provider, .hmda-saas-ms-btn) {
+  font-family: var(--saas-font-sans);
+}
+
+.hmda-saas-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(180deg, var(--saas-bg) 0%, var(--saas-bg-elevated) 48%, var(--saas-bg) 100%);
+}
+
+.hmda-saas-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px 20px 48px;
+}
+
+.hmda-saas-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.hmda-saas-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: var(--saas-text);
+  text-decoration: none !important;
+}
+
+.hmda-saas-brand:hover,
+.hmda-saas-brand:focus,
+.hmda-saas-brand:focus-visible,
+.hmda-saas-brand:visited,
+.hmda-saas-brand:active {
+  text-decoration: none !important;
+  color: var(--saas-navy);
+}
+
+.hmda-saas-brand-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  text-decoration: none !important;
+}
+
+.hmda-saas-brand-title {
+  font-family: var(--saas-font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.03em;
+  line-height: var(--saas-leading-tight);
+  text-decoration: none !important;
+}
+
+.hmda-saas-brand-accent {
+  background: var(--coheus-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.hmda-saas-brand-tagline {
+  font-weight: 550;
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--saas-muted);
+  max-width: min(320px, 42vw);
+  text-decoration: none !important;
+}
+
+@media (max-width: 520px) {
+  .hmda-saas-brand-tagline {
+    display: none;
+  }
+}
+
+.hmda-saas-brand-logo {
+  display: block;
+  flex-shrink: 0;
+  height: 48px;
+  width: auto;
+  object-fit: contain;
+  border-radius: 9px;
+}
+
+@media (min-width: 768px) {
+  .hmda-saas-brand-logo {
+    height: 52px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hmda-saas-brand-logo {
+    height: 56px;
+  }
+}
+
+.hmda-saas-topbar-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hmda-saas-topbar-links > a:not(.hmda-saas-pill) {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--saas-muted);
+  text-decoration: none;
+  padding: 6px 4px;
+  letter-spacing: -0.01em;
+}
+
+.hmda-saas-topbar-links > a:not(.hmda-saas-pill):hover {
+  color: var(--saas-text);
+}
+
+.hmda-saas-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  border: 1px solid var(--saas-border-hover);
+  background: rgba(255, 255, 255, 0.65);
+  color: rgba(15, 23, 42, 0.88);
+  box-shadow: none;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.hmda-saas-pill:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--saas-border-hover);
+  color: var(--saas-text);
+}
+
+.hmda-saas-pill--ghost {
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(15, 23, 42, 0.1);
+  color: rgba(15, 23, 42, 0.82);
+}
+
+.hmda-saas-pill--primary {
+  background: var(--saas-navy) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.hmda-saas-pill--primary:hover {
+  background: var(--saas-navy-hover) !important;
+  color: #fff !important;
+  filter: none;
+}
+
+/* Primary wins over generic .hmda-saas-pill:hover when both classes apply */
+.hmda-saas-pill.hmda-saas-pill--primary:hover {
+  background: var(--saas-navy-hover) !important;
+  color: #fff !important;
+}
+
+.hmda-saas-main {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.hmda-saas-hero-text {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.hmda-saas-title {
+  font-size: clamp(1.5rem, 3.8vw, 1.875rem);
+  font-weight: var(--title-weight-light, 300);
+  letter-spacing: var(--title-tracking-display, -0.048em);
+  line-height: var(--title-leading-display, 1.1);
+  margin: 0 0 8px;
+  color: var(--saas-text);
+}
+
+.hmda-saas-subtitle {
+  margin: 0;
+  font-size: var(--saas-text-sm);
+  color: var(--saas-muted);
+  line-height: var(--saas-leading-relaxed);
+  font-weight: 400;
+  letter-spacing: var(--saas-tracking-body);
+  max-width: 36em;
+}
+
+.hmda-saas-card {
+  border-radius: 14px;
+  padding: 24px 22px 26px;
+  background: var(--saas-surface);
+  border: 1px solid var(--saas-border);
+  box-shadow: var(--saas-shadow-card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  font-size: var(--saas-text-base);
+  line-height: var(--saas-leading-relaxed);
+}
+
+.hmda-saas-field {
+  margin-bottom: 14px;
+}
+
+.hmda-saas-field label {
+  display: block;
+  font-size: var(--saas-text-sm);
+  font-weight: 500;
+  letter-spacing: var(--saas-tracking-tight);
+  text-transform: none;
+  color: var(--saas-label-color);
+  margin-bottom: 6px;
+}
+
+.hmda-saas-input,
+.hmda-saas-select,
+.hmda-saas-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 9px;
+  border: 1px solid var(--saas-input-border);
+  background: var(--saas-input-bg);
+  padding: 10px 12px;
+  font-size: var(--saas-text-sm);
+  font-family: inherit;
+  color: var(--saas-text);
+  letter-spacing: var(--saas-tracking-body);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hmda-saas-input:focus,
+.hmda-saas-select:focus,
+.hmda-saas-textarea:focus {
+  border-color: rgba(111, 69, 214, 0.45);
+  box-shadow: 0 0 0 3px var(--saas-focus-ring);
+}
+
+.hmda-saas-error {
+  font-size: 13px;
+  color: #b91c1c;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: rgba(254, 242, 242, 0.9);
+  border: 1px solid rgba(252, 165, 165, 0.45);
+}
+
+.hmda-saas-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .hmda-saas-row2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hmda-saas-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.hmda-saas-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 9px;
+  font-size: var(--saas-text-sm);
+  font-weight: 600;
+  font-family: inherit;
+  border: 1px solid transparent;
+  cursor: pointer;
+  letter-spacing: -0.01em;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.12s ease;
+}
+
+.hmda-saas-btn:active {
+  transform: scale(0.99);
+}
+
+.hmda-saas-page a.hmda-saas-btn,
+.hmda-saas-page a.hmda-saas-btn:hover,
+.hmda-saas-page a.hmda-saas-pill,
+.hmda-saas-page a.hmda-saas-pill:hover {
+  text-decoration: none !important;
+}
+
+.hmda-saas-btn--primary {
+  background: var(--saas-navy);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--saas-shadow-soft);
+}
+
+.hmda-saas-btn--primary:hover {
+  background: var(--saas-navy-hover);
+  filter: none;
+}
+
+.hmda-saas-btn--ghost {
+  background: rgba(255, 255, 255, 0.65);
+  color: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow: none;
+}
+
+.hmda-saas-btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--saas-border-hover);
+}
+
+.hmda-saas-pricing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 640px) {
+  .hmda-saas-pricing-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hmda-saas-plan {
+  border-radius: 11px;
+  padding: 16px 14px 18px;
+  border: 1px solid var(--saas-border);
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.hmda-saas-plan:hover {
+  border-color: var(--saas-border-hover);
+  box-shadow: var(--saas-shadow-soft);
+}
+
+.hmda-saas-plan--selected {
+  border-color: rgba(111, 69, 214, 0.35);
+  box-shadow: 0 0 0 2px rgba(111, 69, 214, 0.12);
+  background: #fff;
+}
+
+.hmda-saas-plan-name {
+  font-size: var(--saas-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--saas-muted);
+  margin-bottom: 6px;
+}
+
+.hmda-saas-plan-price {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: var(--saas-leading-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--saas-text);
+}
+
+.hmda-saas-plan-note {
+  font-size: 12px;
+  color: var(--saas-muted);
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
+.hmda-saas-badge-save {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #047857;
+  background: rgba(236, 253, 245, 0.95);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 4px 9px;
+  border-radius: 9px;
+}
+
+.hmda-saas-ms-btn {
+  width: 100%;
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 9px;
+  border: 1px solid var(--saas-input-border);
+  background: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: none !important;
+  color: var(--saas-text);
+  box-sizing: border-box;
+  box-shadow: var(--saas-shadow-soft);
+  letter-spacing: -0.01em;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.hmda-saas-ms-btn:hover,
+.hmda-saas-ms-btn:focus,
+.hmda-saas-ms-btn:focus-visible,
+.hmda-saas-ms-btn:visited,
+.hmda-saas-ms-btn:active {
+  text-decoration: none !important;
+  color: var(--saas-text);
+  border-color: var(--saas-border-hover);
+  background: #fff;
+}
+
+.hmda-saas-muted {
+  font-size: var(--saas-text-sm);
+  color: var(--saas-muted);
+  line-height: var(--saas-leading-relaxed);
+  margin-top: 16px;
+}
+
+.hmda-saas-steps {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.hmda-saas-step {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--saas-border);
+  color: var(--saas-muted);
+  letter-spacing: -0.01em;
+}
+
+.hmda-saas-step--on {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(111, 69, 214, 0.28);
+  color: var(--saas-navy);
+  box-shadow: none;
+}
+
+.hmda-saas-insight {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--saas-text);
+  border: 1px solid var(--saas-border);
+  box-shadow: var(--saas-shadow-soft);
+}
+
+.hmda-saas-insight p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.hmda-saas-insight a {
+  text-decoration: none;
+  color: var(--saas-navy);
+  font-weight: 500;
+}
+
+.hmda-saas-insight a:hover {
+  text-decoration: underline;
+}
+
+.hmda-saas-insight button {
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--saas-text);
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: none;
+  letter-spacing: -0.01em;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.hmda-saas-insight button:hover {
+  background: #fff;
+  border-color: var(--saas-border-hover);
+  filter: none;
+}
+
+/* ── Premium onboarding (Go Premium / checklist) ───────────────────────── */
+
+.hmda-saas-onboarding-h2 {
+  margin: 22px 0 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--saas-muted);
+}
+
+.hmda-saas-onboarding-h2:first-of-type {
+  margin-top: 0;
+}
+
+.hmda-saas-feature-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hmda-saas-feature-list li {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--saas-border);
+  background: var(--saas-input-bg);
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.hmda-saas-feature-list strong {
+  display: block;
+  font-weight: 700;
+  color: var(--saas-text);
+  margin-bottom: 4px;
+  letter-spacing: -0.02em;
+}
+
+.hmda-saas-onboarding-callout {
+  margin: 18px 0 14px;
+  padding: 14px 16px;
+  border-radius: 11px;
+  border: 1px solid rgba(111, 69, 214, 0.22);
+  background: linear-gradient(135deg, rgba(111, 69, 214, 0.07) 0%, rgba(23, 43, 85, 0.06) 100%);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--saas-text);
+}
+
+.hmda-saas-onboarding-callout em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--saas-navy);
+}
+
+.hmda-saas-onboarding-roi {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--saas-text);
+  padding: 12px 14px;
+  border-radius: 10px;
+  border-left: 3px solid var(--saas-accent);
+  background: rgba(111, 69, 214, 0.06);
+}
+
+.hmda-saas-onboarding-checklist {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.65;
+  font-size: 13px;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-feature-list li {
+  background: rgba(255, 255, 255, 0.45);
+  border-color: var(--saas-border);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onboarding-roi {
+  background: rgba(255, 255, 255, 0.38);
+}
+
+/* Wide account / admin / onboarding — edge-to-edge shell (padding only); keeps narrow flows on default shell */
+.hmda-saas-wide .hmda-saas-inner {
+  max-width: none;
+  width: 100%;
+  padding-left: clamp(16px, 4vw, 40px);
+  padding-right: clamp(16px, 4vw, 40px);
+}
+
+.hmda-saas-wide .hmda-saas-main {
+  max-width: none;
+  width: 100%;
+}
+
+/* Edge-to-edge workspace layouts (pinned list, files library, etc.) */
+/* Admin / no-pad layout — children render directly without card constraint */
+.hmda-saas-main--nopad {
+  max-width: none !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.hmda-saas-main--nopad ~ *,
+.hmda-saas-page--auth:has(.hmda-saas-main--nopad) .hmda-saas-inner {
+  max-width: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.hmda-saas-page--auth:has(.hmda-saas-main--nopad) .hmda-saas-inner {
+  width: 100%;
+}
+
+.hmda-saas-page--fullwidth .hmda-saas-inner {
+  max-width: none;
+  width: 100%;
+  padding-left: clamp(16px, 4vw, 40px);
+  padding-right: clamp(16px, 4vw, 40px);
+}
+
+.hmda-saas-page--fullwidth .hmda-saas-main {
+  max-width: none !important;
+  width: 100%;
+}
+
+.hmda-saas-page--fullwidth .hmda-saas-fullwidth-main {
+  width: 100%;
+  max-width: min(1400px, 100%);
+  margin: 0 auto;
+}
+
+/* ── Premium onboarding — minimal two-column board ───────────────────── */
+
+.hmda-saas-onb-board {
+  width: 100%;
+}
+
+.hmda-saas-onb-board--minimal {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.hmda-saas-wide .hmda-saas-main > .hmda-saas-card:has(.hmda-saas-onb-board--minimal) {
+  max-width: 980px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: clamp(28px, 4vw, 40px) clamp(24px, 4vw, 36px);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.05);
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-wide .hmda-saas-main > .hmda-saas-card:has(.hmda-saas-onb-board--minimal) {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.hmda-saas-wide .hmda-saas-main:has(.hmda-saas-onb-board--minimal) .hmda-saas-hero-text {
+  display: none;
+}
+
+.hmda-saas-onb-minimal__head {
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+.hmda-saas-onb-minimal__title {
+  margin: 0 0 6px;
+  font-family: var(--saas-font-display);
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+  color: var(--saas-text);
+}
+
+.hmda-saas-onb-minimal__sub {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  color: var(--saas-muted);
+  line-height: 1.45;
+}
+
+.hmda-saas-onb-column__label {
+  margin: 0 0 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(100, 116, 139, 0.88);
+}
+
+.hmda-saas-onb-layout--minimal {
+  gap: 16px 20px;
+  align-items: stretch;
+}
+
+.hmda-saas-onb-layout--minimal .hmda-saas-onb-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 16px 18px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-layout--minimal .hmda-saas-onb-column {
+  background: rgba(255, 255, 255, 0.42);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.hmda-saas-onb-minimal-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.hmda-saas-onb-minimal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.hmda-saas-onb-minimal-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.hmda-saas-onb-minimal-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--coheus-gradient-soft, rgba(248, 250, 252, 0.95));
+  color: var(--coheus-blue, #1d77c3);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+.hmda-saas-onb-minimal__foot {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  text-align: center;
+}
+
+.hmda-saas-onb-minimal__foot .hmda-saas-btn--primary {
+  min-width: 140px;
+}
+
+.hmda-saas-onb-minimal__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 10px;
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--saas-muted);
+}
+
+.hmda-saas-onb-minimal__links a {
+  font-weight: 550;
+  color: var(--saas-text);
+  text-decoration: none;
+}
+
+.hmda-saas-onb-minimal__links a:hover {
+  color: var(--coheus-blue, #1d77c3);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hmda-saas-onb-minimal__links span[aria-hidden] {
+  opacity: 0.35;
+  user-select: none;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-minimal__title {
+  background: none;
+  -webkit-text-fill-color: unset;
+  color: var(--saas-text);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-minimal-icon {
+  background: rgba(255, 255, 255, 0.65);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #1d77c3;
+}
+
+@media (max-width: 720px) {
+  .hmda-saas-onb-layout--minimal {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+/* ── Premium onboarding profile — two-column value layout (legacy) ───── */
+
+.hmda-saas-onb-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px clamp(24px, 4vw, 48px);
+  align-items: start;
+}
+
+@media (max-width: 820px) {
+  .hmda-saas-onb-layout {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+}
+
+.hmda-saas-onb-kicker {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--saas-muted);
+  font-weight: 450;
+  letter-spacing: -0.015em;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.hmda-saas-onb-kicker a {
+  font-weight: 600;
+  color: var(--saas-navy);
+  text-decoration: none;
+}
+
+.hmda-saas-onb-kicker a:hover {
+  text-decoration: underline;
+}
+
+.hmda-saas-onb-kicker__dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.22);
+  flex-shrink: 0;
+}
+
+.hmda-saas-onb-heading {
+  margin: 0 0 10px;
+  font-family: var(--saas-font-display);
+  font-size: clamp(1.25rem, 2.4vw, 1.45rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+  color: var(--saas-text);
+}
+
+.hmda-saas-onb-heading--compact {
+  margin-top: 8px;
+  margin-bottom: 14px;
+}
+
+.hmda-saas-onb-lede {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--saas-muted);
+  font-weight: 440;
+  letter-spacing: -0.012em;
+}
+
+.hmda-saas-onb-features {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hmda-saas-onb-feature {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--saas-border);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--saas-shadow-soft);
+}
+
+.hmda-saas-pastel-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.hmda-saas-pastel-icon--mint {
+  background: linear-gradient(155deg, #ecfdf5 0%, #ccfbf1 48%, #d1fae5 100%);
+  color: #0d9488;
+}
+
+.hmda-saas-pastel-icon--lilac {
+  background: linear-gradient(155deg, #f5f3ff 0%, #ede9fe 52%, #e9d5ff 100%);
+  color: #7c3aed;
+}
+
+.hmda-saas-pastel-icon--apricot {
+  background: linear-gradient(155deg, #fffbeb 0%, #ffedd5 50%, #fed7aa 100%);
+  color: #c2410c;
+}
+
+.hmda-saas-pastel-icon--aqua {
+  background: linear-gradient(155deg, #ecfeff 0%, #e0f2fe 52%, #bae6fd 100%);
+  color: #0369a1;
+}
+
+.hmda-saas-pastel-icon--rose {
+  background: linear-gradient(155deg, #fff1f2 0%, #ffe4e6 52%, #fecdd3 100%);
+  color: #e11d48;
+}
+
+.hmda-saas-pastel-icon--sky {
+  background: linear-gradient(155deg, #f0f9ff 0%, #e0f2fe 50%, #bae6fd 100%);
+  color: #0284c7;
+}
+
+.hmda-saas-pastel-icon--mist {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: linear-gradient(155deg, #f8fafc 0%, #f1f5f9 100%);
+  color: #475569;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.hmda-saas-onb-feature .hmda-saas-pastel-icon--mist {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+}
+
+.hmda-saas-onb-feature__body {
+  min-width: 0;
+}
+
+.hmda-saas-onb-feature__title {
+  display: block;
+  font-family: var(--saas-font-display);
+  font-size: 15px;
+  font-weight: 630;
+  letter-spacing: -0.022em;
+  color: var(--saas-text);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.hmda-saas-onb-feature__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--saas-muted);
+  letter-spacing: -0.01em;
+  font-weight: 440;
+}
+
+.hmda-saas-onb-aside-text {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.68;
+  color: var(--saas-muted);
+  letter-spacing: -0.012em;
+}
+
+.hmda-saas-onb-callout {
+  margin-top: 0;
+}
+
+.hmda-saas-onb-roi {
+  margin-bottom: 22px;
+}
+
+.hmda-saas-onb-roi__label {
+  display: block;
+  font-family: var(--saas-font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--saas-navy);
+  margin-bottom: 8px;
+  opacity: 0.92;
+}
+
+.hmda-saas-onb-checklist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.hmda-saas-onb-checklist li {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.58;
+  color: var(--saas-text);
+  letter-spacing: -0.01em;
+  font-weight: 440;
+}
+
+.hmda-saas-onb-checklist li span:last-child {
+  padding-top: 5px;
+}
+
+.hmda-saas-onb-actions {
+  margin-top: 22px;
+}
+
+.hmda-saas-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.hmda-saas-matrix th,
+.hmda-saas-matrix td {
+  padding: 8px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--saas-border);
+}
+
+/* ── SprinkleX / sx.tvma.fi — SaaS auth & billing shell ─────────────────── */
+
+.hmda-saas-page--sprinkle {
+  --saas-bg: transparent;
+  --saas-bg-elevated: transparent;
+  --saas-text: #0f172a;
+  --saas-muted: rgba(15, 23, 42, 0.58);
+  --saas-border: rgba(255, 255, 255, 0.42);
+  --saas-border-hover: rgba(255, 255, 255, 0.55);
+  --saas-input-bg: rgba(255, 255, 255, 0.55);
+  --saas-input-border: rgba(255, 255, 255, 0.38);
+  --saas-focus-ring: rgba(29, 119, 195, 0.28);
+  --saas-shadow-card: 0 14px 44px rgba(15, 23, 42, 0.09), 0 2px 10px rgba(29, 119, 195, 0.06);
+  --saas-navy: #152b52;
+  --saas-navy-hover: #1d77c3;
+
+  font-family: var(--saas-font-sans);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-bg {
+  display: none;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-inner {
+  padding-top: 28px;
+  padding-bottom: 56px;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-topbar {
+  margin-bottom: 28px;
+  padding: 12px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.07), 0 1px 6px rgba(15, 23, 42, 0.04);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-brand {
+  font-family: var(--saas-font-sans);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-brand-title {
+  font-family: var(--saas-font-display);
+  font-size: clamp(15px, 1.2vw, 17px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-brand-tagline {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.016em;
+  max-width: min(400px, 52vw);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-brand:hover,
+.hmda-saas-page--sprinkle .hmda-saas-brand:focus-visible {
+  color: var(--saas-text);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-pill {
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.62);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  font-weight: 550;
+  letter-spacing: -0.015em;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-pill--ghost {
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-pill--primary {
+  background: linear-gradient(135deg, #1d77c3 0%, #4e9a4b 88%) !important;
+  border-color: transparent !important;
+  box-shadow: 0 10px 28px rgba(29, 119, 195, 0.28);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-pill--primary:hover {
+  filter: brightness(1.05);
+  background: linear-gradient(135deg, #1d77c3 0%, #4e9a4b 88%) !important;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-title {
+  font-size: clamp(1.72rem, 4.2vw, 2.35rem);
+  font-weight: 600;
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+  background: linear-gradient(90deg, #1d77c3 0%, #4e9a4b 52%, #90d348 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-subtitle {
+  color: rgba(15, 23, 42, 0.62);
+  font-weight: 400;
+  font-size: clamp(14px, 1.45vw, 16px);
+  line-height: 1.62;
+  letter-spacing: -0.014em;
+  max-width: 56ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-card {
+  border-radius: 22px;
+  padding: 28px 26px 30px;
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--saas-shadow-card);
+  font-size: 15px;
+  line-height: 1.58;
+  letter-spacing: -0.012em;
+}
+
+/* Wide account rails — editorial alignment vs centered checkout flows */
+.hmda-saas-wide.hmda-saas-page--sprinkle .hmda-saas-hero-text {
+  text-align: left;
+  max-width: min(72ch, 100%);
+}
+
+.hmda-saas-wide.hmda-saas-page--sprinkle .hmda-saas-subtitle {
+  margin-left: 0;
+  margin-right: 0;
+  max-width: min(68ch, 100%);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-field label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-input,
+.hmda-saas-page--sprinkle .hmda-saas-select,
+.hmda-saas-page--sprinkle .hmda-saas-textarea {
+  font-size: 15px;
+  letter-spacing: -0.012em;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-btn--primary {
+  background: linear-gradient(135deg, #1d77c3 0%, #4e9a4b 92%);
+  border-color: transparent;
+  box-shadow: 0 10px 26px rgba(29, 119, 195, 0.22);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-btn--primary:hover {
+  filter: brightness(1.05);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-btn--ghost {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.48);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-ms-btn {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.56);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-ms-btn:hover {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-step {
+  background: rgba(255, 255, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-step--on {
+  border-color: rgba(29, 119, 195, 0.35);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-plan {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.52);
+  border-color: rgba(255, 255, 255, 0.46);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-plan--selected {
+  border-color: rgba(29, 119, 195, 0.42);
+  box-shadow: 0 0 0 2px rgba(29, 119, 195, 0.12);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-insight {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.42);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-kicker__dot {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-heading {
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-feature {
+  background: rgba(255, 255, 255, 0.58);
+  border-color: rgba(255, 255, 255, 0.52);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-feature:hover {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(255, 255, 255, 0.65);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-wide .hmda-saas-card {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.55);
+  border-radius: 22px;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-minimal__foot {
+  border-top-color: rgba(255, 255, 255, 0.4);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-pastel-icon--mist {
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.85) 0%, rgba(248, 250, 252, 0.75) 100%);
+  border-color: rgba(255, 255, 255, 0.55);
+  color: rgba(30, 58, 95, 0.82);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-onb-roi__label {
+  color: var(--saas-navy-hover);
+}
+
+/* Account / workspace — back to public DataBank (top of stack) */
+.hmda-account-back {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  margin: 0 0 4px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--saas-border);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: var(--saas-shadow-soft);
+}
+
+.hmda-account-back__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--saas-navy);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.hmda-account-back__link:hover {
+  color: var(--saas-navy-hover);
+  text-decoration: none;
+}
+
+.hmda-account-back__link:focus-visible {
+  outline: 2px solid var(--saas-focus-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.hmda-account-back__arrow {
+  font-weight: 600;
+  opacity: 0.72;
+}
+
+.hmda-account-back__hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--saas-muted);
+  letter-spacing: -0.01em;
+}
+
+.hmda-saas-page--sprinkle .hmda-account-back {
+  background: rgba(255, 255, 255, 0.42);
+  border-color: rgba(255, 255, 255, 0.52);
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.05);
+}
+
+.hmda-ws > .hmda-account-back {
+  margin-bottom: 14px;
+}
+
+/* ── Auth (sign-in / sign-up) — modern minimal + Coheus sprinkle ───── */
+
+.hmda-saas-page--auth .hmda-saas-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-top: 16px;
+  padding-bottom: 32px;
+}
+
+.hmda-saas-topbar--auth {
+  margin-bottom: 0;
+  padding: 10px 4px 14px;
+  border-bottom: none;
+}
+
+.hmda-saas-topbar--auth .hmda-saas-brand-logo {
+  height: 40px;
+}
+
+.hmda-saas-topbar--auth .hmda-saas-brand-title {
+  font-size: 14px;
+}
+
+.hmda-saas-nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: -0.02em;
+  color: var(--saas-muted);
+  text-decoration: none !important;
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.hmda-saas-nav-link:hover,
+.hmda-saas-nav-link:focus-visible {
+  color: var(--saas-text);
+  text-decoration: none !important;
+}
+
+.hmda-saas-nav-link--accent {
+  font-weight: 600;
+  color: var(--coheus-blue);
+}
+
+.hmda-saas-nav-link--accent:hover {
+  color: #155a94;
+}
+
+.hmda-saas-page--auth .hmda-saas-topbar-links {
+  gap: 16px;
+}
+
+.hmda-saas-topbar--auth .hmda-saas-nav-link,
+.hmda-saas-topbar--auth .hmda-saas-nav-link--accent {
+  color: #0f172a;
+}
+.hmda-saas-topbar--auth .hmda-saas-nav-link:hover,
+.hmda-saas-topbar--auth .hmda-saas-nav-link--accent:hover {
+  color: #334155;
+}
+
+.hmda-saas-page--auth .hmda-saas-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 8px 0 24px;
+}
+
+.hmda-saas-card--auth {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.hmda-saas-auth {
+  position: relative;
+  padding: 28px 26px 24px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 20px 50px rgba(29, 119, 195, 0.08),
+    0 8px 24px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.hmda-saas-auth::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--coheus-gradient);
+  opacity: 0.92;
+}
+
+.hmda-saas-auth__head {
+  margin-bottom: 22px;
+  text-align: center;
+}
+
+.hmda-saas-auth__kicker {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hmda-saas-auth__kicker .hmda-saas-brand-accent {
+  background: var(--coheus-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.hmda-saas-auth__title {
+  margin: 0 0 6px;
+  font-size: 1.375rem;
+  font-weight: var(--title-weight-light, 300);
+  letter-spacing: var(--title-tracking-display, -0.048em);
+  line-height: 1.12;
+  color: var(--saas-text);
+}
+
+.hmda-saas-auth__lead {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  color: rgba(100, 116, 139, 0.92);
+  line-height: 1.4;
+}
+
+.hmda-saas-auth__status {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--saas-muted);
+  background: rgba(248, 250, 252, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.hmda-saas-auth__status--warn {
+  color: #9a3412;
+  background: rgba(255, 247, 237, 0.95);
+  border-color: rgba(251, 146, 60, 0.25);
+}
+
+.hmda-saas-auth__providers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hmda-saas-provider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 11px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  font-size: var(--saas-text-sm);
+  font-weight: 500;
+  font-family: inherit;
+  letter-spacing: -0.02em;
+  color: var(--saas-text);
+  text-decoration: none !important;
+  box-sizing: border-box;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.hmda-saas-provider:hover,
+.hmda-saas-provider:focus-visible {
+  border-color: rgba(15, 23, 42, 0.18);
+  background: rgba(248, 250, 252, 1);
+  color: var(--saas-text);
+  text-decoration: none !important;
+}
+
+.hmda-saas-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 20px 0 18px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(100, 116, 139, 0.85);
+}
+
+.hmda-saas-divider::before,
+.hmda-saas-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.hmda-saas-auth__form .hmda-saas-field {
+  margin-bottom: 12px;
+}
+
+.hmda-saas-card--auth .hmda-saas-field label {
+  font-size: var(--saas-text-sm);
+  font-weight: 500;
+  letter-spacing: var(--saas-tracking-tight);
+  text-transform: none;
+  color: var(--saas-label-color);
+  margin-bottom: 5px;
+}
+
+.hmda-saas-card--auth .hmda-saas-input {
+  min-height: 44px;
+  padding: 11px 13px;
+  border-radius: 11px;
+  border-color: rgba(15, 23, 42, 0.1);
+  background: #fff;
+  font-size: var(--saas-text-sm);
+}
+
+.hmda-saas-card--auth .hmda-saas-input::placeholder {
+  color: rgba(100, 116, 139, 0.55);
+}
+
+.hmda-saas-auth__error {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.hmda-saas-auth__submit {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 6px;
+  border-radius: 11px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hmda-saas-auth__foot {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  text-align: center;
+}
+
+.hmda-saas-auth__meta {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--saas-muted);
+  letter-spacing: -0.01em;
+}
+
+.hmda-saas-auth__meta a {
+  color: var(--saas-text);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.hmda-saas-auth__meta a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hmda-saas-auth__dot {
+  margin: 0 6px;
+  opacity: 0.45;
+}
+
+.hmda-saas-auth__demo-btn {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.hmda-saas-auth__demo-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--saas-muted);
+}
+
+.hmda-saas-provider--linkedin::before {
+  content: 'in';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  border-radius: 3px;
+  background: #0a66c2;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-topbar--auth {
+  background: transparent;
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-auth {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.58);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-provider {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: rgba(15, 23, 42, 0.07);
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-provider:hover {
+  border-color: rgba(29, 119, 195, 0.22);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-card--auth .hmda-saas-input:focus {
+  border-color: rgba(29, 119, 195, 0.45);
+  box-shadow: 0 0 0 3px rgba(29, 119, 195, 0.14);
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-btn--primary {
+  background: var(--coheus-gradient);
+  border: none;
+  box-shadow: 0 8px 22px rgba(29, 119, 195, 0.22);
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-btn--primary:hover {
+  filter: brightness(1.04);
+  box-shadow: 0 10px 26px rgba(29, 119, 195, 0.28);
+}
+
+.hmda-saas-page--sprinkle.hmda-saas-page--auth .hmda-saas-auth__meta a:hover {
+  color: var(--coheus-blue);
+}
+
+@media (max-width: 440px) {
+  .hmda-saas-auth {
+    padding: 22px 18px 20px;
+    border-radius: 16px;
+  }
+}
+
+/* ── Sign-in — minimal compact card ───────────────────────────────────────── */
+
+.hmda-saas-auth--minimal {
+  padding: 18px 20px 16px;
+  border-radius: 16px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px rgba(29, 119, 195, 0.06);
+}
+
+.hmda-saas-auth--minimal::before {
+  height: 2px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__head {
+  margin-bottom: 14px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__title {
+  font-size: 1.25rem;
+  font-weight: var(--title-weight-light, 300);
+  letter-spacing: var(--title-tracking-section, -0.028em);
+  margin: 0;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__status {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__providers {
+  gap: 6px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-provider {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-provider--linkedin::before {
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  font-size: 9px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-divider {
+  margin: 12px 0 10px;
+  gap: 10px;
+  font-size: 10px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__form .hmda-saas-field {
+  margin-bottom: 8px;
+}
+
+.hmda-saas-card--auth .hmda-saas-auth--minimal .hmda-saas-field label {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.hmda-saas-card--auth .hmda-saas-auth--minimal .hmda-saas-input {
+  min-height: 38px;
+  padding: 8px 11px;
+  font-size: 14px;
+  border-radius: 9px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-password-wrap__input {
+  min-height: 38px;
+  padding-right: 40px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-password-wrap__toggle {
+  width: 30px;
+  height: 30px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__submit {
+  min-height: 38px;
+  margin-top: 4px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__foot {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__meta {
+  margin: 0;
+  font-size: 12px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__demo-link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--coheus-blue);
+  cursor: pointer;
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__demo-link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hmda-saas-auth--minimal .hmda-saas-auth__demo-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hmda-saas-page--auth .hmda-saas-inner {
+  padding-top: 8px;
+  padding-bottom: 20px;
+}
+
+.hmda-saas-page--auth .hmda-saas-main {
+  padding: 4px 0 12px;
+}
+
+.hmda-saas-topbar--auth {
+  padding: 6px 4px 8px;
+}
+
+.hmda-saas-topbar--auth .hmda-saas-brand-logo {
+  height: 32px;
+}
+
+@media (max-width: 440px) {
+  .hmda-saas-auth--minimal {
+    padding: 16px 16px 14px;
+    border-radius: 14px;
+  }
+}
+
+/* ── Signup — two-column compact layout ───────────────────────────────────── */
+
+.hmda-saas-page--signup .hmda-saas-main {
+  max-width: min(920px, 100%);
+}
+
+.hmda-saas-page--signup .hmda-saas-hero-text--signup {
+  text-align: left;
+  margin-bottom: 14px;
+}
+
+.hmda-saas-page--signup .hmda-saas-hero-text--signup .hmda-saas-title {
+  font-size: clamp(1.35rem, 2.8vw, 1.625rem);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  margin-bottom: 6px;
+  background: linear-gradient(90deg, #1d77c3 0%, #4e9a4b 52%, #90d348 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.hmda-saas-page--signup .hmda-saas-hero-text--signup .hmda-saas-subtitle {
+  margin-left: 0;
+  margin-right: 0;
+  font-size: var(--saas-text-sm);
+  line-height: var(--saas-leading-relaxed);
+  max-width: 42em;
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-card--signup {
+  padding: 18px 20px 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.07), 0 1px 6px rgba(15, 23, 42, 0.04);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-signup-rail__step--on .hmda-saas-signup-rail__num {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(29, 119, 195, 0.4);
+  color: var(--coheus-blue);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-signup-rail__plan {
+  background: rgba(255, 255, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.48);
+}
+
+.hmda-saas-page--sprinkle .hmda-saas-signup-summary {
+  background: rgba(255, 255, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.48);
+}
+
+.hmda-saas-signup {
+  display: grid;
+  grid-template-columns: minmax(148px, 188px) minmax(0, 1fr);
+  gap: 20px 24px;
+  align-items: start;
+}
+
+@media (max-width: 680px) {
+  .hmda-saas-signup {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .hmda-saas-signup-rail {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 8px 12px;
+    align-items: center;
+  }
+
+  .hmda-saas-signup-rail__steps {
+    grid-column: 1 / -1;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+  }
+
+  .hmda-saas-signup-rail__foot {
+    display: none;
+  }
+}
+
+.hmda-saas-signup-rail__steps {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hmda-saas-signup-rail__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--saas-text-sm);
+  font-weight: 500;
+  color: var(--saas-muted);
+  letter-spacing: var(--saas-tracking-body);
+}
+
+.hmda-saas-signup-rail__step--on {
+  color: var(--saas-text);
+  font-weight: 600;
+}
+
+.hmda-saas-signup-rail__step--done {
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.hmda-saas-signup-rail__num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: var(--saas-text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--saas-border);
+}
+
+.hmda-saas-signup-rail__step--on .hmda-saas-signup-rail__num {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(29, 119, 195, 0.35);
+  color: var(--saas-navy);
+}
+
+.hmda-saas-signup-rail__step--done .hmda-saas-signup-rail__num {
+  opacity: 0.65;
+}
+
+.hmda-saas-signup-rail__plan {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--saas-border);
+  font-size: var(--saas-text-sm);
+  line-height: var(--saas-leading-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+.hmda-saas-signup-rail__plan-label {
+  font-size: var(--saas-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--saas-muted);
+}
+
+.hmda-saas-signup-rail__plan strong,
+.hmda-saas-signup-rail__plan .hmda-saas-plan-price {
+  font-family: var(--saas-font-display);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.hmda-saas-signup-rail__save {
+  font-size: 11px;
+  font-weight: 600;
+  color: #047857;
+}
+
+.hmda-saas-signup-rail__note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--saas-muted);
+  line-height: 1.35;
+}
+
+.hmda-saas-signup-rail__foot {
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.hmda-saas-signup-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.hmda-saas-signup-rail__insight {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--saas-muted);
+}
+
+.hmda-saas-signup-rail__link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--saas-navy);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+.hmda-saas-signup-rail__link:hover {
+  text-decoration: underline;
+}
+
+.hmda-saas-signup-main {
+  min-width: 0;
+  font-size: var(--saas-text-md);
+  color: #0a0a0a;
+}
+
+/* Signup form column — larger, darker type for readability */
+.hmda-saas-signup-main .hmda-saas-signup-heading {
+  margin: 0 0 14px;
+  font-size: 1.3125rem;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  color: #0a0a0a;
+}
+
+.hmda-saas-signup-main .hmda-saas-field--tight label {
+  font-size: var(--saas-text-base);
+  font-weight: 600;
+  color: rgba(10, 10, 10, 0.9);
+}
+
+.hmda-saas-signup-main .hmda-saas-field--tight .hmda-saas-input,
+.hmda-saas-signup-main .hmda-saas-field--tight .hmda-saas-select,
+.hmda-saas-signup-main .hmda-saas-password-wrap__input {
+  min-height: 42px;
+  padding: 10px 12px;
+  font-size: var(--saas-text-md);
+  font-weight: 500;
+  color: #0a0a0a;
+  border-color: rgba(10, 10, 10, 0.14);
+  background: #fff;
+}
+
+.hmda-saas-signup-main .hmda-saas-field--tight .hmda-saas-input::placeholder {
+  color: rgba(10, 10, 10, 0.4);
+}
+
+.hmda-saas-signup-main .hmda-saas-muted,
+.hmda-saas-signup-main .hmda-saas-muted--inline {
+  font-size: var(--saas-text-base);
+  color: #334155;
+}
+
+.hmda-saas-signup-main .hmda-saas-ms-btn,
+.hmda-saas-signup-main .hmda-saas-ms-btn--compact {
+  min-height: 42px;
+  font-size: var(--saas-text-base);
+  font-weight: 600;
+  color: #0a0a0a;
+}
+
+.hmda-saas-signup-main .hmda-saas-signup-divider {
+  font-size: var(--saas-text-sm);
+  font-weight: 600;
+  color: #475569;
+}
+
+.hmda-saas-signup-main .hmda-saas-btn {
+  min-height: 40px;
+  font-size: var(--saas-text-base);
+  font-weight: 600;
+}
+
+.hmda-saas-signup-main .hmda-saas-btn--ghost {
+  color: #0a0a0a;
+}
+
+.hmda-saas-signup-main .hmda-saas-password-wrap__toggle {
+  color: #475569;
+}
+
+.hmda-saas-signup-main .hmda-saas-password-wrap__toggle:hover {
+  color: #0a0a0a;
+}
+
+.hmda-saas-signup-main .hmda-saas-plan-name {
+  color: #334155;
+}
+
+.hmda-saas-signup-main .hmda-saas-plan--compact .hmda-saas-plan-price {
+  font-size: 1.375rem;
+  color: #0a0a0a;
+}
+
+.hmda-saas-signup-main .hmda-saas-signup-summary dt {
+  color: rgba(10, 10, 10, 0.72);
+  font-weight: 600;
+}
+
+.hmda-saas-signup-main .hmda-saas-signup-summary dd {
+  font-size: var(--saas-text-base);
+  color: #0a0a0a;
+}
+
+.hmda-saas-signup-heading {
+  margin: 0 0 12px;
+  font-size: var(--saas-text-lg);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: var(--saas-leading-tight);
+  color: var(--saas-text);
+}
+
+.hmda-saas-field--tight {
+  margin-bottom: 10px;
+}
+
+.hmda-saas-field--tight label {
+  margin-bottom: 4px;
+  font-size: var(--saas-text-sm);
+  font-weight: 500;
+  letter-spacing: var(--saas-tracking-tight);
+  text-transform: none;
+}
+
+.hmda-saas-field--tight .hmda-saas-input,
+.hmda-saas-field--tight .hmda-saas-select {
+  padding: 8px 10px;
+  font-size: var(--saas-text-sm);
+  border-radius: 8px;
+}
+
+.hmda-saas-password-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.hmda-saas-password-wrap__input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.hmda-saas-password-wrap__toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--saas-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.hmda-saas-password-wrap__toggle:hover {
+  color: var(--saas-text);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.hmda-saas-btn-row--tight {
+  margin-top: 12px;
+  gap: 6px;
+}
+
+.hmda-saas-muted--inline {
+  margin-top: 6px;
+  margin-bottom: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.hmda-saas-signup-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 10px;
+  font-size: var(--saas-text-xs);
+  font-weight: 500;
+  color: var(--saas-muted);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.hmda-saas-signup-divider::before,
+.hmda-saas-signup-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.hmda-saas-ms-btn--compact {
+  margin-top: 0;
+  min-height: 36px;
+  font-size: 12px;
+}
+
+.hmda-saas-pricing-grid--compact {
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.hmda-saas-plan--compact {
+  padding: 12px 12px 14px;
+  border-radius: 10px;
+}
+
+.hmda-saas-plan--compact .hmda-saas-plan-price {
+  font-size: 20px;
+}
+
+.hmda-saas-plan--compact .hmda-saas-plan-note {
+  display: none;
+}
+
+.hmda-saas-signup-summary {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid var(--saas-border);
+  display: grid;
+  gap: 8px;
+}
+
+.hmda-saas-signup-summary > div {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.hmda-saas-signup-summary dt {
+  margin: 0;
+  font-size: var(--saas-text-xs);
+  font-weight: 500;
+  color: var(--saas-label-color);
+  text-transform: none;
+  letter-spacing: var(--saas-tracking-tight);
+}
+
+.hmda-saas-signup-summary dd {
+  margin: 0;
+  font-size: var(--saas-text-sm);
+  color: var(--saas-text);
+  line-height: var(--saas-leading-normal);
+  letter-spacing: var(--saas-tracking-body);
+}
+
+.hmda-saas-signup-inline-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: var(--saas-navy);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hmda-saas-signup-inline-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

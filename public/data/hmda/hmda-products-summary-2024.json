@@ -1,0 +1,110 @@
+{
+  "meta": {
+    "dataYear": 2024,
+    "exportedAt": null,
+    "recordCount": 4893,
+    "source": "static JSON",
+    "liveFallback": null,
+    "insightsBackfillFromPriorYear": false,
+    "insightsBackfillCount": 0,
+    "insightsBackfillNote": null
+  },
+  "products": [
+    {
+      "name": "Conventional",
+      "count": 4885,
+      "unitsOriginated": 3051310,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "FHA",
+      "count": 1277,
+      "unitsOriginated": 644959,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "VA",
+      "count": 1247,
+      "unitsOriginated": 424966,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "USDA",
+      "count": 869,
+      "unitsOriginated": 24349,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association",
+        "U.S. Bank National Association",
+        "GUARANTEED RATE, INC."
+      ]
+    },
+    {
+      "name": "Non-QM",
+      "count": 4343,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "Jumbo",
+      "count": 3446,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    },
+    {
+      "name": "HELOC",
+      "count": 1162,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "Wells Fargo Bank, National Association",
+        "U.S. Bank National Association"
+      ]
+    },
+    {
+      "name": "Construction",
+      "count": 3437,
+      "unitsOriginated": null,
+      "topLenders": [
+        "UNITED SHORE FINANCIAL SERVICES, LLC",
+        "Rocket Mortgage, LLC",
+        "JPMorgan Chase Bank, National Association",
+        "CROSSCOUNTRY MORTGAGE, INC.",
+        "Wells Fargo Bank, National Association"
+      ]
+    }
+  ]
+}

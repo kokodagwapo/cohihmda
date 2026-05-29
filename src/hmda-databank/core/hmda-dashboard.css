@@ -1,0 +1,749 @@
+/* ── HMDA DataBank: mobile-first responsive & loading ── */
+/* Typography: Sora display + Inter body (thin, elegant) */
+
+/* Breakpoints (use with JS: viewportW < 768 = mobile, < 1024 = tablet) */
+/* Base = mobile, then min-width overrides */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes hmda-skeleton-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes hmda-demo-icon-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.06); }
+}
+.hmda-demo-icon-pulse {
+  animation: hmda-demo-icon-pulse 2s ease-in-out infinite;
+}
+
+.hmda-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid var(--coheus-blue-soft, rgba(43, 94, 167, 0.2));
+  border-top-color: var(--coheus-blue, #2b5ea7);
+  animation: spin 0.8s linear infinite;
+}
+
+.hmda-skeleton-card {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 18px;
+  overflow: hidden;
+  min-height: 160px;
+}
+
+[data-theme="dark"] .hmda-skeleton-card {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hmda-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.08);
+  animation: hmda-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+[data-theme="dark"] .hmda-skeleton-line {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Mobile-first container + elegant thin typography */
+.hmda-container {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  width: 100%;
+  max-width: 1480px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+}
+
+@media (min-width: 768px) {
+  .hmda-container {
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+}
+
+@media (min-width: 1100px) {
+  .hmda-container {
+    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding-right: max(24px, env(safe-area-inset-right, 0px));
+  }
+}
+
+/* Soft pastel wash + CSS vars for child components */
+.hmda-container-pastel {
+  --hmda-p-lavender: rgba(199, 210, 254, 0.42);
+  --hmda-p-mint: rgba(187, 247, 208, 0.45);
+  --hmda-p-sky: rgba(186, 230, 253, 0.48);
+  --hmda-p-peach: rgba(254, 215, 170, 0.4);
+  --hmda-p-rose: rgba(251, 207, 232, 0.38);
+}
+
+.hmda-nav-home-btn:hover {
+  background: rgba(15, 23, 42, 0.04) !important;
+}
+
+[data-hmda-theme='dark'] .hmda-nav-home-btn:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.hmda-nav-pastel {
+  background: transparent !important;
+}
+
+[data-hmda-theme="dark"] .hmda-nav-pastel {
+  background: transparent !important;
+}
+
+/* Lenders filter toolbar — glass handled in hmda-glass-ui.css */
+.hmda-filter-toolbar-pastel {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+[data-hmda-theme="dark"] .hmda-filter-toolbar-pastel {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+.hmda-tab-icon-well svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Lenders filter toolbar: very light multi-stop pastel */
+.hmda-filter-toolbar-pastel {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+[data-hmda-theme="dark"] .hmda-filter-toolbar-pastel {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+/* Merged nav + filters row: horizontal scroll on narrow desktop instead of wrapping */
+.hmda-nav-filter-merge {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 102, 241, 0.35) transparent;
+}
+
+.hmda-nav-filter-merge::-webkit-scrollbar {
+  height: 6px;
+}
+
+.hmda-nav-filter-merge::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.35);
+  border-radius: 999px;
+}
+
+/* Rainbow hairline on modals */
+.hmda-modal-pastel-accent {
+  position: relative;
+  isolation: isolate;
+}
+
+.hmda-modal-pastel-accent::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 24px 24px 0 0;
+  background: linear-gradient(90deg, #c4b5fd, #67e8f9, #86efac, #fde047, #fbcfe8, #ddd6fe);
+  opacity: 0.88;
+  pointer-events: none;
+  z-index: 4;
+}
+
+[data-hmda-theme="dark"] .hmda-modal-pastel-accent::before {
+  opacity: 0.5;
+  filter: saturate(1.15) brightness(1.05);
+}
+
+@media (max-width: 639px) {
+  .hmda-modal-pastel-accent::before {
+    border-radius: 17px 17px 0 0;
+  }
+}
+
+.hmda-btn-playful:not(:disabled) {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.hmda-btn-playful:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.hmda-btn-playful svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hmda-hero-pastel-chip:not(:disabled) {
+  transition: transform 0.18s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.hmda-hero-pastel-chip:not(:disabled):hover {
+  transform: translateY(-2px);
+}
+
+.hmda-lender-count-pill svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Hero: thin headline + light CTAs */
+.hmda-hero .hmda-heading-1 {
+  font-family: var(--font-display);
+  font-weight: 500 !important;
+  letter-spacing: -0.035em !important;
+}
+.hmda-hero-actions .chip-btn {
+  font-weight: 500 !important;
+  letter-spacing: 0.04em;
+}
+.hmda-hero input {
+  font-weight: 400 !important;
+  letter-spacing: -0.01em;
+}
+
+/* Thin modern overrides: tabs, chips, labels */
+.hmda-container .tab-item {
+  font-family: var(--font-sans);
+  font-weight: 500 !important;
+  letter-spacing: 0.03em;
+}
+.hmda-container .chip-btn {
+  font-weight: 500 !important;
+  letter-spacing: 0.02em;
+}
+.hmda-container input,
+.hmda-container [placeholder] {
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.hmda-container .sort-btn {
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
+}
+/* Card and section headings — thin display + bold accents (typography.css) */
+.hmda-container .hmda-heading-1 {
+  font-family: var(--font-display) !important;
+  font-weight: var(--title-weight-light, 300) !important;
+  letter-spacing: var(--title-tracking-display, -0.048em) !important;
+}
+.hmda-container .hmda-heading-2:not(.hmda-lcard-title):not(.hmda-lender-modal-title) {
+  font-family: var(--font-display) !important;
+  font-weight: var(--title-weight-light, 300) !important;
+  letter-spacing: var(--title-tracking-section, -0.028em) !important;
+}
+.hmda-container .hmda-label {
+  font-weight: 500 !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.6875rem;
+}
+.hmda-container .hmda-mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+/* Pills / badges */
+.hmda-container .hmda-pill {
+  font-weight: 500 !important;
+  letter-spacing: 0.03em;
+}
+
+/* Geography map card: modern glass look */
+.hmda-container .hmda-geo-card {
+  border-radius: 20px;
+}
+
+.hmda-container .hmda-geo-glass {
+  isolation: isolate;
+}
+
+.hmda-container .hmda-map-glass-inner {
+  isolation: isolate;
+}
+
+/* Filter dropdowns: thin labels */
+.hmda-container .filter-group {
+  font-weight: 500 !important;
+}
+
+/* Nav bar: softer, modern */
+.hmda-nav {
+  border-radius: 16px !important;
+}
+
+/* Lender cards: refined display titles */
+.hmda-container .lcard-item .hmda-heading-2 {
+  font-family: var(--font-display) !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.025em !important;
+}
+
+@media (min-width: 640px) {
+  .hmda-container {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hmda-container {
+    padding-left: 36px;
+    padding-right: 36px;
+  }
+}
+
+/* Modal: full-bleed on small screens, centered on large */
+.hmda-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(24px, env(safe-area-inset-bottom, 0px));
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (min-width: 640px) {
+  .hmda-modal-overlay {
+    padding: 24px 16px 40px;
+  }
+}
+
+/* Lender detail modal — frosted backdrop, vertically centered */
+.hmda-modal-overlay.hmda-modal-lender {
+  backdrop-filter: blur(22px) saturate(168%);
+  -webkit-backdrop-filter: blur(22px) saturate(168%);
+  align-items: center;
+  overflow: hidden;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(24px, env(safe-area-inset-bottom, 0px));
+}
+
+.hmda-premium-exec[data-hmda-theme='light'] .hmda-modal-overlay.hmda-modal-lender {
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+@media (min-width: 640px) {
+  .hmda-modal-overlay.hmda-modal-lender {
+    align-items: flex-start;
+    padding: 144px 16px 40px;
+    overflow-y: auto;
+  }
+
+  .hmda-modal-lender .hmda-lender-modal-panel--modern.hmda-modal-panel {
+    margin-top: 0;
+    width: min(680px, calc(100vw - 32px));
+    max-width: min(680px, calc(100vw - 32px));
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+}
+
+/* Lender modal — prevent horizontal bleed from nested grids/tables */
+.hmda-modal-lender .hmda-lender-modal-card,
+.hmda-modal-lender .hmda-lender-modal-scroll,
+.hmda-modal-lender .hmda-lender-modal-body,
+.hmda-modal-lender .hmda-lender-modal-body--accordion,
+.hmda-modal-lender .hmda-lender-modal-accordion,
+.hmda-modal-lender .hmda-lender-modal-accordion-item,
+.hmda-modal-lender .hmda-lender-modal-accordion-content,
+.hmda-modal-lender .hmda-lender-modal-accordion-content > div,
+.hmda-modal-lender .hmda-lender-registry,
+.hmda-modal-lender .hmda-lender-modal-header-inner--merged {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Compare modal: centered like other modals */
+.hmda-modal-overlay.hmda-modal-compare {
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(24px, env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 640px) {
+  .hmda-modal-overlay.hmda-modal-compare {
+    align-items: flex-start;
+    padding: 120px 16px 40px;
+    overflow-y: auto;
+  }
+}
+
+.hmda-modal-panel.hmda-modal-compare-panel:fullscreen {
+  width: 100%;
+  width: 100vw;
+  height: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  box-sizing: border-box;
+}
+
+.hmda-modal-panel.hmda-modal-compare-panel:-webkit-full-screen {
+  width: 100%;
+  width: 100vw;
+  height: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  box-sizing: border-box;
+}
+
+/* Fullscreen reparents the panel; flatten top accent bar to match square corners */
+.hmda-modal-panel.hmda-modal-compare-panel:fullscreen::before,
+.hmda-modal-panel.hmda-modal-compare-panel:-webkit-full-screen::before {
+  border-radius: 0;
+}
+
+/* Light + fullscreen: opaque white (backup if inline styles are overridden) */
+.hmda-modal-panel.hmda-modal-compare-panel.hmda-compare-fs-light:fullscreen,
+.hmda-modal-panel.hmda-modal-compare-panel.hmda-compare-fs-light:-webkit-full-screen {
+  background: #fff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-modal-panel {
+  width: 100%;
+  max-width: 96vw;
+  margin: 0;
+  margin-left: env(safe-area-inset-left, 0);
+  margin-right: env(safe-area-inset-right, 0);
+  max-height: none;
+  border-radius: 18px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hmda-modal-protected.hmda-modal-panel {
+  max-height: min(90vh, calc(100vh - 48px));
+}
+
+/* Disable right-click, copy, and selection on protected modals (lender detail) */
+.hmda-modal-protected {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Public LAR drilldown: must remain readable/selectable (parent modal is anti-scrape). */
+.hmda-modal-protected #hmda-lender-modal-pipeline-drill,
+.hmda-modal-protected #hmda-lender-modal-pipeline-drill * {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default;
+}
+
+@media (min-width: 640px) {
+  .hmda-modal-panel {
+    width: 94%;
+    max-width: 720px;
+    max-height: calc(92vh - 48px);
+    border-radius: 26px;
+  }
+
+  /* Lender detail: compact executive panel */
+  .hmda-modal-lender .hmda-lender-modal-panel.hmda-modal-panel {
+    width: min(680px, calc(100vw - 32px));
+    max-width: min(680px, calc(100vw - 32px));
+  }
+}
+
+/* Lender modal: responsive 2-column body + full-width history strip */
+.hmda-lender-modal-body-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.hmda-lender-modal-panel--clean .hmda-lender-modal-body-inner--extended {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .hmda-lender-modal-body-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 18px;
+    align-items: start;
+  }
+
+  .hmda-lender-modal-panel--clean .hmda-lender-modal-body-inner--extended {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 12px 20px;
+    align-items: start;
+  }
+
+  .hmda-lender-modal-panel--dense .hmda-lender-modal-body-inner--extended {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
+    gap: 14px 22px;
+  }
+
+  .hmda-lender-modal-col-span,
+  .hmda-lender-modal-col--drill,
+  .hmda-lender-modal-footer {
+    grid-column: 1 / -1;
+  }
+
+  .hmda-lender-modal-col-left,
+  .hmda-lender-modal-col-right,
+  .hmda-lender-modal-col-lar,
+  .hmda-lender-modal-col-credit,
+  .hmda-lender-modal-col-contact {
+    min-width: 0;
+  }
+}
+
+/* Search suggestions: touch-friendly on mobile */
+.hmda-search-suggestions {
+  max-height: min(280px, 60vh);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Filter bar: stack on mobile */
+.hmda-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+/* Portaled filter menus (Type, Product, Channel, Sort) — above cards, map, toolbar scroll */
+.hmda-filter-menu-portal {
+  z-index: 10050 !important;
+}
+
+.hmda-filter-bar--menu-open {
+  position: relative;
+  z-index: 10040;
+}
+
+.hmda-filter-bar--menu-open .hmda-nav-filter-merge {
+  overflow: visible;
+}
+
+.hmda-filter-bar--search-open .hmda-nav-filter-merge {
+  overflow: visible;
+}
+
+.hmda-lenders-toolbar-search {
+  z-index: 2;
+}
+
+@media (min-width: 768px) {
+  .hmda-filter-bar .toolbar-shell {
+    flex-wrap: wrap;
+  }
+}
+
+/* Lenders toolbar: 2-column filter grid on small screens */
+.hmda-filter-toolbar--mf .hmda-filter-toolbar-mobile-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+
+.hmda-filter-toolbar--mf .hmda-filter-toolbar-mobile-filters > div {
+  min-width: 0;
+}
+
+.hmda-filter-toolbar--mf .hmda-filter-toolbar-mobile-filters .filter-group {
+  width: 100%;
+  max-width: 100%;
+  justify-content: space-between;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.hmda-filter-toolbar--mf .hmda-filter-toolbar-mobile-filters .filter-group span.hmda-heading-2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 520px) {
+  .hmda-filter-toolbar--mf .hmda-filter-toolbar-mobile-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Results grid: mobile-first single column until tablet width */
+.hmda-results-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 768px) {
+  .hmda-results-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+  }
+}
+
+@media (min-width: 900px) {
+  .hmda-results-grid {
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+}
+
+.hmda-lender-list-metrics-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(91, 141, 239, 0.35) transparent;
+}
+
+.hmda-lender-list-metrics-scroll::-webkit-scrollbar {
+  height: 5px;
+}
+
+.hmda-lender-list-metrics-scroll::-webkit-scrollbar-thumb {
+  background: rgba(91, 141, 239, 0.35);
+  border-radius: 999px;
+}
+
+/* List view: single column on mobile */
+.hmda-list-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+@media (min-width: 768px) {
+  .hmda-list-row {
+    flex-direction: row;
+    display: grid;
+    grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(75px, 1fr)) 44px 60px;
+    align-items: center;
+  }
+}
+
+/* ── Demo / Tour modal: thin modern typography ── */
+.hmda-demo-modal {
+  font-family: var(--font-sans) !important;
+}
+.hmda-demo-modal h3 {
+  font-family: var(--font-display) !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.025em !important;
+}
+.hmda-demo-modal p {
+  font-weight: 400 !important;
+}
+.hmda-demo-modal .hmda-demo-btn-primary {
+  font-weight: 500 !important;
+  letter-spacing: 0.02em;
+}
+.hmda-demo-modal .hmda-demo-btn-ghost {
+  font-weight: 500 !important;
+}
+/* Subtle pastel dismiss buttons with smaller icons */
+.hmda-demo-dismiss-btn {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  padding: 6px 10px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(91, 141, 239, 0.15) !important;
+  cursor: pointer;
+  font-family: var(--font-sans) !important;
+  background: rgba(91, 141, 239, 0.04) !important;
+  color: rgba(43, 94, 167, 0.6) !important;
+  letter-spacing: 0.02em;
+  transition: all 0.2s ease;
+  box-shadow: none;
+}
+.hmda-demo-dismiss-btn:hover {
+  background: rgba(91, 141, 239, 0.08) !important;
+  color: rgba(43, 94, 167, 0.8) !important;
+  transform: translateY(-1px);
+}
+.hmda-demo-dismiss-btn .hmda-demo-icon-pulse {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Lender match row — minimalist dismiss */
+.hmda-nav-search-lender-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(100, 116, 139, 0.08);
+  color: rgba(100, 116, 139, 0.72);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.hmda-nav-search-lender-remove svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hmda-nav-search-lender-remove:hover {
+  background: rgba(100, 116, 139, 0.14);
+  color: rgba(51, 65, 85, 0.92);
+}
+
+.hmda-nav-search-lender-remove:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.4);
+  outline-offset: 2px;
+}

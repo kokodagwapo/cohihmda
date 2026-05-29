@@ -266,12 +266,14 @@ async function seedTenantUsers(tenantPool: pg.Pool): Promise<void> {
   const adminHash = await bcrypt.hash(TEST_ACCOUNTS.tenantAdmin.password, 10);
   await tenantPool.query(
     `
-    INSERT INTO users (email, encrypted_password, full_name, role, is_active)
-    VALUES ($1, $2, $3, $4, true)
+    INSERT INTO users (email, encrypted_password, full_name, role, persona, loan_scope, is_active)
+    VALUES ($1, $2, $3, $4, 'tenant_admin', 'all', true)
     ON CONFLICT (email) DO UPDATE SET
       encrypted_password = EXCLUDED.encrypted_password,
       full_name = EXCLUDED.full_name,
       role = EXCLUDED.role,
+      persona = EXCLUDED.persona,
+      loan_scope = EXCLUDED.loan_scope,
       updated_at = NOW()
   `,
     [
@@ -287,12 +289,14 @@ async function seedTenantUsers(tenantPool: pg.Pool): Promise<void> {
   const userHash = await bcrypt.hash(TEST_ACCOUNTS.standardUser.password, 10);
   await tenantPool.query(
     `
-    INSERT INTO users (email, encrypted_password, full_name, role, is_active)
-    VALUES ($1, $2, $3, $4, true)
+    INSERT INTO users (email, encrypted_password, full_name, role, persona, loan_scope, is_active)
+    VALUES ($1, $2, $3, $4, 'tenant_user', 'encompass', true)
     ON CONFLICT (email) DO UPDATE SET
       encrypted_password = EXCLUDED.encrypted_password,
       full_name = EXCLUDED.full_name,
       role = EXCLUDED.role,
+      persona = EXCLUDED.persona,
+      loan_scope = EXCLUDED.loan_scope,
       updated_at = NOW()
   `,
     [

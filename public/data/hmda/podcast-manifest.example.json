@@ -1,0 +1,16 @@
+{
+  "episodes": [
+    {
+      "dateKey": "2026-03-30",
+      "audioUrl": "https://cdn.example.com/cohi-briefs/daily-brief.wav?v=1",
+      "headline": "30-Yr 6.24% · Spring purchases · Q1 close",
+      "isToday": true
+    },
+    {
+      "dateKey": "2026-03-29",
+      "audioUrl": "https://cdn.example.com/cohi-briefs/2026-03-29.wav",
+      "headline": "Prior day · Markets wrap",
+      "isToday": false
+    }
+  ]
+}

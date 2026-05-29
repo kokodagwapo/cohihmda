@@ -1,0 +1,270 @@
+/* Premium light shell for HMDA Geography tab only (executive analytics) */
+.hmda-geography-premium {
+  --geo-bg: #f4f6f9;
+  --geo-glass-inspector-bg: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.84) 0%,
+    rgba(224, 242, 254, 0.58) 42%,
+    rgba(248, 250, 252, 0.55) 100%
+  );
+  --geo-glass-border: rgba(255, 255, 255, 0.92);
+  --geo-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 0 0 1px rgba(15, 23, 42, 0.04),
+    0 16px 40px -16px rgba(15, 23, 42, 0.22);
+  --geo-glass-blur: blur(22px) saturate(1.45);
+  --geo-card: var(--geo-glass-inspector-bg);
+  --geo-card-border: var(--geo-glass-border);
+  --geo-shadow: var(--geo-glass-shadow);
+  --geo-shadow-hover:
+    0 1px 0 rgba(255, 255, 255, 0.98) inset,
+    0 0 0 1px rgba(15, 23, 42, 0.05),
+    0 20px 48px -14px rgba(15, 23, 42, 0.24);
+  --geo-muted: #64748b;
+  --geo-heading: #0f172a;
+  --geo-accent: #1e40af;
+  --geo-radius: 22px;
+  --geo-radius-sm: 14px;
+  margin: 0 -4px;
+  padding: 8px 4px 32px;
+  border-radius: var(--geo-radius);
+  font-family: var(--font-sans, "Inter"), "Sora", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  text-rendering: optimizeLegibility;
+}
+
+/* Shared glass surface — matches map inspector hover card */
+.hmda-geography-premium .hmda-geo-glass-surface,
+.hmda-geography-premium .hmda-geo-kpi-card,
+.hmda-geography-premium .hmda-geo-card-surface,
+.hmda-geography-premium .card-glass {
+  background: var(--geo-glass-inspector-bg) !important;
+  border: 1px solid var(--geo-glass-border) !important;
+  box-shadow: var(--geo-glass-shadow) !important;
+  backdrop-filter: var(--geo-glass-blur) !important;
+  -webkit-backdrop-filter: var(--geo-glass-blur) !important;
+}
+
+.hmda-geography-premium .hmda-geo-kpi-card:hover,
+.hmda-geography-premium .card-glass:hover {
+  box-shadow: var(--geo-shadow-hover) !important;
+  border-color: var(--geo-glass-border) !important;
+}
+
+.hmda-geography-premium .hmda-geo-premium-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.hmda-geography-premium--map-hero {
+  padding-top: 0;
+  /* Keep the viewport on the map when lender/state cards mount below the hero */
+  overflow-anchor: none;
+}
+
+.hmda-geography-premium--map-hero > .hmda-geo-kpi-grid,
+.hmda-geography-premium--map-hero > .hmda-geo-main-grid,
+.hmda-geography-premium--map-hero > .hmda-geo-support-grid {
+  display: none !important;
+}
+
+.hmda-geo-drilldown-year-note {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--geo-muted, #64748b);
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: var(--geo-radius-sm, 14px);
+}
+
+.hmda-geo-drilldown-year-note__code {
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.hmda-geography-premium .hmda-geo-premium-header > div:first-child {
+  display: none;
+}
+
+.hmda-geography-premium .hmda-geo-premium-title {
+  display: none;
+}
+
+.hmda-geography-premium .hmda-geo-premium-sub {
+  display: none;
+}
+
+.hmda-geography-premium .hmda-geo-premium-badge {
+  display: none;
+}
+
+.hmda-geography-premium .hmda-geo-premium-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.hmda-geography-premium .hmda-geo-premium-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--geo-card-border);
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.hmda-geography-premium .hmda-geo-premium-btn:hover {
+  box-shadow: var(--geo-shadow-hover);
+  border-color: rgba(30, 64, 175, 0.15);
+}
+
+.hmda-geography-premium .hmda-geo-premium-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.hmda-geography-premium .hmda-geo-premium-btn--primary {
+  background: linear-gradient(180deg, #1e40af 0%, #1d4ed8 100%);
+  color: #fff;
+  border-color: transparent;
+}
+
+.hmda-geography-premium .hmda-geo-filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  border-radius: var(--geo-radius-sm);
+  background: var(--geo-glass-inspector-bg);
+  border: 1px solid var(--geo-glass-border);
+  box-shadow: var(--geo-glass-shadow);
+  backdrop-filter: var(--geo-glass-blur);
+  -webkit-backdrop-filter: var(--geo-glass-blur);
+}
+
+.hmda-geography-premium .hmda-geo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(15, 23, 42, 0.04);
+  color: #475569;
+  border: 1px solid transparent;
+}
+
+.hmda-geography-premium .hmda-geo-pill--active {
+  background: rgba(30, 64, 175, 0.1);
+  color: #1e3a8a;
+  border-color: rgba(30, 64, 175, 0.18);
+}
+
+.hmda-geography-premium .hmda-geo-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (min-width: 900px) {
+  .hmda-geography-premium .hmda-geo-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.hmda-geography-premium .hmda-geo-kpi-card {
+  border-radius: var(--geo-radius-sm);
+  padding: 18px 20px;
+  transition: box-shadow 0.22s ease, transform 0.18s ease;
+}
+
+.hmda-geography-premium .hmda-geo-kpi-card:hover {
+  transform: translateY(-2px);
+}
+
+.hmda-geography-premium .hmda-geo-kpi-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--geo-muted);
+  margin-bottom: 8px;
+}
+
+.hmda-geography-premium .hmda-geo-kpi-value {
+  font-size: clamp(1.25rem, 2.4vw, 1.65rem);
+  font-weight: 800;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: var(--geo-heading);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.hmda-geography-premium .hmda-geo-main-grid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (min-width: 1100px) {
+  .hmda-geography-premium .hmda-geo-main-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  }
+}
+
+.hmda-geography-premium .hmda-geo-card-surface {
+  border-radius: var(--geo-radius);
+}
+
+.hmda-geography-premium .hmda-geo-skeleton {
+  min-height: 200px;
+  border-radius: var(--geo-radius);
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.04) 0%, rgba(15, 23, 42, 0.07) 50%, rgba(15, 23, 42, 0.04) 100%);
+  background-size: 200% 100%;
+  animation: hmdaGeoShimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes hmdaGeoShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.hmda-geography-premium .hmda-geo-support-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+@media (min-width: 900px) {
+  .hmda-geography-premium .hmda-geo-support-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

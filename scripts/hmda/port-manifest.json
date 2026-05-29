@@ -1,0 +1,19 @@
+{
+  "coreDir": "src/hmda",
+  "destCore": "src/hmda-databank/core",
+  "files": [
+    { "from": "src/services/hmdaApi.js", "to": "src/hmda-databank/services/hmdaApi.js" },
+    { "from": "src/services/hmdaYearsManifest.js", "to": "src/hmda-databank/services/hmdaYearsManifest.js" },
+    { "from": "src/services/hmdaLenderPager.js", "to": "src/hmda-databank/services/hmdaLenderPager.js" },
+    { "from": "src/services/hmdaMorningSync.js", "to": "src/hmda-databank/services/hmdaMorningSync.js" },
+    { "from": "src/services/hmdaInsightsEnrich.js", "to": "src/hmda-databank/services/hmdaInsightsEnrich.js" },
+    { "from": "src/services/hmdaLenderQuery.js", "to": "src/hmda-databank/services/hmdaLenderQuery.js" },
+    { "from": "src/services/lenderRegistryClient.js", "to": "src/hmda-databank/services/lenderRegistryClient.js" },
+    { "from": "src/utils/publicAssetUrl.js", "to": "src/hmda-databank/utils/publicAssetUrl.js" },
+    { "from": "src/utils/hmdaFfiecLive.js", "to": "src/hmda-databank/utils/hmdaFfiecLive.js" },
+    { "from": "src/hmda/useHmdaEmbedMode.js", "to": "src/hmda-databank/useHmdaEmbedMode.js" },
+    { "from": "src/hmda/saas/buildDemoSessionUser.js", "to": "src/hmda-databank/saas/buildDemoSessionUser.js" }
+  ],
+  "serverDir": "server/hmda",
+  "destServer": "server/hmda"
+}

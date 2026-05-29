@@ -1,0 +1,356 @@
+{
+  "generatedAt": "2026-05-28T23:51:13.068Z",
+  "rateSnapshot": [
+    {
+      "label": "30-Yr. FHA",
+      "value": "6.125%",
+      "change": "+0.025",
+      "up": true
+    },
+    {
+      "label": "30-Yr. VA",
+      "value": "5.975%",
+      "change": "-0.015",
+      "up": false
+    },
+    {
+      "label": "30-Yr. USDA",
+      "value": "6.100%",
+      "change": "+0.020",
+      "up": true
+    }
+  ],
+  "dataCards": [
+    {
+      "title": "30-YR FIXED RATE",
+      "desc": "30-Yr Fixed at 6.12%",
+      "source": "Freddie Mac PMMS",
+      "chart": "line30yr",
+      "icon": "trend",
+      "insight": "The 30-year fixed mortgage rate ticked up to 6.12%, reflecting a 5 basis point increase over the last week. Rates have climbed steadily since early May, driven by inflation concerns and Treasury yield fluctuations.",
+      "takeaway": "Lenders should prepare for rate-sensitive borrowers delaying decisions.",
+      "context": "Based on weekly Freddie Mac Primary Mortgage Market Survey data.",
+      "updated": "May 28, 2026",
+      "dateRange": "Apr 23 – May 28"
+    },
+    {
+      "title": "10-YR TREASURY YIELD",
+      "desc": "Yield at 4.05%",
+      "source": "U.S. Treasury",
+      "chart": "line10yr",
+      "icon": "chart",
+      "insight": "The 10-year Treasury yield stands at 4.05%, reflecting a 15 basis point drop from its peak earlier this week. Market volatility remains high as investors digest mixed inflation data and Fed guidance.",
+      "takeaway": "Monitor Treasury trends for near-term rate movement signals.",
+      "context": "Based on daily U.S. Treasury yield data.",
+      "updated": "May 28, 2026",
+      "dateRange": "May 20 – May 28"
+    },
+    {
+      "title": "MBA APPLICATION INDEX",
+      "desc": "Refinance share: 38%",
+      "source": "MBA Weekly Applications Survey",
+      "chart": "dualBar",
+      "icon": "bar",
+      "insight": "Refinance applications dropped 4% week-over-week, now comprising 38% of total activity. Purchase applications rose 2%, driven by strong demand in Sunbelt markets despite affordability challenges.",
+      "takeaway": "Focus on purchase lending opportunities in regional growth areas.",
+      "context": "Based on MBA's survey of mortgage bankers, brokers, and lenders.",
+      "updated": "May 28, 2026",
+      "dateRange": "Apr 23 – May 28"
+    },
+    {
+      "title": "NAHB BUILDER CONFIDENCE",
+      "desc": "HMI: 55",
+      "source": "NAHB HMI",
+      "chart": "nahb",
+      "icon": "bar",
+      "insight": "Builder confidence rose to an HMI of 55 in May, up from 52 in April. Builders report improving buyer traffic, though material costs and labor shortages remain headwinds.",
+      "takeaway": "Expect moderate increases in new housing starts this summer.",
+      "context": "Based on monthly NAHB/Wells Fargo Housing Market Index survey.",
+      "updated": "May 28, 2026",
+      "dateRange": "Mar – May"
+    },
+    {
+      "title": "RATE SNAPSHOT BY PRODUCT",
+      "desc": "Products down/up 2–5 bps",
+      "source": "Optimal Blue OBMMI",
+      "chart": "horizontal",
+      "icon": "compare",
+      "insight": "30-year fixed rates rose 4 bps to 6.12%, while 15-year fixed rates increased 2 bps to 5.45%. FHA and Jumbo products saw mixed movement, with FHA up 3 bps and Jumbo down 5 bps.",
+      "takeaway": "Tailor product offerings to align with rate-sensitive borrower needs.",
+      "context": "Based on Optimal Blue Mortgage Market Indices.",
+      "updated": "May 28, 2026",
+      "dateRange": "Prior week vs today"
+    },
+    {
+      "title": "EXISTING HOME SALES (SAAR)",
+      "desc": "SAAR: 4.79M",
+      "source": "NAR Existing-Home Sales",
+      "chart": "homeSales",
+      "icon": "home",
+      "insight": "Existing-home sales fell to a SAAR of 4.79M in April, down 8% year-over-year. Inventory remains tight at 2.7 months, while median prices rose 4.3% to $382,000.",
+      "takeaway": "Affordability pressures are limiting sales despite strong demand.",
+      "context": "Based on NAR's monthly report on existing-home sales.",
+      "updated": "May 28, 2026",
+      "dateRange": "Sep '25 – Feb '26"
+    }
+  ],
+  "headlines": [
+    {
+      "title": "CMLS Pushes DOJ/FTC for MLS Antitrust Guidance",
+      "fullContent": "CMLS has urged regulators to recognize MLSs as pro-competitive entities, highlighting their role in providing data access to 1.7 million subscribers across 230 MLSs. The trade group argues that collaboration among MLSs benefits consumers and promotes market transparency.",
+      "source": "HousingWire",
+      "sourceUrl": "https://www.housingwire.com/articles/cmls-mls-antitrust-guidance/",
+      "date": "May 28, 2026, 7:51 PM"
+    },
+    {
+      "title": "New Home Sales Drop 6.2% in April",
+      "fullContent": "New home sales fell to a SAAR of 622,000 in April, down 6.2% from March and 11.3% year-over-year. Median prices climbed to $422,500, while supply rose to 9.4 months, reflecting affordability challenges.",
+      "source": "HousingWire",
+      "sourceUrl": "https://www.housingwire.com/articles/fidelity-data-shows-record-retirement-savings-rising-roth-adoption/",
+      "date": "May 28, 2026, 7:51 PM"
+    },
+    {
+      "title": "Mortgage Rates in the Sixes: A New Normal?",
+      "fullContent": "Mortgage rates remain in the mid-6% range, reflecting ongoing volatility from inflation, geopolitical risks, and Fed policy uncertainty. Borrowers are adjusting expectations as rates stabilize at these elevated levels.",
+      "source": "HousingWire",
+      "sourceUrl": "https://www.housingwire.com/articles/new-home-sales-april-2026/",
+      "date": "May 28, 2026, 7:51 PM"
+    },
+    {
+      "title": "Fed Chair Faces Inflation Challenges Amid Rate Volatility",
+      "fullContent": "New Fed Chair Kevin Warsh is navigating a complex economic landscape with inflation data complicating rate decisions. Analysts expect continued rate volatility as the Fed balances growth and price stability.",
+      "source": "HousingWire",
+      "sourceUrl": "https://www.housingwire.com/articles/warren-bilt-payment-disruptions/",
+      "date": "May 28, 2026, 7:51 PM"
+    }
+  ],
+  "chartData": {
+    "line30yr": {
+      "labels": [
+        "Apr 23",
+        "Apr 30",
+        "May 7",
+        "May 14",
+        "May 21",
+        "May 28"
+      ],
+      "values": [
+        5.98,
+        6.02,
+        6.1,
+        6.08,
+        6.07,
+        6.12
+      ],
+      "unit": "%",
+      "title": "30-Yr Fixed Rate"
+    },
+    "line10yr": {
+      "labels": [
+        "May 20",
+        "May 22",
+        "May 24",
+        "May 26",
+        "May 28"
+      ],
+      "values": [
+        4.15,
+        4.2,
+        4.18,
+        4.1,
+        4.05
+      ],
+      "unit": "%",
+      "title": "10-Yr Treasury"
+    },
+    "dualBar": {
+      "labels": [
+        "Apr 23",
+        "Apr 30",
+        "May 7",
+        "May 14",
+        "May 21",
+        "May 28"
+      ],
+      "purchase": [
+        85,
+        88,
+        90,
+        92,
+        91,
+        93
+      ],
+      "refi": [
+        72,
+        68,
+        65,
+        60,
+        58,
+        56
+      ]
+    },
+    "nahb": {
+      "labels": [
+        "Mar",
+        "May",
+        "Jul",
+        "Sep",
+        "Nov",
+        "Jan"
+      ],
+      "values": [
+        52,
+        55,
+        57,
+        60,
+        59,
+        58
+      ]
+    },
+    "homeSales": {
+      "labels": [
+        "Sep '25",
+        "Oct '25",
+        "Nov '25",
+        "Dec '25",
+        "Jan '26",
+        "Feb '26"
+      ],
+      "values": [
+        5.1,
+        5,
+        4.9,
+        4.85,
+        4.8,
+        4.79
+      ]
+    },
+    "horizontal": [
+      {
+        "label": "30-Yr Fixed",
+        "prior": 6.08,
+        "today": 6.12
+      },
+      {
+        "label": "15-Yr Fixed",
+        "prior": 5.43,
+        "today": 5.45
+      },
+      {
+        "label": "30-Yr FHA",
+        "prior": 6.1,
+        "today": 6.13
+      },
+      {
+        "label": "30-Yr Jumbo",
+        "prior": 5.95,
+        "today": 5.9
+      }
+    ]
+  },
+  "asOf": "2026-05-28",
+  "podcast": {
+    "latest": {
+      "dateKey": "2026-05-23",
+      "audioUrl": "/audio/daily-brief.wav?v=20260523",
+      "headline": "May 23 · 6.13% · States debate HEI loan classification in e"
+    },
+    "archive": [
+      {
+        "dateKey": "2026-05-22",
+        "audioUrl": "/audio/daily-brief.wav?v=20260522",
+        "headline": "May 22 · 6.25% · Freddie Mac sees 6"
+      },
+      {
+        "dateKey": "2026-05-21",
+        "audioUrl": "/audio/daily-brief.wav?v=20260521",
+        "headline": "May 21 · 6.13% · Southern Land Launches In-House Mortgage D"
+      },
+      {
+        "dateKey": "2026-05-20",
+        "audioUrl": "/audio/daily-brief.wav?v=20260520",
+        "headline": "May 20 · 6.13% · Down payments hit 4-year low from Q1 2026 "
+      },
+      {
+        "dateKey": "2026-05-19",
+        "audioUrl": "/audio/daily-brief.wav?v=20260519",
+        "headline": "May 19 · 6.13% · New-home applications drop 2"
+      },
+      {
+        "dateKey": "2026-05-12",
+        "audioUrl": "/audio/daily-brief.wav?v=20260512",
+        "headline": "May 12 · 6.13% · Cotality's Broker Listing Exchange Launche"
+      },
+      {
+        "dateKey": "2026-05-08",
+        "audioUrl": "/audio/daily-brief.wav?v=20260508",
+        "headline": "May 8 · 5.92% · Carrington Acquires Valon Mortgage for $19"
+      },
+      {
+        "dateKey": "2026-05-07",
+        "audioUrl": "/audio/daily-brief.wav?v=20260507",
+        "headline": "May 7 · 6.13% · Borrowers sue Shellpoint, SLS and Rushmore"
+      },
+      {
+        "dateKey": "2026-05-04",
+        "audioUrl": "/audio/daily-brief.wav?v=20260504",
+        "headline": "May 4 · 6.08% · Spring purchase pipeline firms as benchmarks ease"
+      },
+      {
+        "dateKey": "2026-05-01",
+        "audioUrl": "/audio/briefs/2026-05-01.wav",
+        "headline": "May 1 · 6.14% · MBA turns up advocacy on housing policy"
+      },
+      {
+        "dateKey": "2026-04-30",
+        "audioUrl": "/audio/briefs/2026-04-30.wav",
+        "headline": "Apr 30 · 6.14% · May opens with Fed on hold"
+      },
+      {
+        "dateKey": "2026-04-14",
+        "audioUrl": "/audio/daily-brief.wav?v=20260414",
+        "headline": "Apr 14 · 6.13% · Veterans United Lawsuit Dismissal Sought"
+      },
+      {
+        "dateKey": "2026-04-09",
+        "audioUrl": "/audio/daily-brief.wav?v=20260409",
+        "headline": "Apr 9 · 6.20% · GTIS and Hovnanian Launch $200M JV"
+      },
+      {
+        "dateKey": "2026-04-08",
+        "audioUrl": "/audio/daily-brief.wav?v=6",
+        "headline": "Apr 8 · FHA 6.09% · 964K listings · Jobs surge"
+      },
+      {
+        "dateKey": "2026-04-06",
+        "audioUrl": "/audio/briefs/2026-04-06.wav",
+        "headline": "Apr 6 · 30-Yr 6.40% · Tariff volatility"
+      },
+      {
+        "dateKey": "2026-04-01",
+        "audioUrl": "/audio/briefs/2026-04-01.wav",
+        "headline": "April open · 30-Yr 6.22% · Spring purchases"
+      },
+      {
+        "dateKey": "2026-03-31",
+        "audioUrl": "/audio/briefs/2026-03-31.wav",
+        "headline": "Q1 close · 30-Yr 6.24% · Spring purchases"
+      },
+      {
+        "dateKey": "2026-03-30",
+        "audioUrl": "/audio/briefs/2026-03-30.wav",
+        "headline": "30-Yr 6.24% · Spring purchases · Q1 close"
+      },
+      {
+        "dateKey": "2026-03-27",
+        "audioUrl": "/audio/briefs/2026-03-27.wav",
+        "headline": "30-Yr 6.22% · Fed holds · Spring housing"
+      },
+      {
+        "dateKey": "2026-03-23",
+        "audioUrl": "/audio/briefs/2026-03-23.wav",
+        "headline": "30-Yr 6.22% · Fed holds"
+      }
+    ]
+  }
+}

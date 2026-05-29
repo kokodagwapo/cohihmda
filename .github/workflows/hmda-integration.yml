@@ -1,0 +1,40 @@
+name: HMDA integration verify
+
+on:
+  pull_request:
+    paths:
+      - 'src/hmda-databank/**'
+      - 'src/components/admin/HmdaDataSection.tsx'
+      - 'server/hmda/**'
+      - 'server/src/routes/admin/hmdaData.ts'
+      - 'server/src/routes/hmda.ts'
+      - 'scripts/hmda/**'
+      - 'public/data/hmda/**'
+      - 'docs/hmda/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/hmda-databank/**'
+      - 'server/hmda/**'
+      - 'scripts/hmda/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify HMDA integration
+        run: npm run hmda:verify:integration
+
+      - name: Verify HMDA native fixes
+        run: npm run hmda:verify:quick

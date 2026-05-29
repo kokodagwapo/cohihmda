@@ -149,13 +149,12 @@ const topTieringMenuGroups = {
       },
     ],
   },
-  // compliance: not yet ready for production
-  // compliance: {
-  //   label: "Compliance",
-  //   items: [
-  //     { id: "hmda", label: "HMDA", icon: FileText, iconColor: "indigo" as const },
-  //   ],
-  // },
+  compliance: {
+    label: "Compliance",
+    items: [
+      { id: "hmda", label: "HMDA DataBank", icon: FileText, iconColor: "indigo" as const },
+    ],
+  },
   sales: {
     label: "Sales",
     icon: Users,
@@ -368,6 +367,7 @@ const routeMap: Record<string, string> = {
   financialModeling: "/performance/financial-modeling-sandbox",
   captureAnalysis: "/capture-analysis",
   dataQuality: "/data-quality",
+  hmda: "/hmda",
 };
 
 /** Match pathname + search when route targets include query params. */
@@ -716,10 +716,11 @@ export function Navigation(
       "/performance/financial-modeling-sandbox",
       "/capture-analysis",
       "/data-quality",
+      "/hmda",
     ];
     return topTieringRoutes.some(
       (route) =>
-        location.pathname === route || location.pathname.startsWith(route),
+        location.pathname === route || location.pathname.startsWith(`${route}/`),
     );
   }, [location.pathname]);
 
@@ -854,6 +855,40 @@ export function Navigation(
               </div>
               <div className="space-y-1">
                 {topTieringMenuGroups.performance.items.map((item) => {
+                  const Icon = item.icon;
+                  const itemRoute = routeMap[item.id];
+                  const isItemActive =
+                    itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        handleTopTieringClick(item.id);
+                        setMobileMenuOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                        isItemActive
+                          ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
+                      )}
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Compliance */}
+            <div>
+              <div className="px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-2">
+                <Shield className="w-3.5 h-3.5" />
+                Compliance
+              </div>
+              <div className="space-y-1 pl-4">
+                {topTieringMenuGroups.compliance.items.map((item) => {
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
                   const isItemActive =
@@ -1527,6 +1562,50 @@ export function Navigation(
                           </div>
                           <div className="space-y-0.5">
                             {topTieringMenuGroups.performance.items.map((item) => {
+                              const Icon = item.icon;
+                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                              const itemRoute = routeMap[item.id];
+                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
+                              const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
+                              const pinned = isPinned(pinItem);
+                              return (
+                                <button
+                                  key={item.id}
+                                  onClick={() => handleTopTieringClick(item.id)}
+                                  className={cn(compactItemBase, isItemActive ? compactItemActive : compactItemDefault)}
+                                  role="menuitem"
+                                >
+                                  <div className={cn("w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                    <Icon className={cn("w-3 h-3", style.icon, isItemActive && "scale-110")} />
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                                    <span className="truncate text-left">{item.label}</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); togglePinned(pinItem); }}
+                                      className="shrink-0 ml-auto p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                      title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                                      aria-label={pinned ? "Unpin" : "Pin to sidebar"}
+                                    >
+                                      {pinned ? (
+                                        <PinOff className="w-3 h-3 text-amber-500" />
+                                      ) : (
+                                        <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="px-1 py-1 mt-2.5 mb-1 flex items-center gap-1.5">
+                            <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500 opacity-70" />
+                            <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                              Compliance
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {topTieringMenuGroups.compliance.items.map((item) => {
                               const Icon = item.icon;
                               const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                               const itemRoute = routeMap[item.id];

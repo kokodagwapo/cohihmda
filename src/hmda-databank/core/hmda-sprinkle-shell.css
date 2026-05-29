@@ -1,0 +1,506 @@
+/**
+ * SprinkleX / sx.tvma.fi visual treatment on top of HMDA executive shell.
+ * Active when `data-hmda-sprinkle="1"` is set on `.hmda-route-shell` (light theme).
+ */
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] {
+  --hmda-ds-glass-bg: rgba(255, 255, 255, 0.5);
+  --hmda-ds-glass-border: rgba(255, 255, 255, 0.42);
+  --hmda-ds-glass-shadow: 0 10px 40px rgba(15, 23, 42, 0.06), 0 1px 6px rgba(15, 23, 42, 0.04);
+  --hmda-ds-glass-backdrop: blur(18px) saturate(165%);
+}
+
+/*
+ * Fixed app header — flat transparent rail (beats exec-premium frosted bar + pill buttons).
+ */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1'] {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-actions {
+  gap: 8px !important;
+}
+
+/* Flat ghost controls — shared chrome */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd:not(select):not(.hmda-header-cmd--dropdown-year) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: rgba(15, 23, 42, 0.62) !important;
+  border-radius: 10px !important;
+}
+
+/* Icon-only square hits */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd.hmda-header-cmd--icon:not(select):not(.hmda-header-cmd--dropdown-year) {
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 !important;
+  justify-content: center !important;
+}
+
+/* Icon + text rail */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd.hmda-header-cmd--labeled:not(select):not(.hmda-header-cmd--dropdown-year) {
+  width: auto !important;
+  min-width: 0 !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 12px !important;
+  gap: 8px !important;
+  justify-content: flex-start !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd__glyph {
+  display: inline-flex !important;
+  flex-shrink: 0 !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: inherit !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd__label {
+  white-space: nowrap !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd:not(select):not(.hmda-header-cmd--dropdown-year):hover {
+  background: rgba(15, 23, 42, 0.06) !important;
+  border: none !important;
+  color: rgba(15, 23, 42, 0.92) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .toggle-theme:hover {
+  transform: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  select.hmda-header-cmd.hmda-header-cmd--dropdown-year {
+  width: auto !important;
+  min-width: 4rem !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 26px 0 10px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.02em !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: rgba(15, 23, 42, 0.72) !important;
+  border-radius: 10px !important;
+  cursor: pointer !important;
+  appearance: none !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-position: right 10px center !important;
+  background-repeat: no-repeat !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  select.hmda-header-cmd.hmda-header-cmd--dropdown-year:hover {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+  color: rgba(15, 23, 42, 0.92) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  a.hmda-header-cmd.hmda-header-cmd--sprinkle-signup {
+  color: rgba(23, 43, 85, 0.85) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  a.hmda-header-cmd.hmda-header-cmd--sprinkle-signup:hover {
+  color: #172b55 !important;
+  background: rgba(23, 43, 85, 0.08) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd.hmda-header-cmd--account.sprinkle-header-account-icon {
+  width: auto !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Sprinkle light chrome — account glyph reads as a crisp light chip on pastel header */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-account-avatar {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(23, 43, 85, 0.16) !important;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 0 0 1px rgba(255, 255, 255, 0.55) inset !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  > header:first-of-type[data-hmda-sprinkle-chrome='1']
+  .hmda-header-cmd.hmda-header-cmd--account.sprinkle-header-account-icon:hover
+  .hmda-header-account-avatar {
+  background: #ffffff !important;
+  border-color: rgba(23, 43, 85, 0.24) !important;
+}
+
+/* Shell chrome — no backdrop blur (grid stays sharp) */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] nav.hmda-nav.hmda-nav-pastel,
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-filter-toolbar-pastel,
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-lenders-pagination-bar,
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] footer.hmda-route-footer {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Brand ribbon — sx gradient */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .grad-title {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.03em !important;
+  background: linear-gradient(90deg, #1d77c3 0%, #4e9a4b 52%, #90d348 100%) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-heading-1 {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+  max-width: 18ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (min-width: 640px) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-heading-1 {
+    max-width: 22ch;
+  }
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-heading-1.hmda-hero-display-title {
+  position: relative !important;
+  z-index: 100 !important;
+  font-weight: 680 !important;
+  font-size: clamp(1.85rem, 4.6vw, 3.15rem) !important;
+  letter-spacing: -0.034em !important;
+  line-height: 1.17 !important;
+  padding: 0.06em 0.12em 0.14em !important;
+  box-sizing: border-box !important;
+  max-width: 20ch !important;
+  background: linear-gradient(118deg, #0f172a 0%, #172b55 34%, #2563eb 64%, #0d9488 98%) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+@media (min-width: 640px) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-heading-1.hmda-hero-display-title {
+    max-width: 22ch !important;
+  }
+}
+
+/* Hero merged stack (pills + search) — match executive premium card */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-hero-toolbar.toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack {
+  position: relative !important;
+  z-index: 0 !important;
+  margin-top: 0.25in !important;
+  border-radius: 16px !important;
+  padding: 20px 22px 16px !important;
+  max-width: min(720px, 100%) !important;
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  background-image:
+    radial-gradient(ellipse 120% 80% at 18% 22%, rgba(125, 211, 252, 0.08) 0%, transparent 52%),
+    radial-gradient(ellipse 100% 90% at 88% 78%, rgba(74, 222, 128, 0.06) 0%, transparent 48%) !important;
+  border: none !important;
+  box-shadow:
+    0 24px 56px rgba(15, 23, 42, 0.09),
+    0 10px 24px rgba(15, 23, 42, 0.05),
+    0 2px 8px rgba(15, 23, 42, 0.04) !important;
+  backdrop-filter: blur(14px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(165%) !important;
+}
+
+@media (max-width: 768px) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+    .hmda-hero
+    .hmda-hero-toolbar.toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack {
+    padding: 14px 14px 11px !important;
+    gap: 12px !important;
+    border-radius: 14px !important;
+    margin-top: 10px !important;
+  }
+
+  /* Search row: stronger outer shadow + tinted well so it separates from the hero card (mobile-first) */
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+    .hmda-hero
+    .hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack
+    .hmda-ds-hero-search-row {
+    background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%) !important;
+    border: none !important;
+    border-radius: 14px !important;
+    padding: 8px 10px !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.85) inset,
+      0 6px 20px rgba(15, 23, 42, 0.08),
+      0 14px 36px rgba(15, 23, 42, 0.06) !important;
+  }
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack .hmda-ds-hero-search-row {
+  background: #ffffff !important;
+  border: none !important;
+  border-radius: 12px !important;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.05),
+    0 4px 18px rgba(15, 23, 42, 0.07) !important;
+}
+
+/* Hero search toolbar only (no merged stack) — Sprinkle flatten */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-hero-toolbar.toolbar-shell:not(.hmda-ds-hero-search-stack) {
+  border-radius: var(--hmda-ds-radius-md) !important;
+  background: rgba(255, 255, 255, 0.55) !important;
+  border: 1px solid rgba(15, 23, 42, 0.1) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-hero-toolbar.toolbar-shell.hmda-ds-hero-toolbar-surface:not(.hmda-ds-hero-search-stack) {
+  border-radius: 20px !important;
+  padding: 11px 14px !important;
+  background-color: rgba(255, 255, 255, 0.74) !important;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.065) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.065) 1px, transparent 1px) !important;
+  background-size: 11px 11px !important;
+  border: 1px solid rgba(147, 197, 253, 0.36) !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: blur(12px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(160%) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-hero .hmda-ds-hero-toolbar-surface:not(.hmda-ds-hero-search-stack) .hmda-ds-hero-search-row {
+  background: rgba(248, 250, 252, 0.74) !important;
+  border: 1px solid rgba(226, 232, 240, 0.92) !important;
+  border-radius: 14px !important;
+  padding: 10px 14px !important;
+}
+
+/* Nav row glass */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-nav-pastel .toolbar-shell {
+  border-radius: 16px !important;
+}
+
+/* Filter toolbar */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-filter-bar .toolbar-shell:not(.hmda-hero-toolbar) {
+  border-radius: 14px !important;
+}
+
+/* Lender cards — frosted icy blue */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-results-panel > .hmda-results-grid > .lcard-item {
+  background: linear-gradient(
+    165deg,
+    rgba(252, 254, 255, 0.62) 0%,
+    rgba(236, 248, 255, 0.52) 45%,
+    rgba(224, 242, 254, 0.46) 100%
+  ) !important;
+  backdrop-filter: blur(14px) saturate(155%);
+  -webkit-backdrop-filter: blur(14px) saturate(155%);
+  border-color: rgba(147, 197, 253, 0.42) !important;
+}
+
+/* Geography premium panel */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-geography-premium .hmda-geo-kpi-card {
+  backdrop-filter: var(--geo-glass-blur, blur(22px) saturate(1.45));
+  -webkit-backdrop-filter: var(--geo-glass-blur, blur(22px) saturate(1.45));
+}
+
+/*
+ * Income Intelligence / gate `<header>` only — NOT `.toolbar-shell.hmda-ds-hero-toolbar` (hero search).
+ * Match `.hmda-ds-hero-cta` chip tokens.
+ */
+body.hmda-sprinkle-active .hmda-route-shell[data-hmda-sprinkle='1'] header.hmda-ds-hero-toolbar {
+  background: rgba(255, 255, 255, 0.55) !important;
+  border: 1px solid rgba(15, 23, 42, 0.1) !important;
+  border-radius: var(--hmda-ds-radius-md) !important;
+  margin: max(10px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Results: grid sits on route background — no nested slab */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-results-panel {
+  width: 100%;
+  max-width: min(1680px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+  padding: 4px 0 10px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-results-panel > .hmda-results-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 768px) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-results-panel > .hmda-results-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+    gap: 16px;
+  }
+}
+
+@media (min-width: 900px) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-results-panel > .hmda-results-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 372px), 1fr));
+    gap: 18px;
+  }
+}
+
+@media (min-width: 1400px) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light'] .hmda-results-panel > .hmda-results-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
+    gap: 20px;
+  }
+}
+
+/* Card chrome — sx accent rail + hover lift */
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  .hmda-results-panel
+  > .hmda-results-grid
+  > .lcard-item {
+  border-radius: 22px !important;
+  box-shadow:
+    0 12px 36px rgba(15, 23, 42, 0.07),
+    0 2px 10px rgba(29, 119, 195, 0.05) !important;
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    border-color 0.22s ease !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  .hmda-results-panel
+  > .hmda-results-grid
+  > .lcard-item:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 22px 52px rgba(15, 23, 42, 0.11),
+    0 10px 28px rgba(29, 119, 195, 0.1) !important;
+  border-color: rgba(147, 197, 253, 0.55) !important;
+}
+
+/* Accent hairline removed from card DOM — do not target first-child (was crushing `.hmda-results-grid-card-inner`). */
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  .hmda-results-panel
+  .hmda-lcard-metrics-row:not(.hmda-lcard-metrics-row--clean)
+  > span
+  > div {
+  background: rgba(255, 255, 255, 0.55) !important;
+  border-color: rgba(255, 255, 255, 0.42) !important;
+  backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  .hmda-results-panel
+  .hmda-results-grid-card:not(.hmda-results-grid-card--clean)
+  .hmda-grid-card-stat-band {
+  background: rgba(255, 255, 255, 0.36) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+  .hmda-results-panel
+  .hmda-results-grid-card:not(.hmda-results-grid-card--clean)
+  .hmda-grid-card-stat-band
+  > div {
+  background: rgba(255, 255, 255, 0.52) !important;
+  border-color: rgba(255, 255, 255, 0.38) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+    .hmda-results-panel
+    > .hmda-results-grid
+    > .lcard-item {
+    transition: none !important;
+  }
+
+  .hmda-premium-exec.hmda-route-shell[data-hmda-sprinkle='1'][data-hmda-theme='light']
+    .hmda-results-panel
+    > .hmda-results-grid
+    > .lcard-item:hover {
+    transform: none;
+  }
+}
+
+/* Embedded inside Cohi iframe (?embed=1) — no standalone app chrome */
+.hmda-premium-exec.hmda-route-shell[data-hmda-embed='1'] {
+  min-height: 100% !important;
+  overflow: auto !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-embed='1'] .hmda-container {
+  padding-top: 0 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-embed='1'] .hmda-hero .hmda-hero-toolbar.toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack,
+.hmda-premium-exec.hmda-route-shell[data-hmda-embed='1'] .hmda-hero .toolbar-shell.hmda-ds-hero-toolbar-surface.hmda-ds-hero-search-stack {
+  margin-top: 0 !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-embed='1'] .hmda-hero-display-title {
+  display: none !important;
+}
+
+.hmda-premium-exec.hmda-route-shell[data-hmda-embed='1'] .hmda-container-pastel {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+@media (min-width: 640px) {
+  .hmda-premium-exec.hmda-route-shell[data-hmda-embed='1'] .hmda-container-pastel {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

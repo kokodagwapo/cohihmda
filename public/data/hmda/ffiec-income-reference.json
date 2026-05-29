@@ -1,0 +1,42 @@
+{
+  "version": "2026.1",
+  "description": "FFIEC-style income band and tract-income category reference for Income & Market Fit ETL (estimated market baselines; replace with live FFIEC AMI + tract files when ingested).",
+  "amiBands": ["<80%", "80–100%", "100–120%", "120%+"],
+  "tractIncomeCategories": ["Low", "Moderate", "Middle", "Upper"],
+  "marketTractPenetration": {
+    "Low": 0.11,
+    "Moderate": 0.18,
+    "Middle": 0.38,
+    "Upper": 0.33
+  },
+  "marketOriginationShareByAmiBand": {
+    "<80%": 0.19,
+    "80–100%": 0.28,
+    "100–120%": 0.31,
+    "120%+": 0.22
+  },
+  "marketDenialRateByAmiBand": {
+    "<80%": 0.178,
+    "80–100%": 0.145,
+    "100–120%": 0.118,
+    "120%+": 0.092
+  },
+  "denialReasonLabels": {
+    "1": "Debt-to-income ratio",
+    "2": "Employment history",
+    "3": "Credit history",
+    "4": "Collateral",
+    "5": "Insufficient cash to close",
+    "6": "Unverifiable information",
+    "7": "Credit application incomplete",
+    "8": "Mortgage insurance denied",
+    "9": "Other",
+    "10": "Not applicable"
+  },
+  "defaultDenialReasonsByBand": {
+    "<80%": ["Debt-to-income ratio", "Credit history", "Insufficient cash to close"],
+    "80–100%": ["Debt-to-income ratio", "Collateral", "Credit history"],
+    "100–120%": ["Collateral", "Debt-to-income ratio", "Insufficient cash to close"],
+    "120%+": ["Credit application incomplete", "Collateral", "Debt-to-income ratio"]
+  }
+}

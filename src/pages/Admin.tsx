@@ -30,6 +30,7 @@ import { ReleaseNotesSection } from "@/components/admin/ReleaseNotesSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { FeedbackNotificationRecipientsSection } from "@/components/admin/FeedbackNotificationRecipientsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
+import { HmdaDataSection } from "@/components/admin/HmdaDataSection";
 import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
 import { ApiUsageSection } from "@/components/admin/ApiUsageSection";
 import { PlatformUsageReport } from "@/components/admin/PlatformUsageReport";
@@ -599,6 +600,17 @@ export const Admin = () => {
               {/* Sync Management Section (Platform Admin) */}
               {activeSection === "sync-management" && isPlatform && (
                 <SyncManagementSection />
+              )}
+
+              {/* HMDA Data Section (Platform Admin) */}
+              {activeSection === "hmda-data" && isPlatform && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <HmdaDataSection />
+                </motion.div>
               )}
 
               {/* API Usage Section (Platform Admin) */}

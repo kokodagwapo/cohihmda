@@ -1,0 +1,20 @@
+/**
+ * Scoped HMDA DataBank styles for native Coheus mount.
+ * Coheus shadcn tokens win outside .hmda-databank-root.
+ */
+@import './core/hmda-dashboard.css';
+@import './core/hmda-geography-premium.css';
+@import './core/geography/hmda-geography-mapbox.css';
+@import './core/hmda-glass-ui.css';
+@import './core/hmda-executive-premium.css';
+@import './core/hmda-hero-search-combo.css';
+
+.hmda-databank-root {
+  min-height: 100%;
+  width: 100%;
+  isolation: isolate;
+}
+
+.hmda-databank-root [data-hmda-embed='1'] {
+  min-height: 100%;
+}

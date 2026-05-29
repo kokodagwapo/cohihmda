@@ -1,0 +1,41 @@
+{
+  "lastRun": "2026-03-03T21:48:58.066Z",
+  "stats": {
+    "totalSources": 25,
+    "succeeded": 3,
+    "failed": 22,
+    "avgLatencyMs": 1428
+  },
+  "results": [
+    {
+      "lei": "7H6GLXDRUGQFU57RNE97",
+      "name": "JPMorgan Chase",
+      "rate": 6.25,
+      "source": "html",
+      "url": "https://www.chase.com/personal/mortgage/mortgage-rates",
+      "scrapedAt": "2026-03-03T21:48:27.563Z",
+      "latencyMs": 750,
+      "success": true
+    },
+    {
+      "lei": "549300AQ3T62GXDU7D76",
+      "name": "Guild Mortgage",
+      "rate": 4.8,
+      "source": "html",
+      "url": "https://www.guildmortgage.com/mortgage-rates/",
+      "scrapedAt": "2026-03-03T21:48:45.255Z",
+      "latencyMs": 1417,
+      "success": true
+    },
+    {
+      "lei": "5493003GQDUH26DNNH17",
+      "name": "Navy Federal Credit Union",
+      "rate": 4.875,
+      "source": "html",
+      "url": "https://www.navyfederal.org/loans-cards/mortgage/mortgage-rates/conventional-fixed-rate-mortgages.html",
+      "scrapedAt": "2026-03-03T21:48:46.322Z",
+      "latencyMs": 266,
+      "success": true
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "hero": {
+    "headlineSentences": [
+      "TopTier\u00ae.",
+      "Your Lending DNA. Your Data.",
+      "Your Unique Way."
+    ],
+    "ctaPrimary": "Experience Cohi",
+    "ctaSecondary": "HMDA",
+    "scrollHint": "Explore",
+    "demoInsights": {
+      "urgent": {
+        "metricEnd": 23,
+        "metricPrefix": "$",
+        "metricSuffix": " Million Exposure of Closing Late or Falling Out.",
+        "metricDecimals": 0,
+        "title": "Immediate Action Required",
+        "desc": "67 Loans at Risk of Closing Late \u00b7 74 Loans at Risk of Fallout."
+      },
+      "attention": {
+        "cardLabel": "Monitor Closely",
+        "metricEnd": 35,
+        "metricSuffix": "% of Originators have less than One Application on the 15th of the month.",
+        "metricDecimals": 0,
+        "title": "Monitor Closely",
+        "desc": "23 Originators in the Bottom Tier of Production."
+      },
+      "working": {
+        "cardLabel": "Strategic Review",
+        "metricEnd": 12,
+        "metricPrefix": "",
+        "metricSuffix": " Govvie Decline",
+        "metricDecimals": 0,
+        "title": "Strategic Review",
+        "metricText": "Loan Mix is trending away from Company Target",
+        "desc": "Govvie loan percentage is down 12%, Govvie fallout is exceeding target; profit impact is increasing."
+      }
+    },
+    "infoCardText": "Loan condition count averaged 32.8 per active file, surpassing the 5-condition review threshold.",
+    "gauge": {
+      "headerPrefix": "+ \ud83d\udcc8 ",
+      "headerStrong": "Pull-Through Tracker",
+      "labelFunded": "Funded",
+      "labelStalled": "Stalled",
+      "gaugeVal": "135 / 246",
+      "footer": "Monthly Target: 150 Loans"
+    },
+    "hmdaSnapshotFloats": {
+      "enabled": true,
+      "kicker": "HMDA 2024 \u00b7 illustrative national panel",
+      "cards": [
+        { "label": "Lenders", "value": "4,893" },
+        { "label": "Applications", "value": "12.2M" },
+        { "label": "Approval rate", "value": "50.5%" },
+        { "label": "Denial rate", "value": "17.2%" },
+        { "label": "Volume", "value": "$2.0T" }
+      ],
+      "insight": "Cohi \u2014 concentration and approval dynamics shift with geography; explore in HMDA DataBank."
+    }
+  },
+  "ugc": {
+    "sectionTitle": "The Platform: Intelligence That Pays",
+    "sectionSubtitle": "Mortgage-native metrics that separate winners from the field\u2014briefings, TopTiering\u00ae, and pipeline visibility built for lenders who demand precision.",
+    "items": [
+      {
+        "src": "/brand/cohi-insights-briefing.png",
+        "headline": "Cohi Insights",
+        "headlineSub": "Signals. Not Noise.",
+        "title": "Cohi Insights",
+        "caption": "AI-curated executive briefings by urgency\u2014Critical, Needs Attention, What's Working, Context & Trends. See what moves the needle before it shows up in P&L."
+      },
+      {
+        "src": "/brand/brand-12.png",
+        "headline": "The Pareto Visualization:",
+        "headlineSub": "Revenue Concentration",
+        "title": "Revenue by LO: The Pareto",
+        "caption": "Identify who carries the load\u2014e.g., 9 loan officers carrying 44. Top/Second/Bottom tier breakdown reveals hidden value and concentration risk."
+      },
+      {
+        "src": "/brand/daily-briefing.png",
+        "headline": "The Daily Briefing:",
+        "headlineSub": "Actionable Intelligence Before Coffee",
+        "title": "Daily Briefing",
+        "caption": "Revenue insights and pipeline alerts on one screen; MBA market data and refinance activity on the other. Intelligence before the first call."
+      },
+      {
+        "src": "/brand/closings-fallout-forecast.png",
+        "headline": "Closings & Fallout Forecast",
+        "headlineSub": "Predictive Pipeline Intelligence",
+        "title": "Fallout & Closing Intelligence",
+        "caption": "Track loans at risk of falling out, monitor closing timelines, and surface pipeline slippage early. Intervene when it matters\u2014not after the quarter closes."
+      }
+    ]
+  },
+  "outcomes": {
+    "title": "Why Cohi?",
+    "tagline": "Your Lender DNA. Your Data. Your Unique Way.",
+    "signalsHeadline": "Signals. Not Noise.",
+    "signalsBody": "The industry doesn't need more dashboards \u2014 it needs answers. Cohi provides clear prioritized signals \u2014 no noise \u2014 trained to your business model, your data, your way. Clear signals for you to make effective decisions. ",
+    "signalsBold": "Signals. Not Noise.",
+    "lead": "Cohi converts your lender DNA and production data into critical, forward-looking executive intelligence:",
+    "items": [
+      { "icon": "Users", "text": "Identify your most productive employees.", "color": "blue", "stat": "+18% throughput" },
+      { "icon": "TrendingDown", "text": "Identify the causes of margin pressure.", "color": "rose", "stat": "\u221234 bps identified" },
+      { "icon": "ShieldCheck", "text": "Preventing needless fallout.", "color": "green", "stat": "92% retention rate" },
+      { "icon": "Target", "text": "Identifying profitability opportunities to positively impact your business.", "color": "indigo", "stat": "+$2.1M opportunity" },
+      { "icon": "AlertTriangle", "text": "Surfacing emerging risk.", "color": "amber", "stat": "3 risks flagged early" },
+      { "icon": "BarChart2", "text": "Modeling the Future with Actionable Proforma financials.", "color": "teal", "stat": "12-mo forecast live" }
+    ],
+    "ctaLineBefore": "Get ",
+    "ctaLineStrong": "TopTier\u00ae Intelligence",
+    "ctaLineAfter": " with Cohi.",
+    "closing1": "Cohi is built around your operational model, your risk appetite, and your growth strategy.",
+    "closing2": "Cohi doesn't standardize you.\u00a0 It amplifies you and your unique business model."
+  },
+  "about": {
+    "sectionTitle": "TopTiering\u00ae",
+    "sectionLead": "A structured framework for ranking and coaching loan officer performance\u2014so lenders can align compensation to results and invest where it matters.",
+    "ctaLabel": "See Demo Video",
+    "panels": [
+      {
+        "id": "gap",
+        "src": "/ugc/playbook/toptiering-gap.png",
+        "title": "The 200+ BP Performance Gap",
+        "tagline": "$4.6M total revenue. 56 LOs. Only 7 in the Top Tier.",
+        "copy": "Revenue by Loan Officer tells the real story: a massive spread between your best and worst producers. Without structured ranking, your top performers go unrecognized and compensation stays disconnected from actual results."
+      },
+      {
+        "id": "overview",
+        "src": "/ugc/playbook/toptiering-overview.png",
+        "title": "Rank Every LO in Real Time",
+        "tagline": "One dashboard. Every metric that matters.",
+        "copy": "TopTiering\u00ae Comparison gives you the full picture\u2014revenue, units, BPS\u2014ranked high to low across every loan officer. Filter by time period, switch between branch and LO views, and see exactly who drives production and who needs support."
+      },
+      {
+        "id": "coaching",
+        "src": "/ugc/playbook/toptiering-coaching.png",
+        "title": "Drill Down to Every LO",
+        "tagline": "Revenue, units, BPS\u2014per loan officer, on mobile.",
+        "copy": "Managers can pull up any loan officer's performance on their phone. See revenue contribution, unit volume, and basis points side by side. Spot gaps instantly and turn every 1:1 into a targeted coaching conversation backed by real data."
+      },
+      {
+        "id": "compensation",
+        "src": "/ugc/playbook/toptiering-compensation.png",
+        "title": "See the Tiers. Align the Comp.",
+        "tagline": "Top Tier: $2.2M \u00b7 Second Tier: $1.5M \u00b7 Bottom Tier: $950K",
+        "copy": "7 Top Tier LOs produce $2.2M at $308K avg revenue and 41 avg units. 35 Bottom Tier LOs produce $950K at $27K avg. When you see the tiers clearly, compensation conversations shift from volume to value\u2014retain top talent and reduce costly turnover."
+      }
+    ]
+  },
+  "contact": {
+    "heading": "We'd love to work with you",
+    "lead": "Get in touch. We're here to help you see the full picture.",
+    "formLabel": "Send us a message",
+    "messageLabel": "What can we do for you?",
+    "submitIdle": "Send message",
+    "submitSending": "Sending\u2026",
+    "otherWaysTitle": "Other ways to reach us",
+    "emailLabel": "Email",
+    "phoneLabel": "Phone",
+    "officeLabel": "Office",
+    "emailValue": "sales@coheus.com",
+    "phoneValue": "(855) 374-8862",
+    "addressLine1": "15205 Collier Blvd Suite 205",
+    "addressLine2": "Naples, FL 34119"
+  },
+  "footer": {
+    "disclaimer": "Results may vary by user and circumstances. Consult qualified professionals for advice specific to your situation.",
+    "legalPrefix": "\u00a9 ",
+    "legalSuffix": " TVMA, Inc. trading as Teraverde\u00ae"
+  }
+}

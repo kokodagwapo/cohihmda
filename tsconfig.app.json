@@ -24,7 +24,8 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@hmda/*": ["./src/hmda-databank/*"]
     }
   },
   "include": ["src"]
